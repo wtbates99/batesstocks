@@ -19,9 +19,10 @@ def pull_stocks(tickers):
 
     for tick_x in tickers:
         stock_data = pull_single_stock(tick_x)
+        input_value = stock_data.iloc[-1:]
         all_stocks.append(stock_data)
 
     # Concatenate all stock_data into a single stock_dataFrame
     concatenated_stock_data = pd.concat(all_stocks)
 
-    return concatenated_stock_data
+    return concatenated_stock_data, input_value

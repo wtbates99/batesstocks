@@ -25,20 +25,37 @@ def calculate_metrics(df):
     rs = gain / loss
     df["RSI"] = 100 - (100 / (1 + rs))
 
-    # Ichimoku Cloud
-    high_9 = df["High"].rolling(window=9).max()
-    low_9 = df["Low"].rolling(window=9).min()
+    # Ichimoku Cloud calculations with filling
+    high_9 = df["High"].rolling(window=9).max().fillna(method="bfill")  # Backward fill
+    low_9 = df["Low"].rolling(window=9).min().fillna(method="bfill")  # Backward fill
     df["Tenkan-sen"] = (high_9 + low_9) / 2
 
-    high_26 = df["High"].rolling(window=26).max()
-    low_26 = df["Low"].rolling(window=26).min()
+    high_26 = (
+        df["High"].rolling(window=26).max().fillna(method="bfill")
+    )  # Backward fill
+    low_26 = df["Low"].rolling(window=26).min().fillna(method="bfill")  # Backward fill
     df["Kijun-sen"] = (high_26 + low_26) / 2
 
     df["Senkou Span A"] = ((df["Tenkan-sen"] + df["Kijun-sen"]) / 2).shift(26)
     df["Senkou Span B"] = (
-        (df["High"].rolling(window=52).max() + df["Low"].rolling(window=52).min()) / 2
+        (
+            df["High"].rolling(window=52).max().fillna(method="bfill")
+            + df["Low"].rolling(window=52).min().fillna(method="bfill")
+        )
+        / 2
     ).shift(26)
     df["Chikou Span"] = df["Close"].shift(-26)
+
+    # Fill NaN values for Senkou Span A, Senkou Span B, and Chikou Span without distorting their intended shifts
+    df["Senkou Span A"].fillna(
+        method="bfill", inplace=True
+    )  # Backward fill for future projection
+    df["Senkou Span B"].fillna(
+        method="bfill", inplace=True
+    )  # Backward fill for future projection
+    df["Chikou Span"].fillna(
+        method="ffill", inplace=True
+    )  # Forward fill for past shift
 
     # Indicators for Dividends within 7, 30, and 90 days
     df["Dividend_7d"] = (
