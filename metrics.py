@@ -1,30 +1,51 @@
 import pandas as pd
 import numpy as np
 
-
-def calculate_metrics(df):
-    # Ensure the DataFrame is sorted by date
-    df = df.sort_values(by="Date")
-
-    # Price-Based Metrics
+# Price-Based Metrics
+def calculate_daily_returns(df):
     df["Daily Returns"] = df["Close"].pct_change()
+    return df
+
+
+def calculate_log_returns(df):
     df["Log Returns"] = np.log(1 + df["Daily Returns"])
-    df["SMA_10"] = df["Close"].rolling(window=10).mean()
-    df["EMA_10"] = df["Close"].ewm(span=10, adjust=False).mean()
+    return df
 
-    # Volume-Based Metrics
+
+def calculate_sma(df, window=10):
+    df[f"SMA_{window}"] = df["Close"].rolling(window=window).mean()
+    return df
+
+
+def calculate_ema(df, span=10):
+    df[f"EMA_{span}"] = df["Close"].ewm(span=span, adjust=False).mean()
+    return df
+
+
+# Volume-Based Metrics
+def calculate_volume_change_rate(df):
     df["Volume Change Rate"] = df["Volume"].pct_change()
+    return df
 
-    # Volatility Metrics
-    df["Volatility_10"] = df["Daily Returns"].rolling(window=10).std()
 
-    # Momentum Indicators (Example: RSI)
+# Volatility Metrics
+def calculate_volatility(df, window=10):
+    df[f"Volatility_{window}"] = df["Daily Returns"].rolling(window=window).std()
+    return df
+
+
+# Momentum Indicators
+def calculate_rsi(df, window=14):
     delta = df["Close"].diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+    gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
     rs = gain / loss
     df["RSI"] = 100 - (100 / (1 + rs))
+    return df
 
+
+# Ichimoku
+def calculate_ichimoku_cloud(df):
     # Ichimoku Cloud calculations with filling
     high_9 = df["High"].rolling(window=9).max().fillna(method="bfill")  # Backward fill
     low_9 = df["Low"].rolling(window=9).min().fillna(method="bfill")  # Backward fill
@@ -56,54 +77,51 @@ def calculate_metrics(df):
     df["Chikou Span"].fillna(
         method="ffill", inplace=True
     )  # Forward fill for past shift
+    return df
 
-    # Indicators for Dividends within 7, 30, and 90 days
-    df["Dividend_7d"] = (
-        df["Dividends"]
-        .rolling(window=7, min_periods=1)
-        .apply(lambda x: 1 if x.sum() > 0 else 0)
-    )
-    df["Dividend_30d"] = (
-        df["Dividends"]
-        .rolling(window=30, min_periods=1)
-        .apply(lambda x: 1 if x.sum() > 0 else 0)
-    )
-    df["Dividend_90d"] = (
-        df["Dividends"]
-        .rolling(window=90, min_periods=1)
-        .apply(lambda x: 1 if x.sum() > 0 else 0)
-    )
 
-    # Indicators for Stock Splits within 7, 30, and 90 days
-    df["Split_7d"] = (
-        df["Stock Splits"]
-        .rolling(window=7, min_periods=1)
-        .apply(lambda x: 1 if x.sum() > 0 else 0)
-    )
-    df["Split_30d"] = (
-        df["Stock Splits"]
-        .rolling(window=30, min_periods=1)
-        .apply(lambda x: 1 if x.sum() > 0 else 0)
-    )
-    df["Split_90d"] = (
-        df["Stock Splits"]
-        .rolling(window=90, min_periods=1)
-        .apply(lambda x: 1 if x.sum() > 0 else 0)
-    )
+# Dividends and Splits Indicators
+def calculate_dividend_split_indicators(df, windows=[7, 30, 90]):
+    print(df.columns)
+    for window in windows:
+        df[f"Dividend_{window}d"] = (
+            df["Dividends"]
+            .rolling(window=window, min_periods=1)
+            .apply(lambda x: 1 if x.sum() > 0 else 0)
+        )
+        df[f"Split_{window}d"] = (
+            df["Stock Splits"]
+            .rolling(window=window, min_periods=1)
+            .apply(lambda x: 1 if x.sum() > 0 else 0)
+        )
+    # Fill NaN values with 0
+    indicators = [f"Dividend_{window}d" for window in windows] + [
+        f"Split_{window}d" for window in windows
+    ]
+    df[indicators].fillna(0, inplace=True)
+    return df
 
-    # Fill NaN values with 0 for these indicators
-    df[
-        [
-            "Dividend_7d",
-            "Dividend_30d",
-            "Dividend_90d",
-            "Split_7d",
-            "Split_30d",
-            "Split_90d",
-        ]
-    ].fillna(0, inplace=True)
 
+def clean_up_columns(df):
     # Drop the original Dividends and Stock Splits columns
     df.drop(["Dividends", "Stock Splits"], axis=1, inplace=True)
+    return df
+
+
+def calculate_metrics(df):
+    # Ensure the DataFrame is sorted by date
+    df = df.sort_values(by="Date")
+
+    # Call each metrics calculation function
+    df = calculate_daily_returns(df)
+    df = calculate_log_returns(df)
+    df = calculate_sma(df)
+    df = calculate_ema(df)
+    df = calculate_volume_change_rate(df)
+    df = calculate_volatility(df)
+    df = calculate_rsi(df)
+    df = calculate_ichimoku_cloud(df)
+    df = calculate_dividend_split_indicators(df)
+    df = clean_up_columns(df)
 
     return df
