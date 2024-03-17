@@ -8,7 +8,7 @@ from model_types import pick_model_type
 from model_types import xgb
 
 
-def creation_of_the_gods(data):
+def creation_of_the_gods(data, choosey_model):
     # Prepare the Data
     X, y = prepare_data(
         data, target_column="Close", columns_to_drop=["Date", "Close", "Ticker"]
@@ -18,7 +18,7 @@ def creation_of_the_gods(data):
     X_train, X_test, y_train, y_test = split_data(X, y)
 
     # Train Baseline
-    base, p_grid, p_dist = pick_model_type(X_train, y_train)
+    base, p_grid, p_dist = pick_model_type(X_train, y_train, choosey_model)
 
     # Grid Search and Random Search
     grid, grid_score = grid_s_cv(X_train, y_train, base, p_grid)
@@ -29,7 +29,7 @@ def creation_of_the_gods(data):
         base, grid, grid_score, random, random_score, X_test, y_test
     )
 
-    return best_model
+    return best_model, base, random, grid
 
 
 def prediction_of_the_gods(prediction_input, dankest_model):

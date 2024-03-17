@@ -3,8 +3,8 @@ from sklearn.ensemble import RandomForestRegressor
 from xgboost import XGBRegressor
 
 
-def pick_model_type(train_data_x, train_data_y):
-    choice = input("Choices: xgb || linear_regression || random_forest\n")
+def pick_model_type(train_data_x, train_data_y, model_choosey):
+    choice = model_choosey
     if choice == "xgb":
         baseline, param_grid, param_dist = xgb(train_data_x, train_data_y)
     elif choice == "linear_regression":
