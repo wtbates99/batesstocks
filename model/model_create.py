@@ -1,11 +1,11 @@
-from model_functions import prepare_data
-from model_functions import split_data
-from model_functions import grid_s_cv
-from model_functions import random_s_cv
-from model_functions import select_best_model
+from model.model_functions import prepare_data
+from model.model_functions import split_data
+from model.model_functions import grid_s_cv
+from model.model_functions import random_s_cv
+from model.model_functions import select_best_model
 
-from model_types import pick_model_type
-from model_types import xgb
+from model.model_types import pick_model_type
+from model.model_types import xgb
 
 
 def creation_of_the_gods(data, choosey_model):
