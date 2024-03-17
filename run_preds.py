@@ -2,6 +2,7 @@ import pandas as pd
 from datetime import datetime
 from stock_data import pull_stocks
 from model_create import creation_of_the_gods, prediction_of_the_gods
+import os
 
 
 def run_stock_predictions(stocks, mod_choice):
@@ -48,8 +49,13 @@ def run_stock_predictions(stocks, mod_choice):
 
     # Generate filename with today's date
     filename = f"{datetime.now().strftime('%Y-%m-%d')}_stock_predictions.csv"
+    current_directory = os.getcwd()
+    predictions_folder_path = os.path.join(current_directory, "predictions")
+    if not os.path.exists(predictions_folder_path):
+        os.makedirs(predictions_folder_path)
+    full_file_path = os.path.join(predictions_folder_path, filename)
 
     # Export to CSV
-    results_df.to_csv(filename, index=False)
+    results_df.to_csv(full_file_path, index=False)
 
     print(f"Predictions saved to {filename}")
