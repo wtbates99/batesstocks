@@ -1,4 +1,4 @@
-from run_preds import run_stock_predictions
+from predictions.run_preds import run_stock_predictions
 
 if __name__ == "__main__":
     stocks = ["MSFT", "AAPL", "TSLA"]  # Example list of stocks

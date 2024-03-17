@@ -1,6 +1,6 @@
 import yfinance as yf
 import pandas as pd
-from metrics import calculate_metrics
+from metric.metrics import calculate_metrics
 
 
 def pull_single_stock(ticker):
