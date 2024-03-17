@@ -23,9 +23,6 @@ def pull_stocks(tickers):
         input_value = stock_data.iloc[-1:]
         input_value["Prev_Day_Close"] = input_value["Close"]
         input_value = input_value.drop(columns=["Date", "Close", "Ticker"])
-        print(
-            f"YESTERDAY INFORMATION:\nTicker: {str(tick_x)}\n Open: {str(input_value['Open'])}\n Close: {str(input_value['Prev_Day_Close'])}"
-        )
         all_stocks.append(stock_data)
 
     # Concatenate all stock_data into a single stock_dataFrame
