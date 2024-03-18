@@ -1,5 +1,5 @@
 
-# Project Name: Predictive Stock Model
+# Predictive Stock/ETF Model
 
 ## Overview
 This repository contains a Python-based project aimed at creating predictive models for stock market data. It leverages various machine learning techniques to analyze historical stock data and predict future movements. The project is structured to allow for easy creation of models, evaluation of performance metrics, and running predictions.
