@@ -26,7 +26,7 @@ repos:
     rev: v0.3.7
     hooks:
       - id: ruff
-        args: [ "--fix", "--extend-select=T201", "--extend-select=PD002", "--extend-select=E722", "--extend-select=PERF101" ]
+        args: [ "--fix", "--extend-select=PD002", "--extend-select=E722", "--extend-select=PERF101" ]
       - id: ruff-format
   - repo: https://github.com/antonbabenko/pre-commit-terraform
     rev: v1.89.0
