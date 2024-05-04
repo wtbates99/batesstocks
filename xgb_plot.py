@@ -61,10 +61,10 @@ def train_model(X, y):
     return grid.best_estimator_
 
 
-def run_backtest(ticker, backtest_period=60):
+def run_backtest(ticker, backtest_period=14):
     """Executes backtesting for a specified period using the trained model, calculates changes in capital, and counts profitable days."""
     stock = yf.Ticker(ticker)
-    hist = stock.history(period="max", interval="5d")
+    hist = stock.history(period="max", interval="1d")
     X_clean, y = prepare_data(hist)
     model = train_model(X_clean, y)
 
@@ -125,4 +125,4 @@ def run_backtest(ticker, backtest_period=60):
 
 
 # Example usage
-rmse = run_backtest("SPY")
+rmse = run_backtest("INTC")
