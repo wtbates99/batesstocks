@@ -16,7 +16,7 @@ def run_pred(ticker):
     hist["Ticker"] = ticker
     X = hist.drop(columns=["Close", "Ticker"])
     y = hist["Close"]
-    X = X.replace([np.inf, -np.inf], np.nan)
+    X.replace([np.inf, -np.inf], np.nan)
     imputer = SimpleImputer(strategy="median")
     X = pd.DataFrame(imputer.fit_transform(X), columns=X.columns)
     X_train, X_test, y_train, y_test = train_test_split(
@@ -29,6 +29,8 @@ def run_pred(ticker):
             "n_estimators": [100, 200],
             "max_depth": [3, 6, 9],
             "learning_rate": [0.01, 0.1],
+            "reg_alpha": [0.01, 0.1],  # L1 regularization
+            "reg_lambda": [1, 10],  # L2 regularization
         },
         cv=5,
         scoring="neg_mean_squared_error",
@@ -39,7 +41,10 @@ def run_pred(ticker):
     rmse = np.sqrt(mean_squared_error(y_test, y_pred))
     mae = mean_absolute_error(y_test, y_pred)
     r2 = r2_score(y_test, y_pred)
-    latest_data = X.iloc[-1].fillna(X.median())
+    latest_data = X.iloc[-1]
+    latest_data["Prev_Close"] = y.iloc[
+        -1
+    ]  # Using the last actual close price as prev_close for the prediction
     next_day_pred = best_model.predict([latest_data])[0]
     current_price = y.iloc[-1]
     pred_change = next_day_pred - current_price
@@ -58,6 +63,7 @@ def run_pred(ticker):
         },
         index=[ticker],
     )
+
     return results
 
 
