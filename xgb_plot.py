@@ -58,6 +58,7 @@ def train_model(X, y):
         scoring="neg_mean_squared_error",
     )
     grid.fit(X, y)
+    print("Hello World")
     return grid.best_estimator_
 
 
