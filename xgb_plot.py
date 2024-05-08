@@ -8,109 +8,61 @@ from sklearn.metrics import mean_squared_error
 from sklearn.impute import SimpleImputer
 
 
-def calculate_ema(prices, span):
-    return prices.ewm(span=span, adjust=False).mean()
+def compute_financial_indicators(hist):
+    # Exponential Moving Average (EMA)
+    hist["EMA_15"] = hist["Close"].ewm(span=15, adjust=False).mean()
+    hist["EMA_50"] = hist["Close"].ewm(span=50, adjust=False).mean()
 
-
-def calculate_rsi(prices, n=14):
-    delta = prices.diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=n).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=n).mean()
+    # Relative Strength Index (RSI)
+    delta = hist["Close"].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
     rs = gain / loss
-    return 100 - (100 / (1 + rs))
+    hist["RSI_14"] = 100 - (100 / (1 + rs))
 
-
-def calculate_macd(prices, n_fast=12, n_slow=26):
-    ema_fast = calculate_ema(prices, n_fast)
-    ema_slow = calculate_ema(prices, n_slow)
+    # Moving Average Convergence Divergence (MACD)
+    ema_fast = hist["Close"].ewm(span=12, adjust=False).mean()
+    ema_slow = hist["Close"].ewm(span=26, adjust=False).mean()
     macd = ema_fast - ema_slow
-    signal = calculate_ema(macd, 9)
-    return macd, signal, macd - signal
+    hist["MACD"] = macd
+    hist["MACD_Signal"] = macd.ewm(span=9, adjust=False).mean()
+    hist["MACD_Hist"] = hist["MACD"] - hist["MACD_Signal"]
 
+    # Average True Range (ATR)
+    high_low = hist["High"] - hist["Low"]
+    high_close = np.abs(hist["High"] - hist["Close"].shift())
+    low_close = np.abs(hist["Low"] - hist["Close"].shift())
+    tr = pd.DataFrame(
+        {"high_low": high_low, "high_close": high_close, "low_close": low_close}
+    ).max(axis=1)
+    hist["ATR_14"] = tr.rolling(window=14).mean()
 
-def calculate_atr(high, low, close, n=14):
-    high_low = high - low
-    high_close = np.abs(high - close.shift())
-    low_close = np.abs(low - close.shift())
-    tr = high_low.combine(high_close, max).combine(low_close, max)
-    atr = tr.rolling(window=n).mean()
-    return atr
+    # Bollinger Bands
+    sma = hist["Close"].rolling(20).mean()
+    rstd = hist["Close"].rolling(20).std()
+    hist["Upper_BB"] = sma + 2 * rstd
+    hist["Middle_BB"] = sma
+    hist["Lower_BB"] = sma - 2 * rstd
 
+    # On-Balance Volume (OBV)
+    direction = hist["Close"].diff()
+    hist["OBV"] = (hist["Volume"] * np.sign(direction)).fillna(0).cumsum()
 
-def calculate_bollinger_bands(prices, n=20, std_dev=2):
-    sma = prices.rolling(n).mean()
-    rstd = prices.rolling(n).std()
-    upper_band = sma + std_dev * rstd
-    lower_band = sma - std_dev * rstd
-    return upper_band, sma, lower_band
+    # Volume Weighted Average Price (VWAP)
+    typical_price = (hist["High"] + hist["Low"] + hist["Close"]) / 3
+    hist["VWAP"] = (typical_price * hist["Volume"]).cumsum() / hist["Volume"].cumsum()
 
-
-def calculate_obv(close, volume):
-    direction = close.diff()
-    obv = (volume * np.sign(direction)).fillna(0).cumsum()
-    return obv
-
-
-def calculate_vwap(high, low, close, volume):
-    typical_price = (high + low + close) / 3
-    vwap = (typical_price * volume).cumsum() / volume.cumsum()
-    return vwap
-
-
-def prepare_data(hist):
-    """Prepares and cleans the data for model training with manually calculated features."""
-    # Basic historical data and lag features
-    hist["Prev_Close"] = hist["Close"].shift(1)
-    hist["Lag_180"] = hist["Close"].shift(180)
-    hist["Lag_30"] = hist["Close"].shift(30)
-
-    # Moving averages
-    hist["MA_31"] = hist["Close"].rolling(window=31).mean()
-    hist["MA_7"] = hist["Close"].rolling(window=7).mean()
-    hist["EMA_15"] = calculate_ema(hist["Close"], 15)
-    hist["EMA_50"] = calculate_ema(hist["Close"], 50)
-
-    # Momentum indicators
-    hist["RSI_14"] = calculate_rsi(hist["Close"], 14)
-    hist["MACD"], hist["MACD_Signal"], hist["MACD_Hist"] = calculate_macd(hist["Close"])
-
-    # Volatility measures
-    hist["ATR_14"] = calculate_atr(hist["High"], hist["Low"], hist["Close"])
-    hist["Upper_BB"], hist["Middle_BB"], hist["Lower_BB"] = calculate_bollinger_bands(
-        hist["Close"]
-    )
-
-    # Volume indicators
-    hist["OBV"] = calculate_obv(hist["Close"], hist["Volume"])
-    hist["VWAP"] = calculate_vwap(
-        hist["High"], hist["Low"], hist["Close"], hist["Volume"]
-    )
-
-    # Cleanup and final features
+    # Clean up and drop NaNs
     hist = hist.dropna()
-    X = hist[
-        [
-            "Open",
-            "High",
-            "Low",
-            "Volume",
-            "Prev_Close",
-            "EMA_15",
-            "EMA_50",
-            "RSI_14",
-            "MACD",
-            "ATR_14",
-            "Upper_BB",
-            "Lower_BB",
-            "OBV",
-            "VWAP",
-        ]
-    ]
-    X = X.replace([np.inf, -np.inf], np.nan)
 
+    # Features and target setup
+    X = hist.drop(columns=["Close"])
+    y = hist["Close"]
+
+    # Impute any remaining missing values
     imputer = SimpleImputer(strategy="median")
     X_clean = pd.DataFrame(imputer.fit_transform(X), columns=X.columns, index=X.index)
-    y = hist["Close"]
+
     return X_clean, y
 
 
@@ -130,15 +82,14 @@ def train_model(X, y):
         scoring="neg_mean_squared_error",
     )
     grid.fit(X, y)
-    print("Hello World")
     return grid.best_estimator_
 
 
-def run_backtest(ticker, backtest_period=14):
+def run_backtest(ticker, backtest_period=31):
     """Executes backtesting for a specified period using the trained model, calculates changes in capital, and counts profitable days."""
     stock = yf.Ticker(ticker)
     hist = stock.history(period="max", interval="1d")
-    X_clean, y = prepare_data(hist)
+    X_clean, y = compute_financial_indicators(hist)
     model = train_model(X_clean, y)
 
     predictions = []
@@ -198,4 +149,4 @@ def run_backtest(ticker, backtest_period=14):
 
 
 # Example usage
-rmse = run_backtest("INTC")
+rmse = run_backtest("NKE")
