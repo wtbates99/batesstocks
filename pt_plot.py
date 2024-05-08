@@ -182,9 +182,7 @@ def run_backtest(ticker, model, scaler, backtest_period=31):
     return rmse
 
 
-# Example usage
-# Fetch historical stock data
-ticker = "NKE"  # Example ticker symbol for Nike
+ticker = input("Enter the ticker symbol for the stock (e.g., 'AAPL', 'GOOGL', 'NKE'): ")
 stock = yf.Ticker(ticker)
 hist_data = stock.history(period="max", interval="1d")
 
