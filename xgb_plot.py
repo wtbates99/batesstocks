@@ -8,37 +8,109 @@ from sklearn.metrics import mean_squared_error
 from sklearn.impute import SimpleImputer
 
 
+def calculate_ema(prices, span):
+    return prices.ewm(span=span, adjust=False).mean()
+
+
+def calculate_rsi(prices, n=14):
+    delta = prices.diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=n).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=n).mean()
+    rs = gain / loss
+    return 100 - (100 / (1 + rs))
+
+
+def calculate_macd(prices, n_fast=12, n_slow=26):
+    ema_fast = calculate_ema(prices, n_fast)
+    ema_slow = calculate_ema(prices, n_slow)
+    macd = ema_fast - ema_slow
+    signal = calculate_ema(macd, 9)
+    return macd, signal, macd - signal
+
+
+def calculate_atr(high, low, close, n=14):
+    high_low = high - low
+    high_close = np.abs(high - close.shift())
+    low_close = np.abs(low - close.shift())
+    tr = high_low.combine(high_close, max).combine(low_close, max)
+    atr = tr.rolling(window=n).mean()
+    return atr
+
+
+def calculate_bollinger_bands(prices, n=20, std_dev=2):
+    sma = prices.rolling(n).mean()
+    rstd = prices.rolling(n).std()
+    upper_band = sma + std_dev * rstd
+    lower_band = sma - std_dev * rstd
+    return upper_band, sma, lower_band
+
+
+def calculate_obv(close, volume):
+    direction = close.diff()
+    obv = (volume * np.sign(direction)).fillna(0).cumsum()
+    return obv
+
+
+def calculate_vwap(high, low, close, volume):
+    typical_price = (high + low + close) / 3
+    vwap = (typical_price * volume).cumsum() / volume.cumsum()
+    return vwap
+
+
 def prepare_data(hist):
-    """Prepares and cleans the data for model training."""
+    """Prepares and cleans the data for model training with manually calculated features."""
+    # Basic historical data and lag features
     hist["Prev_Close"] = hist["Close"].shift(1)
-    hist["Lag_366"] = hist["Close"].shift(366)
+    hist["Lag_180"] = hist["Close"].shift(180)
+    hist["Lag_30"] = hist["Close"].shift(30)
+
+    # Moving averages
+    hist["MA_31"] = hist["Close"].rolling(window=31).mean()
     hist["MA_7"] = hist["Close"].rolling(window=7).mean()
-    high_9 = hist["High"].rolling(window=9).max()
-    low_9 = hist["Low"].rolling(window=9).min()
-    hist["Conversion_Line"] = (high_9 + low_9) / 2
+    hist["EMA_15"] = calculate_ema(hist["Close"], 15)
+    hist["EMA_50"] = calculate_ema(hist["Close"], 50)
 
-    high_26 = hist["High"].rolling(window=26).max()
-    low_26 = hist["Low"].rolling(window=26).min()
-    hist["Base_Line"] = (high_26 + low_26) / 2
+    # Momentum indicators
+    hist["RSI_14"] = calculate_rsi(hist["Close"], 14)
+    hist["MACD"], hist["MACD_Signal"], hist["MACD_Hist"] = calculate_macd(hist["Close"])
 
-    hist["Leading_Span_A"] = ((hist["Conversion_Line"] + hist["Base_Line"]) / 2).shift(
-        26
+    # Volatility measures
+    hist["ATR_14"] = calculate_atr(hist["High"], hist["Low"], hist["Close"])
+    hist["Upper_BB"], hist["Middle_BB"], hist["Lower_BB"] = calculate_bollinger_bands(
+        hist["Close"]
     )
-    hist["Leading_Span_B"] = (
-        (hist["High"].rolling(window=52).max() + hist["Low"].rolling(window=52).min())
-        / 2
-    ).shift(26)
 
-    hist["Lagging_Span"] = hist["Close"].shift(-26)
+    # Volume indicators
+    hist["OBV"] = calculate_obv(hist["Close"], hist["Volume"])
+    hist["VWAP"] = calculate_vwap(
+        hist["High"], hist["Low"], hist["Close"], hist["Volume"]
+    )
+
+    # Cleanup and final features
     hist = hist.dropna()
-
-    X = hist[["Open", "High", "Low", "Volume", "Prev_Close"]]
+    X = hist[
+        [
+            "Open",
+            "High",
+            "Low",
+            "Volume",
+            "Prev_Close",
+            "EMA_15",
+            "EMA_50",
+            "RSI_14",
+            "MACD",
+            "ATR_14",
+            "Upper_BB",
+            "Lower_BB",
+            "OBV",
+            "VWAP",
+        ]
+    ]
     X = X.replace([np.inf, -np.inf], np.nan)
 
     imputer = SimpleImputer(strategy="median")
     X_clean = pd.DataFrame(imputer.fit_transform(X), columns=X.columns, index=X.index)
     y = hist["Close"]
-
     return X_clean, y
 
 
@@ -88,7 +160,7 @@ def run_backtest(ticker, backtest_period=14):
         predicted_close = model.predict(prev_day_data)[0]
         predictions.append(predicted_close)
 
-        # Determine if we should 'buy' based on prediction being higher than previous close
+        # Determicene if we should 'buy' based on prediction being higher than previous close
         if predicted_close > previous_close:
             new_capital = shares_held * predicted_close
             if new_capital > capital:
