@@ -67,22 +67,37 @@ def compute_financial_indicators(hist):
 
 
 def train_model(X, y):
-    """Trains the XGBoost model using grid search for hyperparameter tuning."""
+    """Trains the XGBoost model using grid search for hyperparameter tuning and plots feature importance."""
     model = XGBRegressor(random_state=42)
     grid = GridSearchCV(
         model,
         {
-            "n_estimators": [100, 200],
-            "max_depth": [3, 6, 9],
-            "learning_rate": [0.01, 0.1],
-            "reg_alpha": [0.01, 0.1],
-            "reg_lambda": [1, 10],
+            "n_estimators": [100, 200, 300],
+            "max_depth": [3, 6, 9, 12],
+            "learning_rate": [0.01, 0.05, 0.1],
+            "reg_alpha": [0.01, 0.1, 0.5],
+            "reg_lambda": [1, 5, 10],
+            "subsample": [0.7, 0.9],
+            "colsample_bytree": [0.7, 0.9],
         },
-        cv=5,
+        cv=5,  # Consider a time-series specific cross-validation
         scoring="neg_mean_squared_error",
+        verbose=1,  # Provides training logs
     )
     grid.fit(X, y)
-    return grid.best_estimator_
+    best_model = grid.best_estimator_
+
+    # Feature importance
+    feature_importances = best_model.feature_importances_
+    features = X.columns
+    plt.bar(features, feature_importances)
+    plt.xlabel("Features")
+    plt.ylabel("Importance")
+    plt.title("Feature Importance")
+    plt.xticks(rotation="vertical")
+    plt.show()
+
+    return best_model
 
 
 def run_backtest(ticker, backtest_period=31):
