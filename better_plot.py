@@ -15,14 +15,19 @@ from sklearn.preprocessing import StandardScaler
 class StockPredictor(nn.Module):
     def __init__(self, num_features):
         super(StockPredictor, self).__init__()
-        self.layer1 = nn.Linear(num_features, 64)
-        self.layer2 = nn.Linear(64, 32)
-        self.output_layer = nn.Linear(32, 1)
+        self.layer1 = nn.Linear(num_features, 128)
+        self.layer2 = nn.Linear(128, 64)
+        self.output_layer = nn.Linear(64, 1)
         self.relu = nn.ReLU()
+        self.dropout = nn.Dropout(0.3)
+        self.batch_norm1 = nn.BatchNorm1d(128)
+        self.batch_norm2 = nn.BatchNorm1d(64)
 
     def forward(self, x):
-        x = self.relu(self.layer1(x))
-        x = self.relu(self.layer2(x))
+        x = self.relu(self.batch_norm1(self.layer1(x)))
+        x = self.dropout(x)
+        x = self.relu(self.batch_norm2(self.layer2(x)))
+        x = self.dropout(x)
         x = self.output_layer(x)
         return x
 
