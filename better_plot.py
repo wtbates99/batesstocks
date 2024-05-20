@@ -4,12 +4,12 @@ import numpy as np
 import yfinance as yf
 from sklearn.metrics import mean_squared_error
 from sklearn.impute import SimpleImputer
+from sklearn.preprocessing import StandardScaler
 
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
-from sklearn.preprocessing import StandardScaler
 
 
 class StockPredictor(nn.Module):
@@ -32,7 +32,7 @@ class StockPredictor(nn.Module):
         return x
 
 
-def train_model(X, y, epochs=100, batch_size=32):
+def train_model(X, y, epochs=100, batch_size=32, lr=0.001):
     # Normalize features
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
@@ -47,17 +47,38 @@ def train_model(X, y, epochs=100, batch_size=32):
     # Model
     model = StockPredictor(X.shape[1])
     criterion = nn.MSELoss()
-    optimizer = optim.Adam(model.parameters(), lr=0.001)
+    optimizer = optim.Adam(model.parameters(), lr=lr)
 
-    # Training loop
+    # Training loop with early stopping
     model.train()
+    min_loss = np.inf
+    patience = 10
+    patience_counter = 0
+
     for epoch in range(epochs):
+        epoch_loss = 0
         for features, targets in dataloader:
             optimizer.zero_grad()
             outputs = model(features)
             loss = criterion(outputs, targets)
             loss.backward()
             optimizer.step()
+            epoch_loss += loss.item()
+        epoch_loss /= len(dataloader)
+
+        print(f"Epoch {epoch+1}/{epochs}, Loss: {epoch_loss:.4f}")
+
+        # Early stopping
+        if epoch_loss < min_loss:
+            min_loss = epoch_loss
+            patience_counter = 0
+            best_model = model.state_dict()
+        else:
+            patience_counter += 1
+            if patience_counter >= patience:
+                print("Early stopping triggered")
+                model.load_state_dict(best_model)
+                break
 
     return model, scaler
 
@@ -187,6 +208,7 @@ def run_backtest(ticker, model, scaler, backtest_period=31):
     return rmse
 
 
+# Example usage
 ticker = input("Enter the ticker symbol for the stock (e.g., 'AAPL', 'GOOGL', 'NKE'): ")
 stock = yf.Ticker(ticker)
 hist_data = stock.history(period="max", interval="1d")
