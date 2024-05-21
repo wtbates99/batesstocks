@@ -7,16 +7,20 @@ import yfinance as yf
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import train_test_split, KFold
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
+from rich.console import Console
+from rich.table import Table
+from rich.progress import track
+from rich import box
 
 # Setup logging
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
+console = Console()
 
 class StockPredictor(nn.Module):
     def __init__(self, num_features):
@@ -37,7 +41,6 @@ class StockPredictor(nn.Module):
         x = self.output_layer(x)
         return x
 
-
 def train_model(X, y, epochs=100, batch_size=32, lr=0.001):
     # Normalize features
     scaler = StandardScaler()
@@ -54,14 +57,15 @@ def train_model(X, y, epochs=100, batch_size=32, lr=0.001):
     model = StockPredictor(X.shape[1])
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=lr)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=5, verbose=True)
 
-    # Training loop with early stopping
+    # Training loop with early stopping and model checkpointing
     model.train()
     min_loss = np.inf
     patience = 10
     patience_counter = 0
 
-    for epoch in range(epochs):
+    for epoch in track(range(epochs), description="Training Model..."):
         epoch_loss = 0
         for features, targets in dataloader:
             optimizer.zero_grad()
@@ -71,14 +75,16 @@ def train_model(X, y, epochs=100, batch_size=32, lr=0.001):
             optimizer.step()
             epoch_loss += loss.item()
         epoch_loss /= len(dataloader)
+        scheduler.step(epoch_loss)
 
         logging.info(f"Epoch {epoch+1}/{epochs}, Loss: {epoch_loss:.4f}")
 
-        # Early stopping
+        # Early stopping and model checkpointing
         if epoch_loss < min_loss:
             min_loss = epoch_loss
             patience_counter = 0
             best_model = model.state_dict()
+            torch.save(best_model, 'best_model.pt')
         else:
             patience_counter += 1
             if patience_counter >= patience:
@@ -87,7 +93,6 @@ def train_model(X, y, epochs=100, batch_size=32, lr=0.001):
                 break
 
     return model, scaler
-
 
 def compute_financial_indicators(hist):
     # Exponential Moving Average (EMA)
@@ -146,7 +151,6 @@ def compute_financial_indicators(hist):
 
     return X_clean, y
 
-
 def run_backtest(ticker, model, scaler, backtest_period=31):
     stock = yf.Ticker(ticker)
     hist = stock.history(period="max", interval="1d")
@@ -200,23 +204,29 @@ def run_backtest(ticker, model, scaler, backtest_period=31):
     plt.figure(figsize=(12, 6))
     plt.plot(actuals.index, actuals, label="Actual Close")
     plt.plot(actuals.index, predictions, label="Predicted Close", linestyle="--")
-    plt.title(
-        f"Backtesting Model for {ticker} - RMSE: {rmse:.2f}, MAE: {mae:.2f}, R²: {r2:.2f}"
-    )
+    plt.title(f"Backtesting Model for {ticker} - RMSE: {rmse:.2f}, MAE: {mae:.2f}, R²: {r2:.2f}")
     plt.xlabel("Date")
     plt.ylabel("Close Price")
     plt.legend()
     plt.grid(True)
     plt.show()
 
-    # Output the results
-    logging.info(f"Initial investment of $100 would have resulted in: ${capital:.2f}")
-    logging.info(f"Number of days with profit: {profit_days}")
-    logging.info(f"Number of days with loss: {loss_days}")
-    logging.info(f"Numbers of days not taken: {not_taken}")
+    # Output the results in a TUI table
+    table = Table(title="Backtest Results", box=box.MINIMAL_DOUBLE_HEAD)
+    table.add_column("Metric", justify="right", style="cyan", no_wrap=True)
+    table.add_column("Value", style="magenta")
+    table.add_row("Initial Capital", f"${initial_capital:.2f}")
+    table.add_row("Final Capital", f"${capital:.2f}")
+    table.add_row("Profit Days", str(profit_days))
+    table.add_row("Loss Days", str(loss_days))
+    table.add_row("Not Taken Days", str(not_taken))
+    table.add_row("RMSE", f"{rmse:.4f}")
+    table.add_row("MAE", f"{mae:.4f}")
+    table.add_row("R²", f"{r2:.4f}")
+
+    console.print(table)
 
     return rmse, mae, r2
-
 
 def main(ticker):
     stock = yf.Ticker(ticker)
@@ -234,13 +244,8 @@ def main(ticker):
     logging.info(f"MAE of the backtest: {mae}")
     logging.info(f"R² of the backtest: {r2}")
 
-
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Stock Price Prediction and Backtesting"
-    )
-    parser.add_argument(
-        "ticker", type=str, help="Ticker symbol of the stock (e.g., AAPL, GOOGL)"
-    )
+    parser = argparse.ArgumentParser(description='Stock Price Prediction and Backtesting')
+    parser.add_argument('ticker', type=str, help='Ticker symbol of the stock (e.g., AAPL, GOOGL)')
     args = parser.parse_args()
     main(args.ticker)
