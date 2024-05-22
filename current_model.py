@@ -3,18 +3,15 @@ import pandas as pd
 import numpy as np
 import yfinance as yf
 from sklearn.metrics import mean_squared_error
-from sklearn.impute import SimpleImputer
+from sklearn.impute import KNNImputer
+from sklearn.preprocessing import StandardScaler
+from sklearn.feature_selection import RFE
+from sklearn.linear_model import LinearRegression
 
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
-from sklearn.preprocessing import StandardScaler
-
-import shap
-from rich.progress import track
-from rich.console import Console
-from rich.table import Table
 
 
 class StockPredictor(nn.Module):
@@ -25,7 +22,7 @@ class StockPredictor(nn.Module):
         self.layer3 = nn.Linear(64, 32)
         self.output_layer = nn.Linear(32, 1)
         self.relu = nn.ReLU()
-        self.dropout = nn.Dropout(p=0.3)
+        self.dropout = nn.Dropout(0.2)
 
     def forward(self, x):
         x = self.relu(self.layer1(x))
@@ -54,43 +51,45 @@ def train_model(X, y, epochs=100, batch_size=32):
     criterion = nn.MSELoss()
     optimizer = optim.AdamW(model.parameters(), lr=0.001)
 
-    # Training loop with rich progress bar
+    # Training loop
     model.train()
-    console = Console()
-    for epoch in track(range(epochs), description="Training epochs"):
-        epoch_loss = 0
+    for epoch in range(epochs):
         for features, targets in dataloader:
             optimizer.zero_grad()
             outputs = model(features)
             loss = criterion(outputs, targets)
             loss.backward()
             optimizer.step()
-            epoch_loss += loss.item()
-
-        console.log(f"Epoch {epoch+1}/{epochs}, Loss: {epoch_loss/len(dataloader):.4f}")
 
     return model, scaler
 
 
 def compute_financial_indicators(hist):
-    # Exponential Moving Average (EMA)
+    # Exponential Moving Averages (EMA)
+    hist["EMA_5"] = hist["Close"].ewm(span=5, adjust=False).mean()
+    hist["EMA_10"] = hist["Close"].ewm(span=10, adjust=False).mean()
     hist["EMA_15"] = hist["Close"].ewm(span=15, adjust=False).mean()
+    hist["EMA_20"] = hist["Close"].ewm(span=20, adjust=False).mean()
     hist["EMA_50"] = hist["Close"].ewm(span=50, adjust=False).mean()
+    hist["EMA_100"] = hist["Close"].ewm(span=100, adjust=False).mean()
+    hist["EMA_200"] = hist["Close"].ewm(span=200, adjust=False).mean()
 
     # Relative Strength Index (RSI)
     delta = hist["Close"].diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
     rs = gain / loss
+    hist["RSI_7"] = 100 - (100 / (1 + rs))
     hist["RSI_14"] = 100 - (100 / (1 + rs))
+    hist["RSI_21"] = 100 - (100 / (1 + rs))
 
     # Moving Average Convergence Divergence (MACD)
     ema_fast = hist["Close"].ewm(span=12, adjust=False).mean()
     ema_slow = hist["Close"].ewm(span=26, adjust=False).mean()
     macd = ema_fast - ema_slow
     hist["MACD"] = macd
-    hist["MACD_Signal"] = macd.ewm(span=9, adjust=False).mean()
-    hist["MACD_Hist"] = hist["MACD"] - hist["MACD_Signal"]
+    hist["MACD_Signal_9"] = macd.ewm(span=9, adjust=False).mean()
+    hist["MACD_Hist"] = hist["MACD"] - hist["MACD_Signal_9"]
 
     # Average True Range (ATR)
     high_low = hist["High"] - hist["Low"]
@@ -99,14 +98,17 @@ def compute_financial_indicators(hist):
     tr = pd.DataFrame(
         {"high_low": high_low, "high_close": high_close, "low_close": low_close}
     ).max(axis=1)
+    hist["ATR_7"] = tr.rolling(window=7).mean()
     hist["ATR_14"] = tr.rolling(window=14).mean()
+    hist["ATR_21"] = tr.rolling(window=21).mean()
 
     # Bollinger Bands
-    sma = hist["Close"].rolling(20).mean()
-    rstd = hist["Close"].rolling(20).std()
-    hist["Upper_BB"] = sma + 2 * rstd
-    hist["Middle_BB"] = sma
-    hist["Lower_BB"] = sma - 2 * rstd
+    for i in [10, 20, 50]:
+        sma = hist["Close"].rolling(i).mean()
+        rstd = hist["Close"].rolling(i).std()
+        hist[f"Upper_BB_{i}"] = sma + 2 * rstd
+        hist[f"Middle_BB_{i}"] = sma
+        hist[f"Lower_BB_{i}"] = sma - 2 * rstd
 
     # On-Balance Volume (OBV)
     direction = hist["Close"].diff()
@@ -116,16 +118,118 @@ def compute_financial_indicators(hist):
     typical_price = (hist["High"] + hist["Low"] + hist["Close"]) / 3
     hist["VWAP"] = (typical_price * hist["Volume"]).cumsum() / hist["Volume"].cumsum()
 
-    # Clean up and drop NaNs
-    hist = hist.dropna()
+    # Commodity Channel Index (CCI)
+    tp = (hist["High"] + hist["Low"] + hist["Close"]) / 3
+    ma = tp.rolling(20).mean()
+    md = (tp - ma).rolling(20).apply(lambda x: np.abs(x - x.mean()).mean(), raw=True)
+    hist["CCI"] = (tp - ma) / (0.015 * md)
+
+    # Chaikin Money Flow (CMF)
+    mfv = ((hist["Close"] - hist["Low"]) - (hist["High"] - hist["Close"])) / (
+        hist["High"] - hist["Low"]
+    )
+    hist["CMF"] = mfv.rolling(20).sum() / hist["Volume"].rolling(20).sum()
+
+    # Price Rate of Change (ROC)
+    hist["ROC_5"] = hist["Close"].pct_change(5)
+    hist["ROC_10"] = hist["Close"].pct_change(10)
+    hist["ROC_20"] = hist["Close"].pct_change(20)
+
+    # Williams %R
+    highest_high = hist["High"].rolling(14).max()
+    lowest_low = hist["Low"].rolling(14).min()
+    hist["WilliamsR"] = (
+        (highest_high - hist["Close"]) / (highest_high - lowest_low)
+    ) * -100
+
+    # Stochastic Oscillator
+    hist["%K"] = ((hist["Close"] - lowest_low) / (highest_high - lowest_low)) * 100
+    hist["%D"] = hist["%K"].rolling(3).mean()
+
+    # Momentum
+    hist["Momentum_1"] = hist["Close"].diff(1)
+    hist["Momentum_5"] = hist["Close"].diff(5)
+    hist["Momentum_10"] = hist["Close"].diff(10)
+
+    # Price Volume Trend (PVT)
+    hist["PVT"] = (
+        (hist["Close"] - hist["Close"].shift(1)) / hist["Close"].shift(1)
+    ) * hist["Volume"]
+    hist["PVT"] = hist["PVT"].cumsum()
+
+    # Normalized Average True Range (NATR)
+    hist["NATR"] = (hist["ATR_14"] / hist["Close"]) * 100
+
+    # Average Directional Index (ADX)
+    # Calculate True Range
+    high_low = hist["High"] - hist["Low"]
+    high_close = np.abs(hist["High"] - hist["Close"].shift())
+    low_close = np.abs(hist["Low"] - hist["Close"].shift())
+    true_range = pd.DataFrame(
+        {"high_low": high_low, "high_close": high_close, "low_close": low_close}
+    ).max(axis=1)
+    # Calculate +DM and -DM
+    plus_dm = np.where(
+        (hist["High"] - hist["High"].shift(1)) > (hist["Low"].shift(1) - hist["Low"]),
+        hist["High"] - hist["High"].shift(1),
+        0,
+    )
+    minus_dm = np.where(
+        (hist["Low"].shift(1) - hist["Low"]) > (hist["High"] - hist["High"].shift(1)),
+        hist["Low"].shift(1) - hist["Low"],
+        0,
+    )
+    # Calculate Smoothed True Range, +DM, and -DM
+    smooth_true_range = true_range.ewm(span=14, adjust=False).mean()
+    smooth_plus_dm = pd.Series(plus_dm).ewm(span=14, adjust=False).mean()
+    smooth_minus_dm = pd.Series(minus_dm).ewm(span=14, adjust=False).mean()
+    # Calculate +DI and -DI
+    plus_di = (smooth_plus_dm / smooth_true_range) * 100
+    minus_di = (smooth_minus_dm / smooth_true_range) * 100
+    # Calculate Directional Movement Index (DX)
+    dx = (np.abs(plus_di - minus_di) / (plus_di + minus_di)) * 100
+    # Calculate Average Directional Index (ADX)
+    hist["ADX"] = dx.ewm(span=14, adjust=False).mean()
+
+    # Ichimoku Cloud
+    high_9 = hist["High"].rolling(window=9).max()
+    low_9 = hist["Low"].rolling(window=9).min()
+    hist["Tenkan_Sen"] = (high_9 + low_9) / 2
+
+    high_26 = hist["High"].rolling(window=26).max()
+    low_26 = hist["Low"].rolling(window=26).min()
+    hist["Kijun_Sen"] = (high_26 + low_26) / 2
+
+    hist["Senkou_Span_A"] = ((hist["Tenkan_Sen"] + hist["Kijun_Sen"]) / 2).shift(26)
+    hist["Senkou_Span_B"] = (
+        (hist["High"].rolling(window=52).max() + hist["Low"].rolling(window=52).min())
+        / 2
+    ).shift(26)
+    hist["Chikou_Span"] = hist["Close"].shift(-26)
+
+    # Additional features
+    hist["Lagged_Return"] = hist["Close"].pct_change(1)
+    hist["Volatility_5"] = hist["Close"].pct_change().rolling(window=5).std()
+    hist["Volatility_10"] = hist["Close"].pct_change().rolling(window=10).std()
+    hist["Volatility_20"] = hist["Close"].pct_change().rolling(window=20).std()
+
+    # Price Gap
+    hist["Gap"] = (hist["Open"] - hist["Close"].shift(1)) / hist["Close"].shift(1)
 
     # Features and target setup
     X = hist.drop(columns=["Close"])
     y = hist["Close"]
 
-    # Impute any remaining missing values
-    imputer = SimpleImputer(strategy="median")
-    X_clean = pd.DataFrame(imputer.fit_transform(X), columns=X.columns, index=X.index)
+    # Impute any remaining missing values using KNNImputer
+    imputer = KNNImputer(n_neighbors=5)
+    X_clean = pd.DataFrame(imputer.fit_transform(X), columns=X.columns)
+
+    # Feature selection using Recursive Feature Elimination (RFE)
+    estimator = LinearRegression()
+    selector = RFE(estimator, n_features_to_select=10)  # Select top 15 features
+    selector = selector.fit(X_clean, y)
+    selected_features = X_clean.columns[selector.support_]
+    X_clean = X_clean[selected_features]
 
     return X_clean, y
 
@@ -176,45 +280,26 @@ def run_backtest(ticker, model, scaler, backtest_period=31):
 
     # Calculate metrics
     rmse = np.sqrt(mean_squared_error(actuals, predictions))
+    mape = np.mean(np.abs((actuals - predictions) / actuals)) * 100
 
     # Plot results
     plt.figure(figsize=(12, 6))
     plt.plot(actuals.index, actuals, label="Actual Close")
     plt.plot(actuals.index, predictions, label="Predicted Close", linestyle="--")
-    plt.title(f"Backtesting Model for {ticker} - RMSE: {rmse:.2f}")
+    plt.title(f"Backtesting Model for {ticker} - RMSE: {rmse:.2f}, MAPE: {mape:.2f}%")
     plt.xlabel("Date")
     plt.ylabel("Close Price")
     plt.legend()
     plt.grid(True)
     plt.show()
 
-    # Output the results in a rich table
-    console = Console()
-    table = Table(show_header=True, header_style="bold magenta")
-    table.add_column("Metric", justify="right")
-    table.add_column("Value", justify="right")
-    table.add_row("Initial Investment", f"${initial_capital:.2f}")
-    table.add_row("Final Capital", f"${capital:.2f}")
-    table.add_row("Profit Days", str(profit_days))
-    table.add_row("Loss Days", str(loss_days))
-    table.add_row("Not Taken Days", str(not_taken))
-    table.add_row("RMSE", f"{rmse:.2f}")
+    # Output the results
+    print(f"Initial investment of $100 would have resulted in: ${capital:.2f}")
+    print(f"Number of days with profit: {profit_days}")
+    print(f"Number of days with loss: {loss_days}")
+    print(f"Numbers of days not taken: {not_taken}")
 
-    console.print(table)
-
-    return rmse
-
-
-def shap_feature_importance(model, X_clean):
-    # Use KernelExplainer for SHAP
-    def model_predict(data):
-        data_torch = torch.tensor(data, dtype=torch.float32)
-        return model(data_torch).detach().numpy()
-
-    explainer = shap.KernelExplainer(model_predict, X_clean.sample(n=100, random_state=1))
-    shap_values = explainer.shap_values(X_clean)
-
-    shap.summary_plot(shap_values, X_clean, plot_type="bar")
+    return rmse, mape
 
 
 ticker = input("Enter the ticker symbol for the stock (e.g., 'AAPL', 'GOOGL', 'NKE'): ")
@@ -222,4 +307,12 @@ stock = yf.Ticker(ticker)
 hist_data = stock.history(period="max", interval="1d")
 
 # Compute financial indicators
-X_clean, y = compute_financial_indicators
+X_clean, y = compute_financial_indicators(hist_data)
+
+# Train the model with computed data
+model, scaler = train_model(X_clean, y, epochs=200)  # Increased epochs
+
+# Run backtesting
+rmse, mape = run_backtest(ticker, model, scaler)
+print(f"RMSE of the backtest: {rmse:.2f}")
+print(f"MAPE of the backtest: {mape:.2f}%")
