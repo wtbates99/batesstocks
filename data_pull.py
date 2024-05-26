@@ -1,0 +1,163 @@
+import yfinance as yf
+import pandas as pd
+import sqlite3
+import os
+from tqdm import tqdm
+
+
+# Function to fetch S&P 500 tickers
+def get_sp500_tickers():
+    sp500_url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+    table = pd.read_html(sp500_url)
+    return table[0]["Symbol"].tolist()
+
+
+# Function to download data in batches
+def download_stock_data(tickers, batch_size=10):
+    all_data = []
+    for i in range(0, len(tickers), batch_size):
+        batch = tickers[i : i + batch_size]
+        print(f"Downloading data for tickers: {batch}")
+        data = yf.download(batch, interval="1d", group_by="ticker", auto_adjust=True)
+        all_data.append(data)
+    return all_data
+
+
+# Function to store stock price data in SQLite
+def store_stock_data_in_sqlite(data_list, db_path):
+    conn = sqlite3.connect(os.path.expanduser(db_path))
+    # Clear the table before storing new data
+    conn.execute("DELETE FROM stock_data")
+    conn.commit()
+
+    for data in data_list:
+        # Flatten the multi-level columns and reset index
+        flat_data = (
+            data.stack(level=0).reset_index().rename(columns={"level_1": "Ticker"})
+        )
+        # Store data into SQLite
+        flat_data.to_sql("stock_data", conn, if_exists="append", index=False)
+    conn.close()
+
+
+# Function to get comprehensive stock information in batches
+def get_stock_information_in_batches(tickers, batch_size):
+    stock_information = []
+    for i in range(0, len(tickers), batch_size):
+        batch = tickers[i : i + batch_size]
+        print(f"Fetching stock information for tickers: {batch}")
+        for ticker in tqdm(
+            batch, desc=f"Fetching stock information for batch {i//batch_size + 1}"
+        ):
+            try:
+                stock_info = yf.Ticker(ticker).info
+                stock_data = {
+                    "Ticker": ticker,
+                    "Sector": stock_info.get("sector", "N/A"),
+                    "Subsector": stock_info.get("industry", "N/A"),
+                    "FullName": stock_info.get("longName", "N/A"),
+                    "MarketCap": stock_info.get("marketCap", "N/A"),
+                    "Country": stock_info.get("country", "N/A"),
+                    "Website": stock_info.get("website", "N/A"),
+                    "Description": stock_info.get("longBusinessSummary", "N/A"),
+                    "CEO": stock_info.get("ceo", "N/A"),
+                    "Employees": stock_info.get("fullTimeEmployees", "N/A"),
+                    "City": stock_info.get("city", "N/A"),
+                    "State": stock_info.get("state", "N/A"),
+                    "Zip": stock_info.get("zip", "N/A"),
+                    "Address": stock_info.get("address1", "N/A"),
+                    "Phone": stock_info.get("phone", "N/A"),
+                    "Exchange": stock_info.get("exchange", "N/A"),
+                    "Currency": stock_info.get("currency", "N/A"),
+                    "QuoteType": stock_info.get("quoteType", "N/A"),
+                    "ShortName": stock_info.get("shortName", "N/A"),
+                    "Price": stock_info.get("regularMarketPrice", "N/A"),
+                    "52WeekHigh": stock_info.get("fiftyTwoWeekHigh", "N/A"),
+                    "52WeekLow": stock_info.get("fiftyTwoWeekLow", "N/A"),
+                    "DividendRate": stock_info.get("dividendRate", "N/A"),
+                    "DividendYield": stock_info.get("dividendYield", "N/A"),
+                    "PayoutRatio": stock_info.get("payoutRatio", "N/A"),
+                    "Beta": stock_info.get("beta", "N/A"),
+                    "PE": stock_info.get("trailingPE", "N/A"),
+                    "EPS": stock_info.get("trailingEps", "N/A"),
+                    "Revenue": stock_info.get("totalRevenue", "N/A"),
+                    "GrossProfit": stock_info.get("grossProfits", "N/A"),
+                    "FreeCashFlow": stock_info.get("freeCashflow", "N/A"),
+                }
+                stock_information.append(stock_data)
+                print(stock_data)
+            except Exception as e:
+                print(f"Error fetching stock information for {ticker}: {e}")
+                stock_information.append(
+                    {
+                        "Ticker": ticker,
+                        "Sector": "N/A",
+                        "Subsector": "N/A",
+                        "FullName": "N/A",
+                        "MarketCap": "N/A",
+                        "Country": "N/A",
+                        "Website": "N/A",
+                        "Description": "N/A",
+                        "CEO": "N/A",
+                        "Employees": "N/A",
+                        "City": "N/A",
+                        "State": "N/A",
+                        "Zip": "N/A",
+                        "Address": "N/A",
+                        "Phone": "N/A",
+                        "Exchange": "N/A",
+                        "Currency": "N/A",
+                        "QuoteType": "N/A",
+                        "ShortName": "N/A",
+                        "Price": "N/A",
+                        "52WeekHigh": "N/A",
+                        "52WeekLow": "N/A",
+                        "DividendRate": "N/A",
+                        "DividendYield": "N/A",
+                        "PayoutRatio": "N/A",
+                        "Beta": "N/A",
+                        "PE": "N/A",
+                        "EPS": "N/A",
+                        "Revenue": "N/A",
+                        "GrossProfit": "N/A",
+                        "FreeCashFlow": "N/A",
+                    }
+                )
+    return stock_information
+
+
+# Function to store stock information in SQLite
+def store_stock_information_in_sqlite(stock_information, db_path):
+    conn = sqlite3.connect(os.path.expanduser(db_path))
+    # Clear the table before storing new data
+    # conn.execute('DELETE FROM stock_information')
+    # conn.commit()
+
+    df = pd.DataFrame(stock_information)
+    df.to_sql("stock_information", conn, if_exists="replace", index=False)
+    conn.close()
+
+
+# Main execution
+def main():
+    db_path = "~/personal_git/db/stock/stock_data.db"
+    tickers = get_sp500_tickers()
+    batch_size = 500  # Set batch size as needed
+
+    print("Downloading stock data...")
+    all_data = download_stock_data(tickers, batch_size)
+
+    print("Storing stock data to SQLite database...")
+    store_stock_data_in_sqlite(all_data, db_path)
+
+    print("Fetching comprehensive stock information...")
+    stock_information = get_stock_information_in_batches(tickers, batch_size)
+
+    print("Storing comprehensive stock information to SQLite database...")
+    store_stock_information_in_sqlite(stock_information, db_path)
+
+    print("Data download and storage complete.")
+
+
+if __name__ == "__main__":
+    main()
