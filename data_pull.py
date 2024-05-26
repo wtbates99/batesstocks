@@ -25,19 +25,24 @@ def download_stock_data(tickers, batch_size=10):
 
 # Function to store stock price data in SQLite
 def store_stock_data_in_sqlite(data_list, db_path):
-    conn = sqlite3.connect(os.path.expanduser(db_path))
-    # Clear the table before storing new data
-    conn.execute("DELETE FROM stock_data")
-    conn.commit()
+    try:
+        conn = sqlite3.connect(os.path.expanduser(db_path))
+        # Clear the table before storing new data
+        conn.execute("DELETE FROM stock_data")
+        conn.commit()
 
-    for data in data_list:
-        # Flatten the multi-level columns and reset index
-        flat_data = (
-            data.stack(level=0).reset_index().rename(columns={"level_1": "Ticker"})
-        )
-        # Store data into SQLite
-        flat_data.to_sql("stock_data", conn, if_exists="append", index=False)
-    conn.close()
+        for data in data_list:
+            # Flatten the multi-level columns and reset index
+            flat_data = (
+                data.stack(level=0).reset_index().rename(columns={"level_1": "Ticker"})
+            )
+            # Store data into SQLite
+            flat_data.to_sql("stock_data", conn, if_exists="append", index=False)
+        conn.close()
+    except sqlite3.Error as e:
+        print(f"SQLite error: {e}")
+    except Exception as e:
+        print(f"Error: {e}")
 
 
 # Function to get comprehensive stock information in batches
@@ -128,19 +133,83 @@ def get_stock_information_in_batches(tickers, batch_size):
 
 # Function to store stock information in SQLite
 def store_stock_information_in_sqlite(stock_information, db_path):
-    conn = sqlite3.connect(os.path.expanduser(db_path))
-    # Clear the table before storing new data
-    # conn.execute('DELETE FROM stock_information')
-    # conn.commit()
-
-    df = pd.DataFrame(stock_information)
-    df.to_sql("stock_information", conn, if_exists="replace", index=False)
-    conn.close()
+    try:
+        conn = sqlite3.connect(os.path.expanduser(db_path))
+        df = pd.DataFrame(stock_information)
+        df.to_sql("stock_information", conn, if_exists="replace", index=False)
+        conn.close()
+    except sqlite3.Error as e:
+        print(f"SQLite error: {e}")
+    except Exception as e:
+        print(f"Error: {e}")
 
 
 # Main execution
 def main():
-    db_path = "~/personal_git/db/stock/stock_data.db"
+    db_dir = os.path.expanduser("~/personal_git/stock_price_predictor/db")
+    db_path = os.path.join(db_dir, "stock_data.db")
+
+    # Check if the database directory exists, create if not
+    if not os.path.exists(db_dir):
+        os.makedirs(db_dir)
+
+    # Check if the database file exists, create if not
+    if not os.path.exists(db_path):
+        try:
+            conn = sqlite3.connect(db_path)
+            conn.execute("""
+            CREATE TABLE IF NOT EXISTS stock_data (
+                Date TEXT,
+                Ticker TEXT,
+                Open REAL,
+                High REAL,
+                Low REAL,
+                Close REAL,
+                Adj_Close REAL,
+                Volume INTEGER
+            )
+            """)
+            conn.execute("""
+            CREATE TABLE IF NOT EXISTS stock_information (
+                Ticker TEXT,
+                Sector TEXT,
+                Subsector TEXT,
+                FullName TEXT,
+                MarketCap REAL,
+                Country TEXT,
+                Website TEXT,
+                Description TEXT,
+                CEO TEXT,
+                Employees INTEGER,
+                City TEXT,
+                State TEXT,
+                Zip TEXT,
+                Address TEXT,
+                Phone TEXT,
+                Exchange TEXT,
+                Currency TEXT,
+                QuoteType TEXT,
+                ShortName TEXT,
+                Price REAL,
+                52WeekHigh REAL,
+                52WeekLow REAL,
+                DividendRate REAL,
+                DividendYield REAL,
+                PayoutRatio REAL,
+                Beta REAL,
+                PE REAL,
+                EPS REAL,
+                Revenue REAL,
+                GrossProfit REAL,
+                FreeCashFlow REAL
+            )
+            """)
+            conn.close()
+        except sqlite3.Error as e:
+            print(f"SQLite error while creating tables: {e}")
+        except Exception as e:
+            print(f"Error while creating tables: {e}")
+
     tickers = get_sp500_tickers()
     batch_size = 500  # Set batch size as needed
 
