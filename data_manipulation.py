@@ -122,6 +122,8 @@ t_df = pd.read_sql_query(t_query, conn)
 s_df = pd.read_sql_query(s_query, conn)
 ss_df = pd.read_sql_query(ss_query, conn)
 
+# Ensure the DataFrame is loaded to the SQLite database
+df.to_sql("stock_data_with_indicators", conn, if_exists="replace", index=False)
 
 t_df["Date"] = pd.to_datetime(t_df["Date"])
 s_df["Date"] = pd.to_datetime(s_df["Date"])
