@@ -1,3 +1,4 @@
+data_pull.py -> data_manipulation.py ->
 
 # Predictive Stock/ETF Model
 

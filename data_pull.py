@@ -13,7 +13,7 @@ def get_sp500_tickers():
 
 
 # Function to download data in batches
-def download_stock_data(tickers, batch_size=10):
+def download_stock_data(tickers, batch_size):
     all_data = []
     for i in range(0, len(tickers), batch_size):
         batch = tickers[i : i + batch_size]
