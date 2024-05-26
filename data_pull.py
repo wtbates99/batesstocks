@@ -81,7 +81,6 @@ def get_stock_information_in_batches(tickers, batch_size):
                     "FreeCashFlow": stock_info.get("freeCashflow", "N/A"),
                 }
                 stock_information.append(stock_data)
-                print(stock_data)
             except Exception as e:
                 print(f"Error fetching stock information for {ticker}: {e}")
                 stock_information.append(
@@ -177,8 +176,8 @@ def main():
                 QuoteType TEXT,
                 ShortName TEXT,
                 Price REAL,
-                52WeekHigh REAL,
-                52WeekLow REAL,
+                "52WeekHigh" REAL,
+                "52WeekLow" REAL,
                 DividendRate REAL,
                 DividendYield REAL,
                 PayoutRatio REAL,
@@ -190,11 +189,27 @@ def main():
                 FreeCashFlow REAL
             )
             """)
+
+            # Create the view if it doesn't exist
+            conn.execute("""
+            CREATE VIEW IF NOT EXISTS stock_view AS
+            SELECT
+                sd.Ticker,
+                sd.Open,
+                sd.High,
+                sd.Low,
+                sd.Close,
+                sd.Volume,
+                si.Sector,
+                si.Subsector
+            FROM stock_data sd
+            JOIN stock_information si ON sd.Ticker = si.Ticker
+            """)
             conn.close()
         except sqlite3.Error as e:
-            print(f"SQLite error while creating tables: {e}")
+            print(f"SQLite error while creating tables/view: {e}")
         except Exception as e:
-            print(f"Error while creating tables: {e}")
+            print(f"Error while creating tables/view: {e}")
 
     tickers = get_sp500_tickers()
     batch_size = 500  # Set batch size as needed

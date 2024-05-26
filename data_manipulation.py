@@ -1,8 +1,8 @@
 import os
 import sqlite3
 import pandas as pd
+import numpy as np
 import ta
-from sklearn.impute import KNNImputer
 
 # Database path
 db_path = os.path.expanduser("~/personal_git/stock_price_predictor/db/stock_data.db")
@@ -12,7 +12,7 @@ conn = sqlite3.connect(db_path)
 
 # Read stock_data table into a DataFrame
 df = pd.read_sql_query(
-    "SELECT Date, Ticker, Open, High, Low, Low, Volume FROM stock_data", conn
+    "SELECT Date, Ticker, Open, Close, High, Low, Volume FROM stock_data", conn
 )
 
 # Ensure Date column is datetime
@@ -86,17 +86,10 @@ def calculate_indicators(group):
     group["KST"] = ta.trend.kst(group["Close"])
     group["KST_Signal"] = ta.trend.kst_sig(group["Close"])
 
-    # Impute missing values with KNNImputer
-    imputer = KNNImputer(n_neighbors=3)
-    imputed_values = imputer.fit_transform(group.drop(columns=["Date", "Ticker"]))
-    group_imputed = pd.DataFrame(
-        imputed_values, columns=group.columns.drop(["Date", "Ticker"])
-    )
+    # Replace infinite values with NaNs
+    group = group.replace([np.inf, -np.inf], np.nan)
 
-    # Combine the imputed values with the Date and Ticker columns
-    group = pd.concat(
-        [group[["Date", "Ticker"]].reset_index(drop=True), group_imputed], axis=1
-    )
+    group = group.ffill()
 
     return group
 
