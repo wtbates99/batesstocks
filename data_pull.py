@@ -25,24 +25,15 @@ def download_stock_data(tickers, batch_size=10):
 
 # Function to store stock price data in SQLite
 def store_stock_data_in_sqlite(data_list, db_path):
-    try:
-        conn = sqlite3.connect(os.path.expanduser(db_path))
-        # Clear the table before storing new data
-        conn.execute("DELETE FROM stock_data")
-        conn.commit()
-
-        for data in data_list:
-            # Flatten the multi-level columns and reset index
-            flat_data = (
-                data.stack(level=0).reset_index().rename(columns={"level_1": "Ticker"})
-            )
-            # Store data into SQLite
-            flat_data.to_sql("stock_data", conn, if_exists="append", index=False)
-        conn.close()
-    except sqlite3.Error as e:
-        print(f"SQLite error: {e}")
-    except Exception as e:
-        print(f"Error: {e}")
+    conn = sqlite3.connect(os.path.expanduser(db_path))
+    concatenated_data = pd.concat(data_list)
+    flat_data = (
+        concatenated_data.stack(level=0)
+        .reset_index()
+        .rename(columns={"level_1": "Ticker"})
+    )
+    flat_data.to_sql("stock_data", conn, if_exists="replace", index=False)
+    conn.close()
 
 
 # Function to get comprehensive stock information in batches
@@ -133,15 +124,10 @@ def get_stock_information_in_batches(tickers, batch_size):
 
 # Function to store stock information in SQLite
 def store_stock_information_in_sqlite(stock_information, db_path):
-    try:
-        conn = sqlite3.connect(os.path.expanduser(db_path))
-        df = pd.DataFrame(stock_information)
-        df.to_sql("stock_information", conn, if_exists="replace", index=False)
-        conn.close()
-    except sqlite3.Error as e:
-        print(f"SQLite error: {e}")
-    except Exception as e:
-        print(f"Error: {e}")
+    conn = sqlite3.connect(os.path.expanduser(db_path))
+    df = pd.DataFrame(stock_information)
+    df.to_sql("stock_information", conn, if_exists="replace", index=False)
+    conn.close()
 
 
 # Main execution
