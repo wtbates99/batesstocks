@@ -190,6 +190,7 @@ def main():
             conn.execute("""
             CREATE VIEW IF NOT EXISTS historicals_with_sector AS
             SELECT
+                sd.Date,
                 sd.Ticker,
                 sd.Open,
                 sd.High,
