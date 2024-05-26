@@ -5,11 +5,11 @@ import os
 from tqdm import tqdm
 
 
-# Function to fetch S&P 500 tickers
 def get_sp500_tickers():
     sp500_url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
-    table = pd.read_html(sp500_url)
-    return table[0]["Symbol"].tolist()
+    table = pd.read_html(sp500_url)[0]
+    filtered_table = table[~table["Symbol"].str.contains(r"\.")]
+    return filtered_table["Symbol"].tolist()
 
 
 # Function to download data in batches
@@ -17,7 +17,6 @@ def download_stock_data(tickers, batch_size=10):
     all_data = []
     for i in range(0, len(tickers), batch_size):
         batch = tickers[i : i + batch_size]
-        print(f"Downloading data for tickers: {batch}")
         data = yf.download(batch, interval="1d", group_by="ticker", auto_adjust=True)
         all_data.append(data)
     return all_data
@@ -41,10 +40,7 @@ def get_stock_information_in_batches(tickers, batch_size):
     stock_information = []
     for i in range(0, len(tickers), batch_size):
         batch = tickers[i : i + batch_size]
-        print(f"Fetching stock information for tickers: {batch}")
-        for ticker in tqdm(
-            batch, desc=f"Fetching stock information for batch {i//batch_size + 1}"
-        ):
+        for ticker in tqdm(batch, desc="Fetching stock information..."):
             try:
                 stock_info = yf.Ticker(ticker).info
                 stock_data = {
@@ -192,7 +188,7 @@ def main():
 
             # Create the view if it doesn't exist
             conn.execute("""
-            CREATE VIEW IF NOT EXISTS stock_view AS
+            CREATE VIEW IF NOT EXISTS historicals_with_sector AS
             SELECT
                 sd.Ticker,
                 sd.Open,
@@ -212,7 +208,7 @@ def main():
             print(f"Error while creating tables/view: {e}")
 
     tickers = get_sp500_tickers()
-    batch_size = 500  # Set batch size as needed
+    batch_size = 503  # Set batch size as needed
 
     print("Downloading stock data...")
     all_data = download_stock_data(tickers, batch_size)

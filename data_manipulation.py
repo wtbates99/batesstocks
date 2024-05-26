@@ -12,7 +12,8 @@ conn = sqlite3.connect(db_path)
 
 # Read stock_data table into a DataFrame
 df = pd.read_sql_query(
-    "SELECT Date, Ticker, Open, Close, High, Low, Volume FROM stock_data", conn
+    "SELECT Date, Ticker, Open, Close, High, Low, Volume, Sector, Subsector FROM stock_data",
+    conn,
 )
 
 # Ensure Date column is datetime
