@@ -19,9 +19,6 @@ df = pd.read_sql_query(
 # Ensure Date column is datetime
 df["Date"] = pd.to_datetime(df["Date"])
 
-# Sort by Date and Ticker
-df = df.sort_values(["Ticker", "Date"])
-
 
 # Define a function to calculate technical indicators and impute missing values
 def calculate_indicators(group):
@@ -95,9 +92,32 @@ def calculate_indicators(group):
     return group
 
 
-# Apply the function to each group (ticker) and calculate indicators
-df = df.groupby("Ticker").apply(calculate_indicators).reset_index(drop=True)
+base_df = (
+    df.drop(columns=["Sector", "Subsector"])
+    .sort_values(["Ticker", "Date"])
+    .groupby("Ticker")
+    .apply(calculate_indicators)
+    .reset_index(drop=True)
+)
+sector_df = (
+    df.drop(columns=["Subsector"])
+    .sort_values(["Sector", "Date"])
+    .groupby("Sector")
+    .apply(calculate_indicators)
+    .reset_index(drop=True)
+)
+subsector_df = (
+    df.drop(columns=["Sector"])
+    .sort_values(["Subsector", "Date"])
+    .groupby("Subsector")
+    .apply(calculate_indicators)
+    .reset_index(drop=True)
+)
 
+
+df = base_df.merge(sector_df, on="Ticker", suffixes=("", "_sector")).merge(
+    subsector_df, on="Ticker", suffixes=("", "_subsector")
+)
 # Save the enhanced and cleaned data back to the database
 df.to_sql("enhanced_stock_data", conn, if_exists="replace", index=False)
 print("Data enhanced, cleaned, and saved to 'enhanced_stock_data' table.")
