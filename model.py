@@ -10,7 +10,12 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 
+# torch stuff
 torch.set_num_threads(1)
+if torch.backends.mps.is_available():
+    device = torch.device("mps")
+else:
+    device = torch.device("cpu")
 
 
 # Function to preprocess data
