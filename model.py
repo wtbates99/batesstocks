@@ -10,6 +10,8 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 
+torch.set_num_threads(1)
+
 
 # Function to preprocess data
 def fetch_preprocess(ticker):
@@ -32,7 +34,6 @@ def fetch_preprocess(ticker):
         le = LabelEncoder()
         df[column] = le.fit_transform(df[column])
         label_encoders[column] = le
-
     imputer = KNNImputer(n_neighbors=3)
     df_numeric_imputed = pd.DataFrame(
         imputer.fit_transform(df[numeric_cols]), columns=numeric_cols
@@ -40,7 +41,6 @@ def fetch_preprocess(ticker):
     df_imputed = pd.concat(
         [df_numeric_imputed, df[non_numeric_cols].reset_index(drop=True)], axis=1
     )
-
     X = df_imputed.drop(
         columns=["Date", "Close"]
     )  # Assuming 'Close' is the target variable
@@ -71,21 +71,35 @@ class SimpleNN(nn.Module):
         return x
 
 
-def train_model(X_train, y_train, input_size, epochs=50):
+def train_model(X_train, y_train, input_size, epochs=50, batch_size=2):
     model = SimpleNN(input_size)
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=0.001)
 
-    X_train_tensor = torch.tensor(X_train, dtype=torch.float32)
-    y_train_tensor = torch.tensor(y_train.values, dtype=torch.float32).view(-1, 1)
+    X_train = np.ascontiguousarray(X_train)
+    y_train = np.ascontiguousarray(y_train.values)
+
+    assert not np.isnan(X_train).any(), "X_train contains NaN values"
+    assert not np.isinf(X_train).any(), "X_train contains infinite values"
+    assert not np.isnan(y_train).any(), "y_train contains NaN values"
+    assert not np.isinf(y_train).any(), "y_train contains infinite values"
+
+    X_train_tensor = torch.from_numpy(X_train).float()
+    y_train_tensor = torch.from_numpy(y_train).float().view(-1, 1)
+
+    dataset = torch.utils.data.TensorDataset(X_train_tensor, y_train_tensor)
+    dataloader = torch.utils.data.DataLoader(
+        dataset, batch_size=batch_size, shuffle=True
+    )
 
     for epoch in range(epochs):
         model.train()
-        optimizer.zero_grad()
-        outputs = model(X_train_tensor)
-        loss = criterion(outputs, y_train_tensor)
-        loss.backward()
-        optimizer.step()
+        for i, (inputs, targets) in enumerate(dataloader):
+            optimizer.zero_grad()
+            outputs = model(inputs)
+            loss = criterion(outputs, targets)
+            loss.backward()
+            optimizer.step()
 
         if (epoch + 1) % 10 == 0:
             print(f"Epoch [{epoch + 1}/{epochs}], Loss: {loss.item():.4f}")
@@ -93,11 +107,22 @@ def train_model(X_train, y_train, input_size, epochs=50):
     return model
 
 
-def predict(model, X_test):
+def predict(model, X_test, batch_size=32):
     model.eval()
-    X_test_tensor = torch.tensor(X_test, dtype=torch.float32)
-    predictions = model(X_test_tensor).detach().numpy()
-    return predictions.flatten()
+    X_test_tensor = torch.from_numpy(np.ascontiguousarray(X_test)).float()
+    dataset = torch.utils.data.TensorDataset(X_test_tensor)
+    dataloader = torch.utils.data.DataLoader(
+        dataset, batch_size=batch_size, shuffle=False
+    )
+
+    predictions = []
+    with torch.no_grad():
+        for inputs in dataloader:
+            outputs = model(inputs[0])
+            predictions.append(outputs.numpy())
+
+    predictions = np.concatenate(predictions).flatten()
+    return predictions
 
 
 def plot_predictions(y_test, predictions):
@@ -121,7 +146,6 @@ def evaluate_predictions(y_test: pd.Series, predictions: np.ndarray):
             mse = np.mean((y_true_period - y_pred_period) ** 2)
             print(f"Mean Squared Error over last {period} days: {mse:.4f}")
 
-    # Additional code to show a table of metrics for the last 7 days
     if len(y_test) >= 7:
         y_true_7 = y_test[-7:]
         y_pred_7 = predictions[-7:]
