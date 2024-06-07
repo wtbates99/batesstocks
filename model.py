@@ -141,7 +141,7 @@ def plot_predictions(y_test, predictions):
     plt.show()
 
 
-def evaluate_predictions(y_test: pd.Series, predictions: np.ndarray):
+def evaluate_predictions(y_test: pd.Series, predictions: np.ndarray, error_period: int):
     y_test = y_test.reset_index(drop=True)
     periods = [7, 30, 90]
     for period in periods:
@@ -151,32 +151,32 @@ def evaluate_predictions(y_test: pd.Series, predictions: np.ndarray):
             mse = np.mean((y_true_period - y_pred_period) ** 2)
             print(f"Mean Squared Error over last {period} days: {mse:.4f}")
 
-    if len(y_test) >= 7:
-        y_true_7 = y_test[-7:]
-        y_pred_7 = predictions[-7:]
-        mse_7 = np.mean((y_true_7 - y_pred_7) ** 2)
-        mae_7 = np.mean(np.abs(y_true_7 - y_pred_7))
-        mape_7 = np.mean(np.abs((y_true_7 - y_pred_7) / y_true_7)) * 100
+    if len(y_test) >= error_period:
+        y_true = y_test[-error_period:]
+        y_pred = predictions[-error_period:]
+        mse = np.mean((y_true - y_pred) ** 2)
+        mae = np.mean(np.abs(y_true - y_pred))
+        mape = np.mean(np.abs((y_true - y_pred) / y_true)) * 100
 
         metrics = {
-            "Date": y_true_7.index,
-            "Actual": y_true_7.values,
-            "Predicted": y_pred_7,
-            "Difference": y_true_7.values - y_pred_7,
-            "Squared Error": (y_true_7.values - y_pred_7) ** 2,
-            "Absolute Error": np.abs(y_true_7.values - y_pred_7),
+            "Date": y_true.index,
+            "Actual": y_true.values,
+            "Predicted": y_pred,
+            "Difference": y_true.values - y_pred,
+            "Squared Error": (y_true.values - y_pred) ** 2,
+            "Absolute Error": np.abs(y_true.values - y_pred),
             "Absolute Percentage Error": np.abs(
-                (y_true_7.values - y_pred_7) / y_true_7.values
+                (y_true.values - y_pred) / y_true.values
             )
             * 100,
         }
         metrics_df = pd.DataFrame(metrics)
         print(metrics_df)
 
-        print("\nMetrics for the last 7 days:")
-        print(f"Mean Squared Error: {mse_7:.4f}")
-        print(f"Mean Absolute Error: {mae_7:.4f}")
-        print(f"Mean Absolute Percentage Error: {mape_7:.2f}%")
+        print(f"\nMetrics for the last {error_period} days:")
+        print(f"Mean Squared Error: {mse:.4f}")
+        print(f"Mean Absolute Error: {mae:.4f}")
+        print(f"Mean Absolute Percentage Error: {mape:.2f}%")
 
 
 if __name__ == "__main__":
@@ -184,5 +184,5 @@ if __name__ == "__main__":
     X_train, X_test, y_train, y_test, scaler, label_encoders = fetch_preprocess(ticker)
     model = train_model(X_train, y_train, input_size=X_train.shape[1])
     predictions = predict(model, X_test)
-    evaluate_predictions(y_test, predictions)
+    evaluate_predictions(y_test, predictions, 30)
     plot_predictions(y_test, predictions)
