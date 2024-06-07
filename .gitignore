@@ -7,6 +7,9 @@ __pycache__/
 # C extensions
 *.so
 
+.DS_Store
+best_model.pth
+
 # Distribution / packaging
 .Python
 build/
