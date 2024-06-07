@@ -144,6 +144,7 @@ def plot_predictions(y_test, predictions):
 def evaluate_predictions(y_test: pd.Series, predictions: np.ndarray, error_period: int):
     y_test = y_test.reset_index(drop=True)
     periods = [7, 30, 90]
+
     for period in periods:
         if len(y_test) >= period:
             y_true_period = y_test[-period:]
@@ -158,6 +159,9 @@ def evaluate_predictions(y_test: pd.Series, predictions: np.ndarray, error_perio
         mae = np.mean(np.abs(y_true - y_pred))
         mape = np.mean(np.abs((y_true - y_pred) / y_true)) * 100
 
+        pct_change_true = y_true.pct_change().fillna(0) * 100
+        pct_change_pred = pd.Series(y_pred).pct_change().fillna(0) * 100
+
         metrics = {
             "Date": y_true.index,
             "Actual": y_true.values,
@@ -169,7 +173,10 @@ def evaluate_predictions(y_test: pd.Series, predictions: np.ndarray, error_perio
                 (y_true.values - y_pred) / y_true.values
             )
             * 100,
+            "Pct Change Actual": pct_change_true.values,
+            "Pct Change Predicted": pct_change_pred.values,
         }
+
         metrics_df = pd.DataFrame(metrics)
         print(metrics_df)
 
