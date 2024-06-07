@@ -61,26 +61,47 @@ def fetch_preprocess(ticker):
     return X_train, X_test, y_train, y_test, scaler, label_encoders
 
 
-class SimpleNN(nn.Module):
+class EnhancedNN(nn.Module):
     def __init__(self, input_size):
-        super(SimpleNN, self).__init__()
-        self.fc1 = nn.Linear(input_size, 128)
-        self.fc2 = nn.Linear(128, 64)
-        self.fc3 = nn.Linear(64, 1)
+        super(EnhancedNN, self).__init__()
+        self.fc1 = nn.Linear(input_size, 512)
+        self.bn1 = nn.BatchNorm1d(512)
+        self.dropout1 = nn.Dropout(0.4)
+        self.fc2 = nn.Linear(512, 256)
+        self.bn2 = nn.BatchNorm1d(256)
+        self.dropout2 = nn.Dropout(0.4)
+        self.fc3 = nn.Linear(256, 128)
+        self.bn3 = nn.BatchNorm1d(128)
+        self.dropout3 = nn.Dropout(0.4)
+        self.fc4 = nn.Linear(128, 64)
+        self.bn4 = nn.BatchNorm1d(64)
+        self.dropout4 = nn.Dropout(0.4)
+        self.fc5 = nn.Linear(64, 1)
         self.relu = nn.ReLU()
 
     def forward(self, x):
-        x = self.relu(self.fc1(x))
-        x = self.relu(self.fc2(x))
-        x = self.fc3(x)
+        x = self.relu(self.bn1(self.fc1(x)))
+        x = self.dropout1(x)
+        x = self.relu(self.bn2(self.fc2(x)))
+        x = self.dropout2(x)
+        x = self.relu(self.bn3(self.fc3(x)))
+        x = self.dropout3(x)
+        x = self.relu(self.bn4(self.fc4(x)))
+        x = self.dropout4(x)
+        x = self.fc5(x)
         return x
 
 
-def train_model(X_train, y_train, input_size, epochs=50, batch_size=2):
-    model = SimpleNN(input_size)
+def train_model(X_train, y_train, input_size, epochs=200, batch_size=64, lr=0.001):
+    model = EnhancedNN(input_size)
     criterion = nn.MSELoss()
-    optimizer = optim.Adam(model.parameters(), lr=0.001)
+    optimizer = optim.Adam(model.parameters(), lr=lr)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, "min", patience=10, factor=0.5
+    )
 
+    scaler = StandardScaler()
+    X_train = scaler.fit_transform(X_train)
     X_train = np.ascontiguousarray(X_train)
     y_train = np.ascontiguousarray(y_train.values)
 
@@ -97,18 +118,38 @@ def train_model(X_train, y_train, input_size, epochs=50, batch_size=2):
         dataset, batch_size=batch_size, shuffle=True
     )
 
+    best_loss = float("inf")
+    patience = 20
+    counter = 0
+
     for epoch in range(epochs):
         model.train()
-        for i, (inputs, targets) in enumerate(dataloader):
+        running_loss = 0.0
+        for inputs, targets in dataloader:
             optimizer.zero_grad()
             outputs = model(inputs)
             loss = criterion(outputs, targets)
             loss.backward()
             optimizer.step()
+            running_loss += loss.item()
+
+        epoch_loss = running_loss / len(dataloader)
+        scheduler.step(epoch_loss)
 
         if (epoch + 1) % 10 == 0:
-            print(f"Epoch [{epoch + 1}/{epochs}], Loss: {loss.item():.4f}")
+            print(f"Epoch [{epoch + 1}/{epochs}], Loss: {epoch_loss:.4f}")
 
+        if epoch_loss < best_loss:
+            best_loss = epoch_loss
+            counter = 0
+            torch.save(model.state_dict(), "best_model.pth")
+        else:
+            counter += 1
+            if counter >= patience:
+                print("Early stopping due to no improvement")
+                break
+
+    model.load_state_dict(torch.load("best_model.pth"))
     return model
 
 
