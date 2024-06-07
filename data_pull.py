@@ -40,7 +40,7 @@ def get_stock_information_in_batches(tickers, batch_size):
     stock_information = []
     for i in range(0, len(tickers), batch_size):
         batch = tickers[i : i + batch_size]
-        for ticker in tqdm(batch, desc="Fetching stock information..."):
+        for ticker in tqdm(batch, desc="Fetching categorical stock information..."):
             try:
                 stock_info = yf.Ticker(ticker).info
                 stock_data = {
@@ -217,7 +217,6 @@ def main():
     print("Storing stock data to SQLite database...")
     store_stock_data_in_sqlite(all_data, db_path)
 
-    print("Fetching comprehensive stock information...")
     stock_information = get_stock_information_in_batches(tickers, batch_size)
 
     print("Storing comprehensive stock information to SQLite database...")
