@@ -33,6 +33,17 @@ class SimpleNN(nn.Module):
         return x
 
 
+def fetch_unique_tickers():
+    db_path = os.path.expanduser(
+        "~/personal_git/stock_price_predictor/db/stock_data.db"
+    )
+    conn = sqlite3.connect(db_path)
+    query = "SELECT DISTINCT Ticker FROM stock_data_with_indicators"
+    df = pd.read_sql_query(query, conn)
+    conn.close()
+    return df
+
+
 def fetch_and_preprocess(ticker: str):
     db_path = os.path.expanduser(
         "~/personal_git/stock_price_predictor/db/stock_data.db"
@@ -79,9 +90,8 @@ def create_table():
     )
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
-    cursor.execute("DROP TABLE IF EXISTS stock_predictions")
     cursor.execute("""
-        CREATE TABLE stock_predictions (
+        CREATE TABLE IF NOT EXISTS stock_predictions (
             Ticker TEXT,
             Date TEXT,
             Type TEXT,
@@ -93,19 +103,36 @@ def create_table():
     conn.close()
 
 
+def delete_predictions(ticker: str):
+    db_path = os.path.expanduser(
+        "~/personal_git/stock_price_predictor/db/stock_data.db"
+    )
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+
+    # Delete existing data for the given ticker
+    delete_query = "DELETE FROM stock_predictions WHERE Ticker = ?"
+    cursor.execute(delete_query, (ticker,))
+
+    conn.commit()
+    conn.close()
+
+
 def save_predictions(ticker: str, df: pd.DataFrame, prediction_type: str):
     db_path = os.path.expanduser(
         "~/personal_git/stock_price_predictor/db/stock_data.db"
     )
     conn = sqlite3.connect(db_path)
+
+    # Add new data
     df["Ticker"] = ticker
     df["Type"] = prediction_type
     df.to_sql("stock_predictions", conn, if_exists="append", index=False)
+
     conn.close()
 
 
 def train_and_predict(ticker: str):
-    create_table()
     X_train, X_test, y_train, y_test, scaler, df_imputed, feature_names = (
         fetch_and_preprocess(ticker)
     )
@@ -194,5 +221,11 @@ def predict_next_5_days(
 
 
 if __name__ == "__main__":
-    ticker = input("Enter the Ticker symbol: ")
-    predictions, future_predictions = train_and_predict(ticker)
+    all_tickers = fetch_unique_tickers()
+    print(all_tickers)
+    create_table()
+    for x in all_tickers["Ticker"]:
+        delete_predictions(x)
+        print(f"{x} started")
+        predictions, future_predictions = train_and_predict(x)
+        print(f"{x} completed")
