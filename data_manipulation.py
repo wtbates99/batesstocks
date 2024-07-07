@@ -6,39 +6,62 @@ import ta
 conn = sqlite3.connect("_stock_data.db")
 
 t_query = """
-SELECT Date, Ticker,
-       SUM(Open) as Open,
-       SUM(Close) as Close,
-       SUM(High) as High,
-       SUM(Low) as Low,
-       SUM(Volume) as Volume
-FROM historicals_with_sector
-GROUP BY Ticker, Date
-ORDER BY Ticker, Date
+SELECT
+    sd.Date,
+    sd.Ticker,
+    SUM(sd.Open) as Open,
+    SUM(sd.Close) as Close,
+    SUM(sd.High) as High,
+    SUM(sd.Low) as Low,
+    SUM(sd.Volume) as Volume
+FROM
+    stock_data sd
+GROUP BY
+    sd.Ticker, sd.Date
+ORDER BY
+    sd.Ticker, sd.Date
 """
 
 s_query = """
-SELECT Date, Sector,
-       SUM(Open) as Open,
-       SUM(Close) as Close,
-       SUM(High) as High,
-       SUM(Low) as Low,
-       SUM(Volume) as Volume
-FROM historicals_with_sector
-GROUP BY Sector, Date
-ORDER BY Sector, Date
+SELECT
+    sd.Date,
+    si.Sector,
+    SUM(sd.Open) as Open,
+    SUM(sd.Close) as Close,
+    SUM(sd.High) as High,
+    SUM(sd.Low) as Low,
+    SUM(sd.Volume) as Volume
+FROM
+    stock_data sd
+JOIN
+    stock_information si
+ON
+    sd.Ticker = si.Ticker
+GROUP BY
+    si.Sector, sd.Date
+ORDER BY
+    si.Sector, sd.Date
 """
 
 ss_query = """
-SELECT Subsector, Date,
-       SUM(Open) as Open,
-       SUM(Close) as Close,
-       SUM(High) as High,
-       SUM(Low) as Low,
-       SUM(Volume) as Volume
-FROM historicals_with_sector
-GROUP BY Subsector, Date
-ORDER BY Subsector, Date
+SELECT
+    si.Subsector,
+    sd.Date,
+    SUM(sd.Open) as Open,
+    SUM(sd.Close) as Close,
+    SUM(sd.High) as High,
+    SUM(sd.Low) as Low,
+    SUM(sd.Volume) as Volume
+FROM
+    stock_data sd
+JOIN
+    stock_information si
+ON
+    sd.Ticker = si.Ticker
+GROUP BY
+    si.Subsector, sd.Date
+ORDER BY
+    si.Subsector, sd.Date
 """
 
 
@@ -92,7 +115,7 @@ def calculate_indicators(df: pd.DataFrame, prefix: str) -> pd.DataFrame:
     indicators_df = pd.DataFrame(indicators)
     indicators_df = indicators_df.replace([np.inf, -np.inf], np.nan).ffill()
 
-    return pd.concat([prefix, indicators_df], axis=1)
+    return indicators_df
 
 
 t_df = pd.read_sql_query(t_query, conn)
