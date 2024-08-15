@@ -57,36 +57,11 @@ def create_tables(conn):
         print(f"An error occurred while creating tables: {e}")
 
 
-def create_views(conn):
-    """Create necessary views in the SQLite database."""
-    try:
-        with conn:
-            conn.execute("""
-            CREATE VIEW IF NOT EXISTS historicals_with_sector AS
-            SELECT
-                sd.Date,
-                sd.Ticker,
-                sd.Open,
-                sd.High,
-                sd.Low,
-                sd.Close,
-                sd.Volume,
-                si.Sector,
-                si.Subsector
-            FROM stock_data sd
-            JOIN stock_information si ON sd.Ticker = si.Ticker
-            """)
-        print("View created successfully.")
-    except sqlite3.Error as e:
-        print(f"An error occurred while creating the view: {e}")
-
-
 def main():
     """Main function to set up the SQLite database with required tables and views."""
     try:
         with sqlite3.connect("_stock_data.db") as conn:
             create_tables(conn)
-            create_views(conn)
     except sqlite3.Error as e:
         print(f"An error occurred while connecting to the database: {e}")
 
