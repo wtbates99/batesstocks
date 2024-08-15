@@ -3,66 +3,13 @@ import pandas as pd
 import numpy as np
 import ta
 
-conn = sqlite3.connect("_stock_data.db")
 
-t_query = """
-SELECT
-    sd.Date,
-    sd.Ticker,
-    SUM(sd.Open) as Open,
-    SUM(sd.Close) as Close,
-    SUM(sd.High) as High,
-    SUM(sd.Low) as Low,
-    SUM(sd.Volume) as Volume
-FROM
-    stock_data sd
-GROUP BY
-    sd.Ticker, sd.Date
-ORDER BY
-    sd.Ticker, sd.Date
-"""
+def create_connection(db_name: str) -> sqlite3.Connection:
+    return sqlite3.connect(db_name)
 
-s_query = """
-SELECT
-    sd.Date,
-    si.Sector,
-    SUM(sd.Open) as Open,
-    SUM(sd.Close) as Close,
-    SUM(sd.High) as High,
-    SUM(sd.Low) as Low,
-    SUM(sd.Volume) as Volume
-FROM
-    stock_data sd
-JOIN
-    stock_information si
-ON
-    sd.Ticker = si.Ticker
-GROUP BY
-    si.Sector, sd.Date
-ORDER BY
-    si.Sector, sd.Date
-"""
 
-ss_query = """
-SELECT
-    si.Subsector,
-    sd.Date,
-    SUM(sd.Open) as Open,
-    SUM(sd.Close) as Close,
-    SUM(sd.High) as High,
-    SUM(sd.Low) as Low,
-    SUM(sd.Volume) as Volume
-FROM
-    stock_data sd
-JOIN
-    stock_information si
-ON
-    sd.Ticker = si.Ticker
-GROUP BY
-    si.Subsector, sd.Date
-ORDER BY
-    si.Subsector, sd.Date
-"""
+def execute_query(conn: sqlite3.Connection, query: str) -> pd.DataFrame:
+    return pd.read_sql_query(query, conn)
 
 
 def calculate_indicators(df: pd.DataFrame, prefix: str) -> pd.DataFrame:
@@ -72,7 +19,6 @@ def calculate_indicators(df: pd.DataFrame, prefix: str) -> pd.DataFrame:
     volume = df["Volume"]
 
     indicators = {
-        f"{prefix}": prefix,
         f"{prefix}_SMA_10": ta.trend.sma_indicator(close, window=10),
         f"{prefix}_EMA_10": ta.trend.ema_indicator(close, window=10),
         f"{prefix}_RSI": ta.momentum.rsi(close, window=14),
@@ -113,31 +59,212 @@ def calculate_indicators(df: pd.DataFrame, prefix: str) -> pd.DataFrame:
     }
 
     indicators_df = pd.DataFrame(indicators)
-    indicators_df = indicators_df.replace([np.inf, -np.inf], np.nan).ffill()
-
-    return indicators_df
+    return indicators_df.replace([np.inf, -np.inf], np.nan).ffill()
 
 
-t_df = pd.read_sql_query(t_query, conn)
-s_df = pd.read_sql_query(s_query, conn)
-ss_df = pd.read_sql_query(ss_query, conn)
+def process_data(conn: sqlite3.Connection, query: str, table_name: str, prefix: str):
+    df = execute_query(conn, query)
+    df["Date"] = pd.to_datetime(df["Date"])
+    indicators_df = calculate_indicators(df, prefix)
+    result_df = pd.concat([df, indicators_df], axis=1)
+    result_df.to_sql(table_name, conn, if_exists="replace", index=False)
+    print(f"Processed and stored data in {table_name}")
 
-# Ensure the DataFrame is loaded to the SQLite database
-df.to_sql("stock_data_with_indicators", conn, if_exists="replace", index=False)
 
-t_df["Date"] = pd.to_datetime(t_df["Date"])
-s_df["Date"] = pd.to_datetime(s_df["Date"])
-ss_df["Date"] = pd.to_datetime(ss_df["Date"])
+def create_combined_view(conn: sqlite3.Connection):
+    view_query = """
+    CREATE VIEW IF NOT EXISTS combined_stock_data AS
+    SELECT
+        t.Date,
+        t.Ticker,
+        t.Open as Ticker_Open,
+        t.Close as Ticker_Close,
+        t.High as Ticker_High,
+        t.Low as Ticker_Low,
+        t.Volume as Ticker_Volume,
+        t.Ticker_SMA_10,
+        t.Ticker_EMA_10,
+        t.Ticker_RSI,
+        t.Ticker_Stochastic_K,
+        t.Ticker_Stochastic_D,
+        t.Ticker_MACD,
+        t.Ticker_MACD_Signal,
+        t.Ticker_MACD_Diff,
+        t.Ticker_TSI,
+        t.Ticker_UO,
+        t.Ticker_ROC,
+        t.Ticker_Williams_R,
+        t.Ticker_Bollinger_High,
+        t.Ticker_Bollinger_Low,
+        t.Ticker_Bollinger_Mid,
+        t.Ticker_Bollinger_PBand,
+        t.Ticker_Bollinger_WBand,
+        t.Ticker_On_Balance_Volume,
+        t.Ticker_Chaikin_MF,
+        t.Ticker_Force_Index,
+        t.Ticker_MFI,
+        s.Open as Sector_Open,
+        s.Close as Sector_Close,
+        s.High as Sector_High,
+        s.Low as Sector_Low,
+        s.Volume as Sector_Volume,
+        s.Sector_SMA_10,
+        s.Sector_EMA_10,
+        s.Sector_RSI,
+        s.Sector_Stochastic_K,
+        s.Sector_Stochastic_D,
+        s.Sector_MACD,
+        s.Sector_MACD_Signal,
+        s.Sector_MACD_Diff,
+        s.Sector_TSI,
+        s.Sector_UO,
+        s.Sector_ROC,
+        s.Sector_Williams_R,
+        s.Sector_Bollinger_High,
+        s.Sector_Bollinger_Low,
+        s.Sector_Bollinger_Mid,
+        s.Sector_Bollinger_PBand,
+        s.Sector_Bollinger_WBand,
+        s.Sector_On_Balance_Volume,
+        s.Sector_Chaikin_MF,
+        s.Sector_Force_Index,
+        s.Sector_MFI,
+        ss.Open as Subsector_Open,
+        ss.Close as Subsector_Close,
+        ss.High as Subsector_High,
+        ss.Low as Subsector_Low,
+        ss.Volume as Subsector_Volume,
+        ss.Subsector_SMA_10,
+        ss.Subsector_EMA_10,
+        ss.Subsector_RSI,
+        ss.Subsector_Stochastic_K,
+        ss.Subsector_Stochastic_D,
+        ss.Subsector_MACD,
+        ss.Subsector_MACD_Signal,
+        ss.Subsector_MACD_Diff,
+        ss.Subsector_TSI,
+        ss.Subsector_UO,
+        ss.Subsector_ROC,
+        ss.Subsector_Williams_R,
+        ss.Subsector_Bollinger_High,
+        ss.Subsector_Bollinger_Low,
+        ss.Subsector_Bollinger_Mid,
+        ss.Subsector_Bollinger_PBand,
+        ss.Subsector_Bollinger_WBand,
+        ss.Subsector_On_Balance_Volume,
+        ss.Subsector_Chaikin_MF,
+        ss.Subsector_Force_Index,
+        ss.Subsector_MFI,
+        si.Sector,
+        si.Subsector,
+        si.FullName,
+        si.MarketCap,
+        si.Country,
+        si.Website,
+        si.Description,
+        si.CEO,
+        si.Employees,
+        si.City,
+        si.State,
+        si.Zip,
+        si.Address,
+        si.Phone,
+        si.Exchange,
+        si.Currency,
+        si.QuoteType,
+        si.ShortName,
+        si.Price,
+        si."52WeekHigh",
+        si."52WeekLow",
+        si.DividendRate,
+        si.DividendYield,
+        si.PayoutRatio,
+        si.Beta,
+        si.PE,
+        si.EPS,
+        si.Revenue,
+        si.GrossProfit,
+        si.FreeCashFlow
+    FROM
+        ticker_data t
+    JOIN
+        stock_information si ON t.Ticker = si.Ticker
+    JOIN
+        sector_data s ON t.Date = s.Date AND si.Sector = s.Sector
+    JOIN
+        subsector_data ss ON t.Date = ss.Date AND si.Subsector = ss.Subsector
+        """
+    conn.execute(view_query)
+    conn.commit()
+    print("Created combined view: combined_stock_data")
 
-t_df = calculate_indicators(t_df, "Ticker")
-print("t")
-s_df = calculate_indicators(s_df, "Sector")
-print("s")
-ss_df = calculate_indicators(ss_df, "Subsector")
-print("ss")
 
-t_df.to_sql("stock_data_with_indicators", conn, if_exists="replace", index=False)
-s_df.to_sql("stock_data_with_indicators", conn, if_exists="replace", index=False)
-ss_df.to_sql("stock_data_with_indicators", conn, if_exists="replace", index=False)
+def main():
+    conn = create_connection("_stock_data.db")
 
-conn.close()
+    ticker_query = """
+    SELECT
+        sd.Date,
+        sd.Ticker,
+        SUM(sd.Open) as Open,
+        SUM(sd.Close) as Close,
+        SUM(sd.High) as High,
+        SUM(sd.Low) as Low,
+        SUM(sd.Volume) as Volume
+    FROM
+        stock_data sd
+    GROUP BY
+        sd.Ticker, sd.Date
+    ORDER BY
+        sd.Ticker, sd.Date
+    """
+
+    sector_query = """
+    SELECT
+        sd.Date,
+        si.Sector,
+        SUM(sd.Open) as Open,
+        SUM(sd.Close) as Close,
+        SUM(sd.High) as High,
+        SUM(sd.Low) as Low,
+        SUM(sd.Volume) as Volume
+    FROM
+        stock_data sd
+    JOIN
+        stock_information si ON sd.Ticker = si.Ticker
+    GROUP BY
+        si.Sector, sd.Date
+    ORDER BY
+        si.Sector, sd.Date
+    """
+
+    subsector_query = """
+    SELECT
+        sd.Date,
+        si.Subsector,
+        SUM(sd.Open) as Open,
+        SUM(sd.Close) as Close,
+        SUM(sd.High) as High,
+        SUM(sd.Low) as Low,
+        SUM(sd.Volume) as Volume
+    FROM
+        stock_data sd
+    JOIN
+        stock_information si ON sd.Ticker = si.Ticker
+    GROUP BY
+        si.Subsector, sd.Date
+    ORDER BY
+        si.Subsector, sd.Date
+    """
+
+    process_data(conn, ticker_query, "ticker_data", "Ticker")
+    process_data(conn, sector_query, "sector_data", "Sector")
+    process_data(conn, subsector_query, "subsector_data", "Subsector")
+
+    create_combined_view(conn)
+
+    conn.close()
+
+
+if __name__ == "__main__":
+    main()
