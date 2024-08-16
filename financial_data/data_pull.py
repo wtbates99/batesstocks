@@ -64,9 +64,8 @@ def fetch_write_financial_data(conn):
                     "FreeCashFlow": stock_info.get("freeCashflow", "N/A"),
                 }
                 stock_information.append(stock_data)
-        quant_data = pd.DataFrame(stock_information)
-        quant_data.to_sql("stock_data", conn, if_exists="replace", index=False)
-
-    quant_data = quant_data(tickers)
+        qual_data = pd.DataFrame(stock_information)
+        qual_data.to_sql("stock_information", conn, if_exists="replace", index=False)
 
     qual_data = qual_data(tickers)
+    quant_data = quant_data(tickers)
