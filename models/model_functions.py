@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 
 
+# [TODO] make it so that it can encode text as well
 def prepare_single_stock(
     ticker: str,
     features: List[str],
@@ -43,7 +44,7 @@ def prepare_single_stock(
     if conn is None:
         raise ValueError("Database connection must be provided")
 
-    query = f"SELECT * FROM combined_stock_data WHERE Ticker = '{ticker}' ORDER BY Date"
+    query = f"SELECT * FROM combined_stock_data WHERE Ticker = '{ticker}' AND Date > '2000-01-01 00:00:00' ORDER BY Date"
     df = pd.read_sql_query(query, conn)
     df["Date"] = pd.to_datetime(df["Date"])
     df = df.set_index("Date")
