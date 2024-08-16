@@ -249,9 +249,3 @@ def process_stock_data(conn: sqlite3.Connection):
     process_data(subsector_query, "subsector_data", "Subsector")
 
     create_combined_view()
-
-
-if __name__ == "__main__":
-    conn = sqlite3.connect("_stock_data.db")
-    process_stock_data(conn)
-    conn.close()
