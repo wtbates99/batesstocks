@@ -56,7 +56,7 @@ y = y.loc[X.index]
 X_train_scaled, X_test_scaled, y_train, y_test, scaler = time_series_split(X, y)
 
 model = XGBRegressor(
-    n_estimators=500,
+    n_estimators=100,
     learning_rate=0.01,
     max_depth=6,
     min_child_weight=1,
