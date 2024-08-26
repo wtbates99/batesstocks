@@ -16,6 +16,9 @@ from typing import List, Optional
 from databases import Database
 import datetime
 
+from fastapi.middleware.cors import CORSMiddleware
+
+
 # Database setup
 SQLALCHEMY_DATABASE_URL = "sqlite:///./stock_data.db"
 engine = create_engine(SQLALCHEMY_DATABASE_URL)
@@ -154,6 +157,14 @@ class CompanyInfo(BaseModel):
 
 
 app = FastAPI()
+# Add this near the top of your FastAPI app file, after creating the FastAPI app instance
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],  # Allow requests from React app
+    allow_credentials=True,
+    allow_methods=["*"],  # Allow all methods
+    allow_headers=["*"],  # Allow all headers
+)
 
 
 # Startup and shutdown events
