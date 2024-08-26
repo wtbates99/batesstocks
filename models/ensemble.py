@@ -16,7 +16,7 @@ import optuna
 
 print("Starting stock prediction script...")
 
-conn = sqlite3.connect("../_stock_data.db")
+conn = sqlite3.connect("../stock_data.db")
 print("Connected to the database.")
 
 
@@ -30,7 +30,7 @@ def prepare_data(ticker, features, conn):
     """
     df = pd.read_sql_query(query, conn)
     df["Date"] = pd.to_datetime(df["Date"])
-    df.set_index("Date", inplace=True)
+    df = df.set_index("Date")
     print(f"Data prepared. Shape: {df.shape}")
     return df
 

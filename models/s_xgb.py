@@ -9,7 +9,7 @@ from model_functions import (
     plot_feature_importance,
 )
 
-conn = sqlite3.connect("../_stock_data.db")
+conn = sqlite3.connect("../stock_data.db")
 features = [
     "Ticker_Open",
     "Ticker_High",

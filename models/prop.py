@@ -8,7 +8,7 @@ from model_functions import prepare_single_stock, evaluate_model
 import matplotlib.pyplot as plt
 
 # Connect to the database
-conn = sqlite3.connect("../_stock_data.db")
+conn = sqlite3.connect("../stock_data.db")
 
 # Define features
 features = [

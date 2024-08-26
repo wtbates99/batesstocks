@@ -39,7 +39,7 @@ def run_comparison_test(conn, query1, query2, test_name):
 
 
 def validate_view():
-    conn = sqlite3.connect("_stock_data.db")
+    conn = sqlite3.connect("stock_data.db")
 
     if not check_view_exists(conn, "combined_stock_data"):
         print("Error: The view 'combined_stock_data' does not exist in the database.")
