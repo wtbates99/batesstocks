@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   ResponsiveContainer,
   LineChart,
@@ -9,75 +9,77 @@ import {
   Tooltip,
   CartesianGrid,
 } from 'recharts';
-import DatePicker from 'react-datepicker';
-import 'react-datepicker/dist/react-datepicker.css';
-import '../styles.css'; // Import your CSS file
+import '../styles.css';
 
-const StockChart = ({ ticker }) => {
+const StockChart = ({ initialTicker, startDate, endDate, metrics, metricsList }) => {
+  const [ticker, setTicker] = useState(initialTicker);
   const [data, setData] = useState([]);
-  const [startDate, setStartDate] = useState(null);
-  const [endDate, setEndDate] = useState(null);
+  const chartRef = useRef(null);
+  const [isFullScreen, setIsFullScreen] = useState(false);
 
   useEffect(() => {
     if (ticker) {
-      const start = startDate ? startDate.toISOString().split('T')[0] : '';
-      const end = endDate ? endDate.toISOString().split('T')[0] : '';
+      const start = startDate.toISOString().split('T')[0];
+      const end = endDate.toISOString().split('T')[0];
+      const metricsParam = metrics.join(',');
 
-      fetch(`http://localhost:8000/stock/${ticker}?start_date=${start}&end_date=${end}`)
+      fetch(`http://localhost:8000/stock/${ticker}?start_date=${start}&end_date=${end}&metrics=${metricsParam}`)
         .then((response) => response.json())
         .then((data) => {
           const sortedData = data.sort((a, b) => new Date(a.Date) - new Date(b.Date));
           setData(sortedData);
         });
     }
-  }, [ticker, startDate, endDate]);
+  }, [ticker, startDate, endDate, metrics]);
 
-  const filteredData = data.filter((d) => {
-    const date = new Date(d.Date);
-    return (!startDate || date >= startDate) && (!endDate || date <= endDate);
-  });
+  const handleTickerChange = (e) => {
+    setTicker(e.target.value.toUpperCase());
+  };
 
-  if (filteredData.length === 0) return null;
+  const toggleFullScreen = () => {
+    if (!isFullScreen) {
+      chartRef.current.requestFullscreen();
+    } else {
+      document.exitFullscreen();
+    }
+    setIsFullScreen(!isFullScreen);
+  };
 
   return (
-    <div className="chart-container">
-      <div className="date-picker-container">
-        <div>
-          <label className="date-label">Start Date:</label>
-          <DatePicker
-            selected={startDate}
-            onChange={(date) => setStartDate(date)}
-            selectsStart
-            startDate={startDate}
-            endDate={endDate}
-            isClearable
-            placeholderText="Select start date"
-            className="date-picker"
-          />
-        </div>
-        <div>
-          <label className="date-label">End Date:</label>
-          <DatePicker
-            selected={endDate}
-            onChange={(date) => setEndDate(date)}
-            selectsEnd
-            startDate={startDate}
-            endDate={endDate}
-            minDate={startDate}
-            isClearable
-            placeholderText="Select end date"
-            className="date-picker"
-          />
-        </div>
+    <div className={`chart-container ${isFullScreen ? 'full-screen' : ''}`} ref={chartRef}>
+      <div className="ticker-field">
+        <input
+          type="text"
+          value={ticker}
+          onChange={handleTickerChange}
+          className="ticker-input-field"
+        />
+        <button onClick={toggleFullScreen} className="full-screen-button">
+          {isFullScreen ? 'Exit Full Screen' : 'Full Screen'}
+        </button>
       </div>
-      <ResponsiveContainer width="100%" height={400}>
-        <LineChart data={filteredData}>
+      <ResponsiveContainer width="100%" height={isFullScreen ? '90%' : 250}>
+        <LineChart data={data}>
           <XAxis dataKey="Date" stroke="#ffffff" />
-          <YAxis stroke="#ffffff" />
+          <YAxis stroke="#ffffff" tickFormatter={(tick) => tick.toFixed(2)} />
           <CartesianGrid strokeDasharray="3 3" stroke="#444444" />
-          <Tooltip contentStyle={{ backgroundColor: '#333333', borderColor: '#777777' }} />
-          <Line type="monotone" dataKey="Ticker_Close" stroke="#4f46e5" strokeWidth={2} dot={false} />
-          {/* Add more lines here for other metrics */}
+          <Tooltip
+            formatter={(value) => value.toFixed(2)}
+            contentStyle={{ backgroundColor: '#333333', borderColor: '#777777', color: '#ffffff' }}
+          />
+          {metrics.map((metric) => {
+            const metricColor = metricsList.find(m => m.name === metric)?.color || '#ffffff';
+            return (
+              <Line
+                key={metric}
+                type="monotone"
+                dataKey={metric}
+                stroke={metricColor}
+                strokeWidth={2}
+                dot={false}
+              />
+            );
+          })}
         </LineChart>
       </ResponsiveContainer>
     </div>
