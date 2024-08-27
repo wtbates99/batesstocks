@@ -1,0 +1,175 @@
+
+/* Background and layout */
+.bg-dark {
+  background-color: #1a1a1a;
+}
+
+.min-h-screen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.layout-container {
+  display: flex;
+  width: 100%;
+}
+
+/* Grid and chart container */
+.grid-container {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  flex-grow: 1;
+}
+
+.chart-wrapper {
+  background-color: #1a1a1a;
+  border-radius: 12px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.5);
+  position: relative;
+}
+
+.chart-container {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  position: relative;
+}
+
+/* Full-screen mode */
+.full-screen {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 1000;
+  background-color: #1a1a1a;
+}
+
+/* Ticker field styling */
+.ticker-field {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.ticker-input-field {
+  background-color: #2d2d2d;
+  color: #ffffff;
+  border: 1px solid #444444;
+  border-radius: 8px;
+  padding: 4px 8px;
+  width: 120px;
+  text-align: center;
+  font-size: 0.9rem;
+}
+
+.full-screen-button {
+  background-color: #2d2d2d;
+  color: #ffffff;
+  border: 1px solid #444444;
+  border-radius: 8px;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+/* Brush handle styling */
+.recharts-brush-traveller {
+  fill: none;
+}
+
+.recharts-brush {
+  fill: none;
+}
+
+.recharts-brush > g > line {
+  stroke: #8884d8;
+  stroke-width: 2;
+}
+
+/* Sidebar styling */
+.sidebar {
+  width: 250px;
+  padding: 16px;
+  background-color: #2a2a2a;
+  border-radius: 12px;
+  margin-left: 16px;
+}
+
+.sidebar-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.sidebar-date-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.date-picker-single {
+  background-color: #2d2d2d;
+  color: #ffffff;
+  border: 1px solid #444444;
+  border-radius: 8px;
+  padding: 4px 8px;
+  text-align: center;
+}
+
+/* Metrics section styling */
+.metrics-section {
+  padding: 8px;
+  background-color: #2a2a2a;
+  border-radius: 12px;
+}
+
+.metrics-title {
+  color: #e5e5e5;
+  margin-bottom: 8px;
+  text-align: center;
+  font-size: 1rem;
+}
+
+.metrics-selector {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.metric-button {
+  color: #ffffff;
+  border: 1px solid #444444;
+  border-radius: 8px;
+  padding: 4px 8px;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+  text-align: center;
+  background-color: #2d2d2d;
+}
+
+.metric-button.active {
+  border-color: inherit;
+}
+
+.metric-button:hover {
+  opacity: 0.8;
+}
+
+/* General styling for improved readability */
+body, input, button {
+  font-family: 'Inter', sans-serif;
+}
+
+h1, h2, h3, h4, h5, h6, label {
+  color: #e5e5e5;
+}
+
+/* Tooltip styling */
+.recharts-tooltip-wrapper .recharts-tooltip-label {
+  color: #ffffff !important;
+}
