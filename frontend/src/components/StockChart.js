@@ -45,6 +45,18 @@ const StockChart = ({ initialTicker, startDate, endDate, metrics, metricsList })
     setIsFullScreen(!isFullScreen);
   };
 
+  const getYAxisDomain = () => {
+    if (data.length === 0) return ['auto', 'auto'];
+
+    const allYValues = data.flatMap(d => metrics.map(metric => parseFloat(d[metric])));
+    const minY = Math.min(...allYValues);
+    const maxY = Math.max(...allYValues);
+
+    return [minY * 0.985, maxY * 1.02]; // Slight padding to ensure the line isn't touching the edges
+  };
+
+  const yAxisDomain = getYAxisDomain();
+
   return (
     <div className={`chart-container ${isFullScreen ? 'full-screen' : ''}`} ref={chartRef}>
       <div className="ticker-field">
@@ -53,22 +65,28 @@ const StockChart = ({ initialTicker, startDate, endDate, metrics, metricsList })
           value={ticker}
           onChange={handleTickerChange}
           className="ticker-input-field"
+          placeholder="Enter Ticker"
         />
         <button onClick={toggleFullScreen} className="full-screen-button">
           {isFullScreen ? 'Exit Full Screen' : 'Full Screen'}
         </button>
       </div>
-      <ResponsiveContainer width="100%" height={isFullScreen ? '90%' : 250}>
+      <ResponsiveContainer width="100%" height={isFullScreen ? '90%' : 300}>
         <LineChart data={data}>
           <XAxis dataKey="Date" stroke="#ffffff" />
-          <YAxis stroke="#ffffff" tickFormatter={(tick) => tick.toFixed(2)} />
+          <YAxis stroke="#ffffff" domain={yAxisDomain} tickFormatter={(tick) => tick.toFixed(2)} />
           <CartesianGrid strokeDasharray="3 3" stroke="#444444" />
           <Tooltip
             formatter={(value) => value.toFixed(2)}
-            contentStyle={{ backgroundColor: '#333333', borderColor: '#777777', color: '#ffffff' }}
+            contentStyle={{
+              backgroundColor: 'rgba(0, 0, 0, 0.8)',
+              borderColor: '#444444',
+              color: '#ffffff',
+              borderRadius: '5px',
+            }}
           />
           {metrics.map((metric) => {
-            const metricColor = metricsList.find(m => m.name === metric)?.color || '#ffffff';
+            const metricColor = metricsList.find((m) => m.name === metric)?.color || '#00bfff';
             return (
               <Line
                 key={metric}
