@@ -194,6 +194,8 @@ async def paginate(query, page: int, page_size: int):
 
 
 # Routes
+
+
 @app.get("/stock/{ticker}", response_model=List[StockData])
 async def get_stock_data(
     ticker: str,
@@ -234,14 +236,13 @@ async def get_stock_data(
     ).where(CombinedStockData.Ticker == ticker)
 
     if start_date:
-        start_date_obj = datetime.strptime(start_date, "%Y-%m-%d")
+        start_date_obj = datetime.datetime.strptime(start_date, "%Y-%m-%d")
         query = query.where(CombinedStockData.Date >= start_date_obj)
     if end_date:
-        end_date_obj = datetime.strptime(end_date, "%Y-%m-%d")
+        end_date_obj = datetime.datetime.strptime(end_date, "%Y-%m-%d")
         query = query.where(CombinedStockData.Date <= end_date_obj)
 
-    query = query.offset((page - 1) * page_size).limit(page_size)
-
+    query = query.order_by(CombinedStockData.Date.desc())
     result = await database.fetch_all(query)
 
     return [

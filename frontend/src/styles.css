@@ -1,0 +1,31 @@
+/* Container for the chart */
+.chart-container {
+  padding: 16px;
+  background-color: #1a1a1a;
+  border-radius: 12px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.5);
+}
+
+/* Container for the date pickers */
+.date-picker-container {
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+/* Labels for the date pickers */
+.date-label {
+  color: #ffffff;
+  display: block;
+  margin-bottom: 4px;
+}
+
+/* Date picker input */
+.date-picker {
+  background-color: #2d2d2d;
+  color: #ffffff;
+  border: 1px solid #444444;
+  border-radius: 8px;
+  padding: 4px 8px;
+}
