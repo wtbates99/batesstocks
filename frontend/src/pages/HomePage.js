@@ -87,6 +87,73 @@ const HomePage = () => {
   return (
     <div className="min-h-screen bg-dark p-8">
       <div className="layout-container">
+        {/* Horizontal Bar for Date Picker and Metrics */}
+        <div className="horizontal-bar">
+          <div className="sidebar-date-picker">
+            <DatePicker
+              selected={startDate}
+              onChange={(date) => setStartDate(date)}
+              selectsStart
+              startDate={startDate}
+              endDate={endDate}
+              placeholderText="Start Date"
+              className="date-picker-single"
+            />
+            <span className="date-range-separator">to</span>
+            <DatePicker
+              selected={endDate}
+              onChange={(date) => setEndDate(date)}
+              selectsEnd
+              startDate={startDate}
+              endDate={endDate}
+              minDate={startDate}
+              placeholderText="End Date"
+              className="date-picker-single"
+            />
+            <div className="date-buttons">
+              <button onClick={() => setDateRange(7)}>7D</button>
+              <button onClick={() => setDateRange(30)}>30D</button>
+              <button onClick={() => setDateRange(180)}>180D</button>
+            </div>
+          </div>
+
+          <div className="metrics-section">
+            {Object.entries({
+              Prices: metricsList.filter(metric => ['Ticker_Open', 'Ticker_Close', 'Ticker_High', 'Ticker_Low'].includes(metric.name)),
+              Volume: metricsList.filter(metric => metric.name.includes('Volume')),
+              'Moving Averages': metricsList.filter(metric => metric.name.includes('SMA') || metric.name.includes('EMA')),
+              Oscillators: metricsList.filter(metric => metric.name.includes('MACD') || metric.name.includes('RSI')),
+              'Bollinger Bands': metricsList.filter(metric => metric.name.includes('Bollinger')),
+            }).map(([groupName, groupMetrics]) => (
+              <div className="metrics-group" key={groupName}>
+                <h3 onClick={() => toggleGroupCollapse(groupName)} className="group-header">
+                  {groupName}
+                  <span className={`collapse-icon ${collapsedGroups[groupName] ? 'collapsed' : ''}`}>▼</span>
+                </h3>
+                {!collapsedGroups[groupName] && (
+                  <div className="group-metrics">
+                    {groupMetrics.map((metric) => (
+                      <span
+                        key={metric.name}
+                        className={`metric-button ${selectedMetrics.includes(metric.name) ? 'active' : ''}`}
+                        style={{
+                          backgroundColor: selectedMetrics.includes(metric.name)
+                            ? metric.color
+                            : '#2d2d2d',
+                        }}
+                        onClick={() => toggleMetric(metric)}
+                      >
+                        {metric.name.replace('Ticker_', '')}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Grid Container for Stock Charts */}
         <div className="grid-container">
           {defaultTickers.map((ticker) => (
             <div className="chart-wrapper" key={ticker}>
@@ -99,76 +166,6 @@ const HomePage = () => {
               />
             </div>
           ))}
-        </div>
-
-        <div className="sidebar">
-          <div className="sidebar-content">
-            <div className="date-metric-section">
-              <div className="sidebar-date-picker">
-                <DatePicker
-                  selected={startDate}
-                  onChange={(date) => setStartDate(date)}
-                  selectsStart
-                  startDate={startDate}
-                  endDate={endDate}
-                  placeholderText="Start Date"
-                  className="date-picker-single"
-                />
-                <span className="date-range-separator">to</span>
-                <DatePicker
-                  selected={endDate}
-                  onChange={(date) => setEndDate(date)}
-                  selectsEnd
-                  startDate={startDate}
-                  endDate={endDate}
-                  minDate={startDate}
-                  placeholderText="End Date"
-                  className="date-picker-single"
-                />
-              </div>
-              <div className="date-buttons-wrapper">
-                <div className="date-buttons">
-                  <button onClick={() => setDateRange(7)}>7D</button>
-                  <button onClick={() => setDateRange(30)}>30D</button>
-                  <button onClick={() => setDateRange(180)}>180D</button>
-                </div>
-              </div>
-            </div>
-            <div className="metrics-section">
-              {Object.entries({
-                Prices: metricsList.filter(metric => ['Ticker_Open', 'Ticker_Close', 'Ticker_High', 'Ticker_Low'].includes(metric.name)),
-                Volume: metricsList.filter(metric => metric.name.includes('Volume')),
-                'Moving Averages': metricsList.filter(metric => metric.name.includes('SMA') || metric.name.includes('EMA')),
-                Oscillators: metricsList.filter(metric => metric.name.includes('MACD') || metric.name.includes('RSI')),
-                'Bollinger Bands': metricsList.filter(metric => metric.name.includes('Bollinger')),
-              }).map(([groupName, groupMetrics]) => (
-                <div className="metrics-group" key={groupName}>
-                  <h3 onClick={() => toggleGroupCollapse(groupName)} className="group-header">
-                    {groupName}
-                    <span className={`collapse-icon ${collapsedGroups[groupName] ? 'collapsed' : ''}`}>▼</span>
-                  </h3>
-                  {!collapsedGroups[groupName] && (
-                    <div className="group-metrics">
-                      {groupMetrics.map((metric) => (
-                        <span
-                          key={metric.name}
-                          className={`metric-button ${selectedMetrics.includes(metric.name) ? 'active' : ''}`}
-                          style={{
-                            backgroundColor: selectedMetrics.includes(metric.name)
-                              ? metric.color
-                              : '#2d2d2d',
-                          }}
-                          onClick={() => toggleMetric(metric)}
-                        >
-                          {metric.name.replace('Ticker_', '')}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
         </div>
       </div>
     </div>
