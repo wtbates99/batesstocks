@@ -201,39 +201,21 @@ async def get_stock_data(
     ticker: str,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
+    metrics: Optional[List[str]] = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(100, ge=1, le=1000),
 ):
-    query = select(
+    selected_metrics = [
         CombinedStockData.Date,
         CombinedStockData.Ticker,
-        CombinedStockData.Ticker_Open,
-        CombinedStockData.Ticker_Close,
-        CombinedStockData.Ticker_High,
-        CombinedStockData.Ticker_Low,
-        CombinedStockData.Ticker_Volume,
-        CombinedStockData.Ticker_SMA_10,
-        CombinedStockData.Ticker_EMA_10,
-        CombinedStockData.Ticker_RSI,
-        CombinedStockData.Ticker_Stochastic_K,
-        CombinedStockData.Ticker_Stochastic_D,
-        CombinedStockData.Ticker_MACD,
-        CombinedStockData.Ticker_MACD_Signal,
-        CombinedStockData.Ticker_MACD_Diff,
-        CombinedStockData.Ticker_TSI,
-        CombinedStockData.Ticker_UO,
-        CombinedStockData.Ticker_ROC,
-        CombinedStockData.Ticker_Williams_R,
-        CombinedStockData.Ticker_Bollinger_High,
-        CombinedStockData.Ticker_Bollinger_Low,
-        CombinedStockData.Ticker_Bollinger_Mid,
-        CombinedStockData.Ticker_Bollinger_PBand,
-        CombinedStockData.Ticker_Bollinger_WBand,
-        CombinedStockData.Ticker_On_Balance_Volume,
-        CombinedStockData.Ticker_Chaikin_MF,
-        CombinedStockData.Ticker_Force_Index,
-        CombinedStockData.Ticker_MFI,
-    ).where(CombinedStockData.Ticker == ticker)
+    ]
+
+    if metrics:
+        selected_metrics.extend(
+            [getattr(CombinedStockData, metric) for metric in metrics]
+        )
+
+    query = select(*selected_metrics).where(CombinedStockData.Ticker == ticker)
 
     if start_date:
         start_date_obj = datetime.datetime.strptime(start_date, "%Y-%m-%d")
