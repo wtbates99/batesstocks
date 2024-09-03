@@ -118,8 +118,8 @@ const StockChart = ({ initialTicker, startDate, endDate, metrics, metricsList })
           {metrics.map((metric) => (
             <defs key={metric}>
               <linearGradient id={metric} x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor={metricsList.find((m) => m.name === metric)?.color} stopOpacity={0.6} />
-                <stop offset="100%" stopColor={metricsList.find((m) => m.name === metric)?.color} stopOpacity={0.1} />
+                <stop offset="0%" stopColor={metricsList.find((m) => m.name === metric)?.color} stopOpacity={0.95} />
+                <stop offset="100%" stopColor={metricsList.find((m) => m.name === metric)?.color} stopOpacity={0.25} />
               </linearGradient>
             </defs>
           ))}
