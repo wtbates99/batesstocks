@@ -6,6 +6,9 @@ body, input, button {
   margin: 0;
   padding: 0;
   background-color: #121212;
+  cursor: default; /* Ensure the cursor is visible */
+  position: relative;
+  overflow-x: hidden; /* Prevent horizontal scrolling */
 }
 
 h1, h2, h3, h4, h5, h6, label {
@@ -17,58 +20,115 @@ h1, h2, h3, h4, h5, h6, label {
   background-color: #1a1a1a;
 }
 
-.min-h-screen {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: flex-start;
-}
-
 /* Header Styling */
 .header {
   width: 100%;
+  position: fixed;
+  top: 0;
+  left: 0;
   display: flex;
   justify-content: space-between;
   align-items: center;
   padding: 20px 0;
   border-bottom: 2px solid #444444;
-  margin-bottom: 20px;
+  background-color: #1a1a1a; /* Full width background */
+  z-index: 100; /* Ensure it's above all other content */
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3); /* Optional: Add shadow for better separation */
 }
 
 .header h1 {
   font-size: 2.5rem;
   color: #ffffff;
   margin: 0;
+  padding-left: 20px; /* Add padding to align with sidebar and charts */
+}
+
+.header-button {
+  margin-right: 20px;
+}
+
+/* Adjust the main content to account for the fixed header */
+.main-content {
+  display: flex;
+  margin-top: 100px; /* Ensure content starts below the fixed header */
+  height: calc(100vh - 100px); /* Fill the remaining height below the header */
+  overflow: hidden;
 }
 
 /* Sidebar Styles */
-.sidebar {
-  width: 300px;
-  background-color: #2a2a2a;
-  padding: 20px;
+.sidebar-container {
+  position: relative;
+  transition: transform 0.3s ease;
+  width: 250px; /* Condensed sidebar width */
+  z-index: 2; /* Ensure it's above other elements */
+  background: linear-gradient(145deg, #2a2a2a, #1f1f1f);
+  box-shadow: 0 4px 30px rgba(0, 0, 0, 0.2);
   border-radius: 12px;
-  margin-right: 20px;
-  flex-shrink: 0;
-  max-height: 90vh;
+  height: calc(100vh - 100px); /* Sidebar height fills the remaining space minus header */
   overflow-y: auto;
-  scrollbar-width: none;
+  padding: 10px; /* Reduced padding */
+  scrollbar-width: none; /* Hide scrollbar in Firefox */
 }
 
-.sidebar::-webkit-scrollbar {
-  display: none;
+.sidebar-container.hidden {
+  transform: translateX(-260px); /* Hide sidebar off-screen */
+}
+
+.sidebar-container::-webkit-scrollbar {
+  display: none; /* Hide scrollbar in Webkit-based browsers */
+}
+
+.sidebar-toggle-button {
+  position: absolute;
+  top: 10px;
+  right: -40px;
+  background-color: #1a1a1a;
+  color: #e5e5e5;
+  border: none;
+  border-radius: 50%;
+  width: 30px;
+  height: 30px;
+  cursor: pointer;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+}
+
+.show-sidebar-button {
+  position: fixed;
+  top: 110px;
+  left: 0;
+  background-color: #1a1a1a;
+  color: #e5e5e5;
+  border: none;
+  border-radius: 0 5px 5px 0;
+  width: 30px;
+  height: 30px;
+  cursor: pointer;
+  display: none; /* Hidden by default */
+  justify-content: center;
+  align-items: center;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+  z-index: 101; /* Ensure it's above other content */
+}
+
+.sidebar-hidden .show-sidebar-button {
+  display: flex; /* Show the button when sidebar is hidden */
 }
 
 .sidebar-box {
   background-color: #1f1f1f;
   border-radius: 12px;
-  padding: 20px;
+  padding: 15px;
   margin-bottom: 20px;
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.5);
+  box-shadow: inset 0 4px 8px rgba(0, 0, 0, 0.6);
 }
 
 .sidebar h2 {
   font-size: 1.5rem;
   margin-bottom: 10px;
+  color: #cccccc;
 }
 
 /* Date Picker and Buttons */
@@ -102,12 +162,14 @@ h1, h2, h3, h4, h5, h6, label {
   border-radius: 8px;
   padding: 8px 16px;
   cursor: pointer;
-  transition: background-color 0.3s ease;
+  transition: background-color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
   width: 32%;
 }
 
 .date-buttons button:hover {
   background-color: #444444;
+  box-shadow: 0 0 20px rgba(0, 191, 255, 0.5);
+  transform: scale(1.05);
 }
 
 /* Metrics Section */
@@ -123,7 +185,7 @@ h1, h2, h3, h4, h5, h6, label {
 }
 
 .group-header {
-  color: #e5e5e5;
+  color: #cccccc;
   font-size: 1.2rem;
   cursor: pointer;
   display: flex;
@@ -153,26 +215,30 @@ h1, h2, h3, h4, h5, h6, label {
   align-items: center;
   gap: 8px;
   font-size: 1rem;
+  color: #e5e5e5; /* Keep the label text color consistent */
 }
 
 .metric-checkbox input {
-  accent-color: #00bfff;
+  accent-color: currentColor; /* Use the current color for the checkbox */
   width: 16px;
   height: 16px;
 }
 
-/* Grid and Chart Container */
-.layout-container {
-  display: flex;
-  width: 100%;
-  flex-wrap: wrap;
+/* Layout and Chart Container */
+.grid-container {
+  flex-grow: 1;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr); /* Limit to 3 charts per row */
+  gap: 24px; /* Add some space between charts */
+  padding: 20px;
+  height: 100%; /* Ensure it takes full height next to the sidebar */
+  overflow-y: auto; /* Ensure scrolling for charts on smaller screens */
+  scrollbar-width: none; /* Hide scrollbar in Firefox */
 }
 
-.grid-container {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr); /* Three charts per row */
-  gap: 24px; /* Add some space between charts */
-  flex-grow: 1;
+
+.grid-container::-webkit-scrollbar {
+  display: none; /* Hide scrollbar in Webkit-based browsers */
 }
 
 .chart-wrapper {
@@ -180,6 +246,8 @@ h1, h2, h3, h4, h5, h6, label {
   border-radius: 12px;
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.5);
   padding: 16px;
+  z-index: 2; /* Ensure charts are above the spotlight */
+  border: 1px solid #444444; /* Add borders around charts */
 }
 
 /* Ticker Field */
@@ -209,4 +277,63 @@ h1, h2, h3, h4, h5, h6, label {
 /* Hover Effects */
 .header-button:hover, .ticker-input-field:focus, .date-buttons button:hover {
   box-shadow: 0 0 10px rgba(255, 255, 255, 0.2);
+}
+
+/* Spinner */
+.spinner:before {
+  content: '';
+  box-sizing: border-box;
+  position: absolute;
+  width: 50px;
+  height: 50px;
+  margin-top: 100px;
+  border-radius: 50%;
+  border: 6px solid #00bfff;
+  border-right-color: transparent;
+  animation: spinner 1s linear infinite;
+}
+
+@keyframes spinner {
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+/* Light Mode */
+body.light-mode {
+  background-color: #f5f5f5;
+  color: #333333;
+}
+
+body.light-mode .bg-dark {
+  background-color: #ffffff;
+}
+
+body.light-mode .sidebar-container {
+  background-color: #ffffff;
+  color: #333333;
+}
+
+body.light-mode .chart-wrapper {
+  background-color: #ffffff;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  border: 1px solid #cccccc;
+}
+
+body.light-mode .header h1 {
+  color: #333333;
+}
+
+/* Spotlight Effect */
+.spotlight {
+  position: fixed; /* Position relative to the viewport */
+  top: 0;
+  left: 0;
+  width: 150px;
+  height: 150px;
+  background: radial-gradient(circle, rgba(255,255,255,0.1), transparent); /* Slightly more opaque */
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 0; /* Ensure it's behind all content */
+  transition: transform 0.1s ease-out;
 }

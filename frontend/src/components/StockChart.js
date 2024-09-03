@@ -111,15 +111,16 @@ const StockChart = ({ initialTicker, startDate, endDate, metrics, metricsList })
                 stroke={`url(#${metric})`}
                 strokeWidth={2}
                 dot={false}
-                activeDot={{ r: 5 }}
+                activeDot={{ r: 8, strokeWidth: 3, stroke: '#ffffff' }}
+                animationDuration={500} // Adds smooth animations
               />
             );
           })}
           {metrics.map((metric) => (
             <defs key={metric}>
               <linearGradient id={metric} x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor={metricsList.find((m) => m.name === metric)?.color} stopOpacity={0.95} />
-                <stop offset="100%" stopColor={metricsList.find((m) => m.name === metric)?.color} stopOpacity={0.25} />
+                <stop offset="0%" stopColor={metricsList.find((m) => m.name === metric)?.color} stopOpacity={0.6} />
+                <stop offset="100%" stopColor={metricsList.find((m) => m.name === metric)?.color} stopOpacity={0.1} />
               </linearGradient>
             </defs>
           ))}

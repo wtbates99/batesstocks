@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import StockChart from '../components/StockChart';
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
@@ -47,6 +47,7 @@ const HomePage = () => {
     Oscillators: true,
     'Bollinger Bands': true,
   });
+  const [sidebarHidden, setSidebarHidden] = useState(false);
 
   const toggleMetric = (metric) => {
     setSelectedMetrics(prev =>
@@ -69,14 +70,43 @@ const HomePage = () => {
     setEndDate(end);
   };
 
+  const toggleTheme = () => {
+    document.body.classList.toggle('light-mode');
+  };
+
+  const toggleSidebar = () => {
+    setSidebarHidden(!sidebarHidden);
+  };
+
+  useEffect(() => {
+    const spotlight = document.createElement('div');
+    spotlight.classList.add('spotlight');
+    document.body.appendChild(spotlight);
+
+    const moveSpotlight = (e) => {
+      spotlight.style.transform = `translate(${e.clientX - 75}px, ${e.clientY - 75}px)`;
+    };
+
+    document.addEventListener('mousemove', moveSpotlight);
+
+    return () => {
+      document.removeEventListener('mousemove', moveSpotlight);
+      spotlight.remove();
+    };
+  }, []);
+
   return (
-    <div className="min-h-screen bg-dark p-8">
+    <div className={`min-h-screen bg-dark ${sidebarHidden ? 'sidebar-hidden' : ''}`}>
       <header className="header">
         <h1>Stock Indicators</h1>
+        <button onClick={toggleTheme} className="header-button">Toggle Theme</button>
       </header>
 
-      <div className="layout-container">
-        <aside className="sidebar">
+      <div className="main-content">
+        <div className={`sidebar-container ${sidebarHidden ? 'hidden' : ''}`}>
+          <button className="sidebar-toggle-button" onClick={toggleSidebar}>
+            {sidebarHidden ? '>' : '<'}
+          </button>
           <div className="sidebar-box">
             <h2>Date Range</h2>
             <div className="sidebar-date-picker">
@@ -132,8 +162,9 @@ const HomePage = () => {
                               type="checkbox"
                               checked={selectedMetrics.includes(metric.name)}
                               onChange={() => toggleMetric(metric)}
+                              style={{ accentColor: metric.color }} /* Match checkbox with chart color */
                             />
-                            {metric.name.replace('Ticker_', '')}
+                            <span style={{ color: '#e5e5e5' }}>{metric.name.replace('Ticker_', '')}</span>
                           </label>
                         </div>
                       ))}
@@ -143,9 +174,11 @@ const HomePage = () => {
               ))}
             </div>
           </div>
-        </aside>
+        </div>
 
-        <main className="grid-container">
+        <button className="show-sidebar-button" onClick={toggleSidebar}>></button>
+
+        <div className="grid-container">
           {defaultTickers.map((ticker) => (
             <div className="chart-wrapper" key={ticker}>
               <StockChart
@@ -154,10 +187,11 @@ const HomePage = () => {
                 endDate={endDate}
                 metrics={selectedMetrics}
                 metricsList={metricsList}
+                roundToWholeNumber={true} /* Rounds axis values to the nearest whole number */
               />
             </div>
           ))}
-        </main>
+        </div>
       </div>
     </div>
   );
