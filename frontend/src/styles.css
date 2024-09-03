@@ -1,5 +1,18 @@
 
-/* Background and layout */
+/* General Styles */
+body, input, button {
+  font-family: 'Inter', sans-serif;
+  color: #e5e5e5;
+  margin: 0;
+  padding: 0;
+  background-color: #121212;
+}
+
+h1, h2, h3, h4, h5, h6, label {
+  font-family: 'Roboto', sans-serif;
+  font-weight: 400;
+}
+
 .bg-dark {
   background-color: #1a1a1a;
 }
@@ -8,114 +21,62 @@
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: flex-start;
 }
 
-.layout-container {
-  display: flex;
+/* Header Styling */
+.header {
   width: 100%;
-  flex-wrap: wrap;
-}
-
-/* Horizontal Bar */
-.horizontal-bar {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 1rem;
-  flex-wrap: wrap;
-  width: 100%;
+  padding: 20px 0;
+  border-bottom: 2px solid #444444;
+  margin-bottom: 20px;
 }
 
-/* Grid and chart container */
-.grid-container {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 16px;
-  flex-grow: 1;
-}
-
-.chart-wrapper {
-  background-color: #1a1a1a;
-  border-radius: 12px;
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.5);
-  position: relative;
-}
-
-/* Full-screen mode */
-.full-screen {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100vh;
-  z-index: 1000;
-  background-color: #1a1a1a;
-}
-
-/* Ticker field styling */
-.ticker-field {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 8px;
-}
-
-.ticker-input-field {
-  background-color: #2d2d2d;
+.header h1 {
+  font-size: 2.5rem;
   color: #ffffff;
-  border: 1px solid #444444;
-  border-radius: 8px;
-  padding: 4px 8px;
-  width: 120px;
-  text-align: center;
-  font-size: 0.9rem;
+  margin: 0;
 }
 
-.full-screen-button {
-  background-color: #2d2d2d;
-  color: #ffffff;
-  border: 1px solid #444444;
-  border-radius: 8px;
-  padding: 4px 8px;
-  cursor: pointer;
-}
-
-/* Brush handle styling */
-.recharts-brush-traveller {
-  fill: none;
-}
-
-.recharts-brush {
-  fill: none;
-}
-
-.recharts-brush > g > line {
-  stroke: #8884d8;
-  stroke-width: 2;
-}
-
-/* Sidebar styling */
+/* Sidebar Styles */
 .sidebar {
-  width: 250px;
-  padding: 16px;
+  width: 300px;
   background-color: #2a2a2a;
+  padding: 20px;
   border-radius: 12px;
-  margin-left: 16px;
+  margin-right: 20px;
   flex-shrink: 0;
+  max-height: 90vh;
+  overflow-y: auto;
+  scrollbar-width: none;
 }
 
-.sidebar-content {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
+.sidebar::-webkit-scrollbar {
+  display: none;
 }
 
-/* Date picker and buttons */
+.sidebar-box {
+  background-color: #1f1f1f;
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 20px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.5);
+}
+
+.sidebar h2 {
+  font-size: 1.5rem;
+  margin-bottom: 10px;
+}
+
+/* Date Picker and Buttons */
 .sidebar-date-picker {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 20px;
 }
 
 .date-picker-single {
@@ -123,65 +84,53 @@
   color: #ffffff;
   border: 1px solid #444444;
   border-radius: 8px;
-  padding: 4px 8px;
+  padding: 8px 12px;
   text-align: center;
-  width: 120px;
-}
-
-.date-range-separator {
-  color: #e5e5e5;
-  margin: 0 8px;
-}
-
-.date-buttons-wrapper {
-  display: flex;
-  justify-content: center;
-  margin-top: 8px;
   width: 100%;
 }
 
 .date-buttons {
   display: flex;
   gap: 8px;
+  justify-content: space-between;
 }
 
 .date-buttons button {
   background-color: #2d2d2d;
   color: #ffffff;
-  border: 1px solid #444444;
+  border: none;
   border-radius: 8px;
-  padding: 6px 12px;
+  padding: 8px 16px;
   cursor: pointer;
   transition: background-color 0.3s ease;
+  width: 32%;
 }
 
 .date-buttons button:hover {
   background-color: #444444;
 }
 
-/* Metrics section styling */
+/* Metrics Section */
 .metrics-section {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 16px;
-  background-color: #242424;
-  border-radius: 12px;
-  padding: 16px;
 }
 
 .metrics-group {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  padding-bottom: 10px;
+  margin-bottom: 10px;
 }
 
 .group-header {
   color: #e5e5e5;
-  font-size: 1rem;
+  font-size: 1.2rem;
   cursor: pointer;
   display: flex;
   justify-content: space-between;
   align-items: center;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #444444;
 }
 
 .collapse-icon {
@@ -194,38 +143,70 @@
 
 .group-metrics {
   display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.metric-checkbox label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 1rem;
+}
+
+.metric-checkbox input {
+  accent-color: #00bfff;
+  width: 16px;
+  height: 16px;
+}
+
+/* Grid and Chart Container */
+.layout-container {
+  display: flex;
+  width: 100%;
   flex-wrap: wrap;
-  gap: 4px;
 }
 
-.metric-button {
-  color: #ffffff;
-  border-radius: 8px;
-  padding: 4px 8px;
-  cursor: pointer;
-  transition: background-color 0.3s ease;
-  text-align: center;
+.grid-container {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr); /* Three charts per row */
+  gap: 24px; /* Add some space between charts */
+  flex-grow: 1;
+}
+
+.chart-wrapper {
+  background-color: #1a1a1a;
+  border-radius: 12px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.5);
+  padding: 16px;
+}
+
+/* Ticker Field */
+.ticker-field {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.ticker-input-field {
   background-color: #2d2d2d;
+  color: #ffffff;
+  border: 1px solid #444444;
+  border-radius: 8px;
+  padding: 8px 12px;
+  width: 100%;
+  text-align: center;
+  font-size: 1rem;
 }
 
-.metric-button.active {
-  background-color: inherit;
-}
-
-.metric-button:hover {
-  opacity: 0.8;
-}
-
-/* General styling for improved readability */
-body, input, button {
-  font-family: 'Inter', sans-serif;
-}
-
-h1, h2, h3, h4, h5, h6, label {
-  color: #e5e5e5;
-}
-
-/* Tooltip styling */
+/* Tooltip Styles */
 .recharts-tooltip-wrapper .recharts-tooltip-label {
   color: #ffffff !important;
+}
+
+/* Hover Effects */
+.header-button:hover, .ticker-input-field:focus, .date-buttons button:hover {
+  box-shadow: 0 0 10px rgba(255, 255, 255, 0.2);
 }
