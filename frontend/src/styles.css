@@ -1,3 +1,5 @@
+
+/* General Styles */
 html, body {
   min-height: 100%;
   height: 100%;
@@ -18,31 +20,25 @@ body::before {
 html, body, #root {
   overflow: auto !important;
 }
-/* Import fonts from Google Fonts */
 
-@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&family=Source+Sans+Pro:wght@400;600&display=swap');
-
-/* General Styles */
 body, input, button {
-    font-family: 'Source Sans Pro', sans-serif;
-    color: #e5e5e5;
-    margin: 0;
-    padding: 0;
-    background-color: #121212;
-    cursor: default; /* Ensure the cursor is visible */
-    position: relative;
-    overflow-x: hidden; /* Prevent horizontal scrolling */
+  font-family: 'Poppins', sans-serif;
+  color: #e5e5e5;
+  margin: 0;
+  padding: 0;
+  background-color: #121212;
+  cursor: default;
+  position: relative;
+  overflow-x: hidden;
 }
 
 h1, h2, h3, h4, h5, h6, label {
-    font-family: 'Poppins', sans-serif;
-    font-weight: 100600; /* Adjust weight for emphasis */
+  font-family: 'Poppins', sans-serif;
+  font-weight: 100600;
 }
-
 
 .bg-dark {
   background-color: #1f1f1f;
-
 }
 
 /* Header Styling */
@@ -54,29 +50,40 @@ h1, h2, h3, h4, h5, h6, label {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 20px 0;
+  padding: 20px 20px;
   border-bottom: 2px solid #444444;
-  background-color: #1a1a1a; /* Full width background */
-  z-index: 100; /* Ensure it's above all other content */
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3); /* Optional: Add shadow for better separation */
+  background-color: #1a1a1a;
+  z-index: 100;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
 }
 
 .header h1 {
   font-size: 2.5rem;
   color: #ffffff;
   margin: 0;
-  padding-left: 20px; /* Add padding to align with sidebar and charts */
 }
 
-.header-button {
-  margin-right: 20px;
+/* Sidebar Toggle Button */
+.sidebar-toggle-button {
+  background-color: #1a1a1a;
+  color: #e5e5e5;
+  border: 1px solid #444444;
+  border-radius: 4px;
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: background-color 0.3s ease, box-shadow 0.3s ease;
 }
 
-/* Adjust the main content to account for the fixed header */
+.sidebar-toggle-button:hover {
+  background-color: #333333;
+  box-shadow: 0 0 10px rgba(255, 255, 255, 0.2);
+}
+
+/* Main Content */
 .main-content {
   display: flex;
-  margin-top: 100px; /* Ensure content starts below the fixed header */
-  height: calc(100vh - 100px); /* Fill the remaining height below the header */
+  margin-top: 100px;
+  height: calc(100vh - 100px);
   overflow: hidden;
 }
 
@@ -84,134 +91,50 @@ h1, h2, h3, h4, h5, h6, label {
 .sidebar-container {
   position: relative;
   transition: transform 0.3s ease;
-  width: 250px; /* Condensed sidebar width */
-  z-index: 2; /* Ensure it's above other elements */
+  width: 250px;
+  z-index: 2;
   background: linear-gradient(145deg, #2a2a2a, #1f1f1f);
   box-shadow: 0 4px 30px rgba(0, 0, 0, 0.2);
   border-radius: 12px;
-  height: calc(100vh - 100px); /* Sidebar height fills the remaining space minus header */
+  height: calc(100vh - 100px);
   overflow-y: auto;
-  padding: 10px; /* Reduced padding */
-  scrollbar-width: none; /* Hide scrollbar in Firefox */
+  padding: 10px;
 }
 
 .sidebar-container.hidden {
-  transform: translateX(-260px); /* Hide sidebar off-screen */
+  transform: translateX(-260px);
 }
 
 .sidebar-container::-webkit-scrollbar {
-  display: none; /* Hide scrollbar in Webkit-based browsers */
+  display: none;
 }
 
-.sidebar-toggle-button {
-  position: absolute;
-  top: 10px;
-  right: -40px;
-  background-color: #1a1a1a;
-  color: #e5e5e5;
-  border: none;
-  border-radius: 50%;
-  width: 30px;
-  height: 30px;
-  cursor: pointer;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+/* Sidebar Content */
+.sidebar-content {
+  overflow-y: auto;
+  max-height: calc(100vh - 120px);
+  overflow-x: hidden;
 }
 
-.show-sidebar-button {
-  position: fixed;
-  top: 110px;
-  left: 0;
-  background-color: #1a1a1a;
-  color: #e5e5e5;
-  border: none;
-  border-radius: 0 5px 5px 0;
-  width: 30px;
-  height: 30px;
-  cursor: pointer;
-  display: none; /* Hidden by default */
-  justify-content: center;
-  align-items: center;
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
-  z-index: 101; /* Ensure it's above other content */
-}
-
-.sidebar-hidden .show-sidebar-button {
-  display: flex; /* Show the button when sidebar is hidden */
-}
-
-.sidebar-box {
-  background-color: #1f1f1f;
-  border-radius: 12px;
-  padding: 15px;
-  margin-bottom: 20px;
-  box-shadow: inset 0 4px 8px rgba(0, 0, 0, 0.6);
-}
-
-.sidebar h2 {
-  font-size: 1.5rem;
-  margin-bottom: 10px;
-  color: #cccccc;
-}
-
-/* Date Picker and Buttons */
-.sidebar-date-picker {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin-bottom: 20px;
-}
-
-.date-picker-single {
-  background-color: #2d2d2d;
-  color: #ffffff;
-  border: 1px solid #444444;
-  border-radius: 8px;
-  padding: 8px 12px;
-  text-align: center;
-  width: 100%;
-}
-
-.date-buttons {
-  display: flex;
-  gap: 8px;
-  justify-content: space-between;
-}
-
-.date-buttons button {
-  background-color: #2d2d2d;
-  color: #ffffff;
-  border: none;
-  border-radius: 8px;
-  padding: 8px 16px;
-  cursor: pointer;
-  transition: background-color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
-  width: 32%;
-}
-
-.date-buttons button:hover {
-  background-color: #444444;
-  box-shadow: 0 0 20px rgba(0, 191, 255, 0.5);
-  transform: scale(1.05);
-}
-
-/* Metrics Section */
+/* Metrics Section Styling */
 .metrics-section {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 8px;
 }
 
 .metrics-group {
-  padding-bottom: 10px;
-  margin-bottom: 10px;
+  background-color: #1f1f1f; /* Stock background for the group */
+  border-radius: 8px;
+  padding: 8px;
+  margin-bottom: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  border: 1px solid #444444;
 }
 
 .group-header {
   color: #cccccc;
-  font-size: 1.2rem;
+  font-size: 1rem;
   cursor: pointer;
   display: flex;
   justify-content: space-between;
@@ -229,41 +152,84 @@ h1, h2, h3, h4, h5, h6, label {
 }
 
 .group-metrics {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin-top: 10px;
-}
-
-.metric-checkbox label {
-  display: flex;
-  align-items: center;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr); /* 2xN grid layout */
   gap: 8px;
-  font-size: 1rem;
-  color: #e5e5e5; /* Keep the label text color consistent */
+  margin-top: 8px;
 }
 
-.metric-checkbox input {
-  accent-color: currentColor; /* Use the current color for the checkbox */
-  width: 16px;
-  height: 16px;
+.metric-item {
+  background-color: #2d2d2d; /* Use the stock background for unselected metrics */
+  padding: 6px 8px;
+  border: 1px solid #777777; /* Light grey border */
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.3s ease, transform 0.2s ease;
+  text-align: center;
+}
+
+.metric-item.selected {
+  background-color: var(--metric-color, #444444); /* 50% opacity background for selected metrics */
+}
+
+.metric-item.selected .metric-label-text {
+  color: #ffffff;
+  text-shadow: 1px 1px 2px #000000; /* White text with black border for contrast */
+}
+
+.metric-item:hover {
+  transform: scale(1.03);
+}
+
+.metric-label-text {
+  color: #e5e5e5;
+  font-size: 0.9rem;
+}
+
+/* Grid Layout for Date Buttons */
+.date-buttons-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin-bottom: 20px;
+}
+
+.date-buttons-grid button {
+  background-color: #1f1f1f;
+  color: #e5e5e5;
+  border: 1px solid #444444;
+  border-radius: 4px;
+  padding: 6px 8px;
+  cursor: pointer;
+  transition: background-color 0.3s ease, border 0.3s ease, transform 0.3s ease;
+}
+
+.date-buttons-grid button.active {
+  background-color: #444444;
+  color: #ffffff;
+  border-color: #ffffff;
+  transform: scale(1.02);
+}
+
+.date-buttons-grid button:hover {
+  background-color: #333333;
+  border-color: #777777;
 }
 
 /* Layout and Chart Container */
 .grid-container {
   flex-grow: 1;
   display: grid;
-  grid-template-columns: repeat(3, 1fr); /* Limit to 3 charts per row */
-  gap: 24px; /* Add some space between charts */
+  grid-template-columns: repeat(3, 1fr);
+  gap: 24px;
   padding: 20px;
-  height: 100%; /* Ensure it takes full height next to the sidebar */
-  overflow-y: auto; /* Ensure scrolling for charts on smaller screens */
-  scrollbar-width: none; /* Hide scrollbar in Firefox */
+  height: 100%;
+  overflow-y: auto;
+  scrollbar-width: none;
 }
 
-
 .grid-container::-webkit-scrollbar {
-  display: none; /* Hide scrollbar in Webkit-based browsers */
+  display: none;
 }
 
 .chart-wrapper {
@@ -271,8 +237,8 @@ h1, h2, h3, h4, h5, h6, label {
   border-radius: 12px;
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.5);
   padding: 16px;
-  z-index: 2; /* Ensure charts are above the spotlight */
-  border: 1px solid #444444; /* Add borders around charts */
+  z-index: 2;
+  border: 1px solid #444444;
 }
 
 /* Ticker Field */
@@ -299,11 +265,6 @@ h1, h2, h3, h4, h5, h6, label {
   color: #ffffff !important;
 }
 
-/* Hover Effects */
-.header-button:hover, .ticker-input-field:focus, .date-buttons button:hover {
-  box-shadow: 0 0 10px rgba(255, 255, 255, 0.2);
-}
-
 /* Spinner */
 .spinner:before {
   content: '';
@@ -324,17 +285,16 @@ h1, h2, h3, h4, h5, h6, label {
   }
 }
 
-
 /* Spotlight Effect */
 .spotlight {
-  position: fixed; /* Position relative to the viewport */
+  position: fixed;
   top: 0;
   left: 0;
   width: 150px;
   height: 150px;
-  background: radial-gradient(circle, rgba(255,255,255,0.1), transparent); /* Slightly more opaque */
+  background: radial-gradient(circle, rgba(255,255,255,0.1), transparent);
   border-radius: 50%;
   pointer-events: none;
-  z-index: 0; /* Ensure it's behind all content */
+  z-index: 0;
   transition: transform 0.1s ease-out;
 }

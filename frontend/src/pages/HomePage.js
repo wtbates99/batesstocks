@@ -1,10 +1,16 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import StockChart from '../components/StockChart';
-import DatePicker from 'react-datepicker';
-import 'react-datepicker/dist/react-datepicker.css';
 import '../styles.css';
 
+
+function hexToRgb(hex) {
+  const bigint = parseInt(hex.replace('#', ''), 16);
+  const r = (bigint >> 16) & 255;
+  const g = (bigint >> 8) & 255;
+  const b = bigint & 255;
+  return `${r}, ${g}, ${b}`;
+}
 const metricsList = [
   { name: 'Ticker_Low', color: 'hsl(0, 70%, 50%)' },
   { name: 'Ticker_Close', color: 'hsl(60, 70%, 50%)' },
@@ -39,6 +45,7 @@ const defaultTickers = ['AAPL', 'GOOGL', 'AMZN', 'MSFT', 'TSLA', 'NKE', 'NVDA', 
 const HomePage = () => {
   const [startDate, setStartDate] = useState(new Date(new Date().setDate(new Date().getDate() - 30)));
   const [endDate, setEndDate] = useState(new Date());
+  const [selectedRange, setSelectedRange] = useState(30); // Default to Last 30 Days
   const [selectedMetrics, setSelectedMetrics] = useState(metricsList.slice(0, 4).map(m => m.name));
   const [collapsedGroups, setCollapsedGroups] = useState({
     Prices: false,
@@ -48,6 +55,15 @@ const HomePage = () => {
     'Bollinger Bands': true,
   });
   const [sidebarHidden, setSidebarHidden] = useState(false);
+
+  const setDateRange = (days) => {
+    const end = new Date();
+    const start = new Date();
+    start.setDate(end.getDate() - days);
+    setStartDate(start);
+    setEndDate(end);
+    setSelectedRange(days);
+  };
 
   const toggleMetric = (metric) => {
     setSelectedMetrics(prev =>
@@ -62,86 +78,37 @@ const HomePage = () => {
     }));
   };
 
-  const setDateRange = (days) => {
-    const end = new Date();
-    const start = new Date();
-    start.setDate(end.getDate() - days);
-    setStartDate(start);
-    setEndDate(end);
-  };
-
-  const toggleTheme = () => {
-    document.body.classList.toggle('light-mode');
-  };
-
   const toggleSidebar = () => {
     setSidebarHidden(!sidebarHidden);
   };
-
-  useEffect(() => {
-    const spotlight = document.createElement('div');
-    spotlight.classList.add('spotlight');
-    document.body.appendChild(spotlight);
-
-    const moveSpotlight = (e) => {
-      spotlight.style.transform = `translate(${e.clientX - 75}px, ${e.clientY - 75}px)`;
-    };
-
-    document.addEventListener('mousemove', moveSpotlight);
-
-    return () => {
-      document.removeEventListener('mousemove', moveSpotlight);
-      spotlight.remove();
-    };
-  }, []);
 
   return (
     <div className={`min-h-screen bg-dark ${sidebarHidden ? 'sidebar-hidden' : ''}`}>
       <header className="header">
         <h1>Stock Indicators</h1>
+        <button className="sidebar-toggle-button" onClick={toggleSidebar}>
+          {sidebarHidden ? 'Expand Metrics' : 'Collapse Metrics'}
+        </button>
       </header>
 
       <div className="main-content">
         <div className={`sidebar-container ${sidebarHidden ? 'hidden' : ''}`}>
-          <button className="sidebar-toggle-button" onClick={toggleSidebar}>
-            {sidebarHidden ? '>' : '<'}
-          </button>
-          <div className="sidebar-box">
-            <h2>Date Range</h2>
-            <div className="sidebar-date-picker">
-              <DatePicker
-                selected={startDate}
-                onChange={(date) => setStartDate(date)}
-                selectsStart
-                startDate={startDate}
-                endDate={endDate}
-                placeholderText="Start Date"
-                className="date-picker-single"
-              />
-              <span className="date-range-separator">to</span>
-              <DatePicker
-                selected={endDate}
-                onChange={(date) => setEndDate(date)}
-                selectsEnd
-                startDate={startDate}
-                endDate={endDate}
-                minDate={startDate}
-                placeholderText="End Date"
-                className="date-picker-single"
-              />
-              <div className="date-buttons">
-                <button onClick={() => setDateRange(7)}>7D</button>
-                <button onClick={() => setDateRange(30)}>30D</button>
-                <button onClick={() => setDateRange(180)}>180D</button>
-              </div>
+          <div className="sidebar-content">
+            <div className="date-buttons-grid">
+              <button className={selectedRange === 7 ? 'active' : ''} onClick={() => setDateRange(7)}>7D</button>
+              <button className={selectedRange === 30 ? 'active' : ''} onClick={() => setDateRange(30)}>30D</button>
+              <button className={selectedRange === 90 ? 'active' : ''} onClick={() => setDateRange(90)}>90D</button>
+              <button className={selectedRange === 180 ? 'active' : ''} onClick={() => setDateRange(180)}>180D</button>
+              <button className={selectedRange === 365 ? 'active' : ''} onClick={() => setDateRange(365)}>1Y</button>
+              <button className={selectedRange === 730 ? 'active' : ''} onClick={() => setDateRange(730)}>2Y</button>
+              <button className={selectedRange === 1095 ? 'active' : ''} onClick={() => setDateRange(1095)}>3Y</button>
+              <button className={selectedRange === 1460 ? 'active' : ''} onClick={() => setDateRange(1460)}>4Y</button>
+              <button className={selectedRange === 1825 ? 'active' : ''} onClick={() => setDateRange(1825)}>5Y</button>
             </div>
-          </div>
 
-          <div className="sidebar-box">
-            <h2>Metrics</h2>
             <div className="metrics-section">
               {Object.entries({
-                Prices: metricsList.filter(metric => ['Ticker_Open', 'Ticker_Close', 'Ticker_High', 'Ticker_Low'].includes(metric.name)),
+                Prices: metricsList.filter(metric => ['Open', 'Close', 'High', 'Low'].includes(metric.name.replace('Ticker_', ''))),
                 Volume: metricsList.filter(metric => metric.name.includes('Volume')),
                 'Moving Averages': metricsList.filter(metric => metric.name.includes('SMA') || metric.name.includes('EMA')),
                 Oscillators: metricsList.filter(metric => metric.name.includes('MACD') || metric.name.includes('RSI')),
@@ -155,16 +122,18 @@ const HomePage = () => {
                   {!collapsedGroups[groupName] && (
                     <div className="group-metrics">
                       {groupMetrics.map((metric) => (
-                        <div key={metric.name} className="metric-checkbox">
-                          <label>
-                            <input
-                              type="checkbox"
-                              checked={selectedMetrics.includes(metric.name)}
-                              onChange={() => toggleMetric(metric)}
-                              style={{ accentColor: metric.color }} /* Match checkbox with chart color */
-                            />
-                            <span style={{ color: '#e5e5e5' }}>{metric.name.replace('Ticker_', '')}</span>
-                          </label>
+                        <div
+                          key={metric.name}
+                          className={`metric-item ${selectedMetrics.includes(metric.name) ? 'selected' : ''}`}
+                          onClick={() => toggleMetric(metric)}
+                          style={{
+                            backgroundColor: selectedMetrics.includes(metric.name)
+                              ? `rgba(${hexToRgb(metric.color)}, 0.5)` // 50% opacity for selected background color
+                              : '#1f1f1f', // Use stock background color for unselected
+                            borderColor: '#444444',  /* Light grey border */
+                          }}
+                        >
+                          <span className="metric-label-text">{metric.name.replace(/Ticker_/g, '').replace(/_/g, ' ')}</span>
                         </div>
                       ))}
                     </div>
@@ -175,8 +144,6 @@ const HomePage = () => {
           </div>
         </div>
 
-        <button className="show-sidebar-button" onClick={toggleSidebar}>></button>
-
         <div className="grid-container">
           {defaultTickers.map((ticker) => (
             <div className="chart-wrapper" key={ticker}>
@@ -186,7 +153,7 @@ const HomePage = () => {
                 endDate={endDate}
                 metrics={selectedMetrics}
                 metricsList={metricsList}
-                roundToWholeNumber={true} /* Rounds axis values to the nearest whole number */
+                roundToWholeNumber={true}
               />
             </div>
           ))}

@@ -21,7 +21,7 @@ const StockChart = ({ initialTicker, startDate, endDate, metrics, metricsList })
     if (ticker) {
       const end = new Date();
       const start = new Date();
-      start.setFullYear(end.getFullYear() - 3);
+      start.setFullYear(end.getFullYear() - 5);
 
       const startDateStr = start.toISOString().split('T')[0];
       const endDateStr = end.toISOString().split('T')[0];
