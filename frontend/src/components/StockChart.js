@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   ResponsiveContainer,
   LineChart,
@@ -14,8 +14,6 @@ import '../styles.css';
 const StockChart = ({ initialTicker, startDate, endDate, metrics, metricsList }) => {
   const [ticker, setTicker] = useState(initialTicker);
   const [data, setData] = useState([]);
-  const chartRef = useRef(null);
-  const [isFullScreen, setIsFullScreen] = useState(false);
 
   useEffect(() => {
     if (ticker) {
@@ -36,15 +34,6 @@ const StockChart = ({ initialTicker, startDate, endDate, metrics, metricsList })
     setTicker(e.target.value.toUpperCase());
   };
 
-  const toggleFullScreen = () => {
-    if (!isFullScreen) {
-      chartRef.current.requestFullscreen();
-    } else {
-      document.exitFullscreen();
-    }
-    setIsFullScreen(!isFullScreen);
-  };
-
   const getYAxisDomain = () => {
     if (data.length === 0) return ['auto', 'auto'];
 
@@ -52,13 +41,13 @@ const StockChart = ({ initialTicker, startDate, endDate, metrics, metricsList })
     const minY = Math.min(...allYValues);
     const maxY = Math.max(...allYValues);
 
-    return [minY * 0.985, maxY * 1.02]; // Slight padding to ensure the line isn't touching the edges
+    return [minY * 0.985, maxY * 1.02];
   };
 
   const yAxisDomain = getYAxisDomain();
 
   return (
-    <div className={`chart-container ${isFullScreen ? 'full-screen' : ''}`} ref={chartRef}>
+    <div className="chart-container">
       <div className="ticker-field">
         <input
           type="text"
@@ -67,11 +56,8 @@ const StockChart = ({ initialTicker, startDate, endDate, metrics, metricsList })
           className="ticker-input-field"
           placeholder="Enter Ticker"
         />
-        <button onClick={toggleFullScreen} className="full-screen-button">
-          {isFullScreen ? 'Exit Full Screen' : 'Full Screen'}
-        </button>
       </div>
-      <ResponsiveContainer width="100%" height={isFullScreen ? '90%' : 300}>
+      <ResponsiveContainer width="100%" height={300}>
         <LineChart data={data}>
           <XAxis dataKey="Date" stroke="#ffffff" />
           <YAxis stroke="#ffffff" domain={yAxisDomain} tickFormatter={(tick) => tick.toFixed(2)} />
