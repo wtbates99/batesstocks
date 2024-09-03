@@ -99,7 +99,6 @@ const HomePage = () => {
     <div className={`min-h-screen bg-dark ${sidebarHidden ? 'sidebar-hidden' : ''}`}>
       <header className="header">
         <h1>Stock Indicators</h1>
-        <button onClick={toggleTheme} className="header-button">Toggle Theme</button>
       </header>
 
       <div className="main-content">

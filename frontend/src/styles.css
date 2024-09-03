@@ -1,23 +1,27 @@
+/* Import fonts from Google Fonts */
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&family=Source+Sans+Pro:wght@400;600&display=swap');
 
 /* General Styles */
 body, input, button {
-  font-family: 'Inter', sans-serif;
-  color: #e5e5e5;
-  margin: 0;
-  padding: 0;
-  background-color: #121212;
-  cursor: default; /* Ensure the cursor is visible */
-  position: relative;
-  overflow-x: hidden; /* Prevent horizontal scrolling */
+    font-family: 'Source Sans Pro', sans-serif;
+    color: #e5e5e5;
+    margin: 0;
+    padding: 0;
+    background-color: #121212;
+    cursor: default; /* Ensure the cursor is visible */
+    position: relative;
+    overflow-x: hidden; /* Prevent horizontal scrolling */
 }
 
 h1, h2, h3, h4, h5, h6, label {
-  font-family: 'Roboto', sans-serif;
-  font-weight: 400;
+    font-family: 'Poppins', sans-serif;
+    font-weight: 100600; /* Adjust weight for emphasis */
 }
 
+
 .bg-dark {
-  background-color: #1a1a1a;
+  background-color: #1f1f1f;
+
 }
 
 /* Header Styling */
@@ -299,30 +303,6 @@ h1, h2, h3, h4, h5, h6, label {
   }
 }
 
-/* Light Mode */
-body.light-mode {
-  background-color: #f5f5f5;
-  color: #333333;
-}
-
-body.light-mode .bg-dark {
-  background-color: #ffffff;
-}
-
-body.light-mode .sidebar-container {
-  background-color: #ffffff;
-  color: #333333;
-}
-
-body.light-mode .chart-wrapper {
-  background-color: #ffffff;
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-  border: 1px solid #cccccc;
-}
-
-body.light-mode .header h1 {
-  color: #333333;
-}
 
 /* Spotlight Effect */
 .spotlight {
