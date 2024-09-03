@@ -302,3 +302,40 @@ h1, h2, h3, h4, h5, h6, label {
   z-index: 0;
   transition: transform 0.1s ease-out;
 }
+
+
+/* Ticker Field and Toggle Button Styling */
+.ticker-field {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.ticker-input-field {
+  background-color: #2d2d2d;
+  color: #ffffff;
+  border: 1px solid #444444;
+  border-radius: 8px;
+  padding: 8px 12px;
+  width: 70%; /* Adjusted to make room for the button */
+  text-align: center;
+  font-size: 1rem;
+}
+
+.toggle-button {
+  background-color: #1a1a1a;
+  color: #e5e5e5;
+  border: 1px solid #444444;
+  border-radius: 8px; /* Matching the radius of the ticker input */
+  padding: 8px 12px; /* Same padding as the ticker input */
+  width: 28%; /* Adjusted to match the width proportionally with the ticker input */
+  text-align: center;
+  cursor: pointer;
+  transition: background-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+.toggle-button:hover {
+  background-color: #333333;
+  box-shadow: 0 0 10px rgba(255, 255, 255, 0.2);
+}
