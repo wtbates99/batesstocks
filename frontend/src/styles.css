@@ -159,18 +159,22 @@ h1, h2, h3, h4, h5, h6, label {
 }
 
 .metric-item {
-  background-color: #2d2d2d; /* Use the stock background for unselected metrics */
   padding: 6px 8px;
-  border: 1px solid #777777; /* Light grey border */
   border-radius: 4px;
   cursor: pointer;
   transition: background-color 0.3s ease, transform 0.2s ease;
   text-align: center;
+  border: 1px solid #777777;
 }
 
 .metric-item.selected {
-  background-color: var(--metric-color, #444444); /* 50% opacity background for selected metrics */
+  transform: scale(1.03);
 }
+
+.metric-label-text {
+  font-size: 0.9rem;
+}
+
 
 .metric-item.selected .metric-label-text {
   color: #ffffff;

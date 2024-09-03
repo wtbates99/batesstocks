@@ -3,14 +3,6 @@ import React, { useState } from 'react';
 import StockChart from '../components/StockChart';
 import '../styles.css';
 
-
-function hexToRgb(hex) {
-  const bigint = parseInt(hex.replace('#', ''), 16);
-  const r = (bigint >> 16) & 255;
-  const g = (bigint >> 8) & 255;
-  const b = bigint & 255;
-  return `${r}, ${g}, ${b}`;
-}
 const metricsList = [
   { name: 'Ticker_Low', color: 'hsl(0, 70%, 50%)' },
   { name: 'Ticker_Close', color: 'hsl(60, 70%, 50%)' },
@@ -87,7 +79,7 @@ const HomePage = () => {
       <header className="header">
         <h1>Stock Indicators</h1>
         <button className="sidebar-toggle-button" onClick={toggleSidebar}>
-          {sidebarHidden ? 'Expand Metrics' : 'Collapse Metrics'}
+          {sidebarHidden ? 'Expand Sidebar' : 'Collapse Sidebar'}
         </button>
       </header>
 
@@ -128,8 +120,10 @@ const HomePage = () => {
                           onClick={() => toggleMetric(metric)}
                           style={{
                             backgroundColor: selectedMetrics.includes(metric.name)
-                              ? `rgba(${hexToRgb(metric.color)}, 0.5)` // 50% opacity for selected background color
+                              ? `${metric.color.replace('hsl', 'hsla').replace('%)', '%, 0.5)')}` // Directly apply HSL color with 50% opacity
                               : '#1f1f1f', // Use stock background color for unselected
+                            color: selectedMetrics.includes(metric.name) ? '#ffffff' : '#e5e5e5',
+                            textShadow: selectedMetrics.includes(metric.name) ? '1px 1px 2px #000000' : 'none',
                             borderColor: '#444444',  /* Light grey border */
                           }}
                         >
