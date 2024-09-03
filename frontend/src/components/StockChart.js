@@ -124,24 +124,6 @@ const StockChart = ({ initialTicker, startDate, endDate, metrics, metricsList })
               </linearGradient>
             </defs>
           ))}
-          <Brush
-            dataKey="Date"
-            height={30}
-            stroke="#444444"
-            fill="#2a2a2a"
-            travellerWidth={15}
-            gap={5} /* Adds a gap between the chart and brush */
-            handleStyle={{
-              fill: '#8884d8', /* Matches the theme */
-              stroke: '#8884d8',
-              cursor: 'pointer',
-            }}
-            tickFormatter={(tick) => new Date(tick).toLocaleDateString()}
-            brushStyle={{
-              backgroundColor: '#444444', /* Updated brush color */
-              borderRadius: '5px',
-            }}
-          />
         </LineChart>
       </ResponsiveContainer>
     </div>
