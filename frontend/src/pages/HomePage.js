@@ -13,7 +13,7 @@ const metricsList = [
   { name: 'Ticker_Chaikin_MF', color: 'hsl(90, 70%, 50%)' },
   { name: 'Ticker_Force_Index', color: 'hsl(200, 70%, 50%)' },
   { name: 'Ticker_MFI', color: 'hsl(340, 70%, 50%)' },
-  { name: 'Ticker_SMA_10', color: 'hsl(60, 70%, 50%)' },
+  { name: 'Ticker_SMA_10', color: 'hsl(40, 50%, 70%)' },
   { name: 'Ticker_EMA_10', color: 'hsl(160, 70%, 50%)' },
   { name: 'Ticker_RSI', color: 'hsl(180, 70%, 50%)' },
   { name: 'Ticker_Stochastic_K', color: 'hsl(240, 70%, 50%)' },
