@@ -8,6 +8,7 @@ import {
   YAxis,
   Tooltip,
   CartesianGrid,
+  Brush,
 } from 'recharts';
 import '../styles.css';
 
@@ -65,6 +66,24 @@ const StockChart = ({ initialTicker, startDate, endDate, metrics, metricsList })
 
   const yAxisDomain = getYAxisDomain();
 
+  const renderCustomTooltip = ({ payload, label }) => {
+    if (!payload || !payload.length) return null;
+
+    return (
+      <div className="custom-tooltip">
+        <p className="label">{`Date: ${new Date(label).toLocaleDateString()}`}</p>
+        {payload.map((entry, index) => {
+          const metricColor = metricsList.find((m) => m.name === entry.dataKey)?.color || '#00bfff';
+          return (
+            <p key={index} style={{ color: metricColor }}>
+              {`${entry.dataKey}: ${entry.value.toFixed(2)}`}
+            </p>
+          );
+        })}
+      </div>
+    );
+  };
+
   return (
     <div className="chart-container">
       <div className="ticker-field">
@@ -76,20 +95,12 @@ const StockChart = ({ initialTicker, startDate, endDate, metrics, metricsList })
           placeholder="Enter Ticker"
         />
       </div>
-      <ResponsiveContainer width="100%" height={300}>
-        <LineChart data={filteredData}>
-          <XAxis dataKey="Date" stroke="#ffffff" />
-          <YAxis stroke="#ffffff" domain={yAxisDomain} tickFormatter={(tick) => tick.toFixed(2)} />
-          <CartesianGrid strokeDasharray="3 3" stroke="#444444" />
-          <Tooltip
-            formatter={(value) => value.toFixed(2)}
-            contentStyle={{
-              backgroundColor: 'rgba(0, 0, 0, 0.8)',
-              borderColor: '#444444',
-              color: '#ffffff',
-              borderRadius: '5px',
-            }}
-          />
+      <ResponsiveContainer width="100%" height={340}>
+        <LineChart data={filteredData} margin={{ top: 5, right: 20, bottom: 10, left: 0 }}>
+          <XAxis dataKey="Date" stroke="#aaaaaa" hide={true} />
+          <YAxis stroke="#aaaaaa" domain={yAxisDomain} tickFormatter={(tick) => tick.toFixed(2)} />
+          <CartesianGrid strokeDasharray="3 3" stroke="#333333" />
+          <Tooltip content={renderCustomTooltip} />
           {metrics.map((metric) => {
             const metricColor = metricsList.find((m) => m.name === metric)?.color || '#00bfff';
             return (
@@ -97,12 +108,39 @@ const StockChart = ({ initialTicker, startDate, endDate, metrics, metricsList })
                 key={metric}
                 type="monotone"
                 dataKey={metric}
-                stroke={metricColor}
+                stroke={`url(#${metric})`}
                 strokeWidth={2}
                 dot={false}
+                activeDot={{ r: 5 }}
               />
             );
           })}
+          {metrics.map((metric) => (
+            <defs key={metric}>
+              <linearGradient id={metric} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor={metricsList.find((m) => m.name === metric)?.color} stopOpacity={0.6} />
+                <stop offset="100%" stopColor={metricsList.find((m) => m.name === metric)?.color} stopOpacity={0.1} />
+              </linearGradient>
+            </defs>
+          ))}
+          <Brush
+            dataKey="Date"
+            height={30}
+            stroke="#444444"
+            fill="#2a2a2a"
+            travellerWidth={15}
+            gap={5} /* Adds a gap between the chart and brush */
+            handleStyle={{
+              fill: '#8884d8', /* Matches the theme */
+              stroke: '#8884d8',
+              cursor: 'pointer',
+            }}
+            tickFormatter={(tick) => new Date(tick).toLocaleDateString()}
+            brushStyle={{
+              backgroundColor: '#444444', /* Updated brush color */
+              borderRadius: '5px',
+            }}
+          />
         </LineChart>
       </ResponsiveContainer>
     </div>

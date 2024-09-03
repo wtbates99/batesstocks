@@ -3,6 +3,9 @@
 body, input, button {
   font-family: 'Inter', sans-serif;
   color: #e5e5e5;
+  margin: 0;
+  padding: 0;
+  background-color: #121212;
 }
 
 h1, h2, h3, h4, h5, h6, label {
@@ -29,7 +32,7 @@ h1, h2, h3, h4, h5, h6, label {
   align-items: center;
   padding: 20px 0;
   border-bottom: 2px solid #444444;
-  margin-bottom: 20px; /* Add buffer between header and content */
+  margin-bottom: 20px;
 }
 
 .header h1 {
@@ -48,12 +51,11 @@ h1, h2, h3, h4, h5, h6, label {
   flex-shrink: 0;
   max-height: 90vh;
   overflow-y: auto;
-  scrollbar-width: none; /* Hide scrollbar for Firefox */
-  -ms-overflow-style: none; /* Hide scrollbar for Internet Explorer and Edge */
+  scrollbar-width: none;
 }
 
 .sidebar::-webkit-scrollbar {
-  display: none; /* Hide scrollbar for Chrome, Safari, and Opera */
+  display: none;
 }
 
 .sidebar-box {
@@ -163,12 +165,13 @@ h1, h2, h3, h4, h5, h6, label {
 .layout-container {
   display: flex;
   width: 100%;
+  flex-wrap: wrap;
 }
 
 .grid-container {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 16px;
+  grid-template-columns: repeat(3, 1fr); /* Three charts per row */
+  gap: 24px; /* Add some space between charts */
   flex-grow: 1;
 }
 
