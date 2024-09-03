@@ -15,10 +15,11 @@ import '../styles.css';
 
 const StockChart = ({ initialTicker, startDate, endDate, metrics, metricsList }) => {
   const [ticker, setTicker] = useState(initialTicker);
-  const [data, setData] = useState([]);
+  const [allData, setAllData] = useState([]);
   const [filteredData, setFilteredData] = useState([]);
   const [isWaterfall, setIsWaterfall] = useState(true);
 
+  // Fetch all data when the ticker changes
   useEffect(() => {
     if (ticker) {
       const end = new Date();
@@ -33,24 +34,25 @@ const StockChart = ({ initialTicker, startDate, endDate, metrics, metricsList })
         .then((response) => response.json())
         .then((data) => {
           const sortedData = data.sort((a, b) => new Date(a.Date) - new Date(b.Date));
-          setData(sortedData);
+          setAllData(sortedData);
         });
     }
-  }, [ticker, metrics]);
+  }, [ticker]);
 
+  // Filter data based on metrics and date range
   useEffect(() => {
-    if (data.length > 0) {
+    if (allData.length > 0) {
       const start = startDate.toISOString().split('T')[0];
       const end = endDate.toISOString().split('T')[0];
 
-      const filtered = data.filter(item => {
+      const filtered = allData.filter(item => {
         const itemDate = new Date(item.Date);
         return itemDate >= new Date(start) && itemDate <= new Date(end);
       });
 
       setFilteredData(filtered);
     }
-  }, [data, startDate, endDate]);
+  }, [allData, startDate, endDate, metrics]);
 
   const handleTickerChange = (e) => {
     setTicker(e.target.value.toUpperCase());
