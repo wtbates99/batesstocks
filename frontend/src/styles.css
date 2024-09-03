@@ -339,3 +339,26 @@ h1, h2, h3, h4, h5, h6, label {
   background-color: #333333;
   box-shadow: 0 0 10px rgba(255, 255, 255, 0.2);
 }
+
+.custom-tooltip {
+  background-color: rgba(50, 50, 50, 0.8); /* Opaque dark grey background */
+  border-radius: 8px;
+  padding: 10px;
+  color: #ffffff; /* Default text color */
+  font-family: 'Poppins', sans-serif;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3); /* Slight shadow for depth */
+}
+
+.tooltip-label {
+  margin-bottom: 5px;
+  font-weight: bold;
+  color: #ffffff; /* White color for the date */
+}
+
+.metric-name {
+  font-weight: bold;
+}
+
+.metric-value {
+  color: #ffffff; /* White color for the values */
+}

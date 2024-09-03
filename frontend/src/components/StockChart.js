@@ -81,10 +81,13 @@ const StockChart = ({ initialTicker, startDate, endDate, metrics, metricsList })
 
     return (
       <div className="custom-tooltip">
-        <p className="label">{`Date: ${new Date(label).toLocaleDateString(undefined, { month: '2-digit', day: '2-digit', year: '2-digit' })}`}</p>
+        <p className="tooltip-label">{`Date: ${new Date(label).toLocaleDateString(undefined, { month: '2-digit', day: '2-digit', year: '2-digit' })}`}</p>
         {payload.map((entry, index) => (
-          <p key={index} style={{ color: entry.stroke }}>
-            {`${entry.dataKey.replace('Ticker_', '')}: ${formatYAxis(entry.value)}`}
+          <p key={index}>
+            <span className="metric-name" style={{ color: entry.stroke }}>
+              {entry.dataKey.replace('Ticker_', '')}:
+            </span>{' '}
+            <span className="metric-value">{entry.value.toFixed(2)}</span>
           </p>
         ))}
       </div>
