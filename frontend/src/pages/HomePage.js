@@ -1,5 +1,5 @@
-
-import React, { useState } from 'react';
+// HomePage.js
+import React, { useState, useMemo, useCallback } from 'react';
 import StockChart from '../components/StockChart';
 import '../styles.css';
 
@@ -35,10 +35,14 @@ const metricsList = [
 const defaultTickers = ['AAPL', 'GOOGL', 'AMZN', 'MSFT', 'TSLA', 'NKE', 'NVDA', 'NFLX', 'JPM'];
 
 const HomePage = () => {
-  const [startDate, setStartDate] = useState(new Date(new Date().setDate(new Date().getDate() - 30)));
+  const [startDate, setStartDate] = useState(
+    new Date(new Date().setDate(new Date().getDate() - 30))
+  );
   const [endDate, setEndDate] = useState(new Date());
   const [selectedRange, setSelectedRange] = useState(30); // Default to Last 30 Days
-  const [selectedMetrics, setSelectedMetrics] = useState(metricsList.slice(0, 4).map(m => m.name));
+  const [selectedMetrics, setSelectedMetrics] = useState(
+    metricsList.slice(0, 4).map((m) => m.name)
+  );
   const [collapsedGroups, setCollapsedGroups] = useState({
     Prices: false,
     Volume: true,
@@ -48,31 +52,48 @@ const HomePage = () => {
   });
   const [sidebarHidden, setSidebarHidden] = useState(false);
 
-  const setDateRange = (days) => {
+  const groupedMetrics = useMemo(
+    () => ({
+      Prices: metricsList.filter((metric) =>
+        ['Open', 'Close', 'High', 'Low'].includes(metric.name.replace('Ticker_', ''))
+      ),
+      Volume: metricsList.filter((metric) => metric.name.includes('Volume')),
+      'Moving Averages': metricsList.filter(
+        (metric) => metric.name.includes('SMA') || metric.name.includes('EMA')
+      ),
+      Oscillators: metricsList.filter(
+        (metric) => metric.name.includes('MACD') || metric.name.includes('RSI')
+      ),
+      'Bollinger Bands': metricsList.filter((metric) => metric.name.includes('Bollinger')),
+    }),
+    []
+  );
+
+  const setDateRange = useCallback((days) => {
     const end = new Date();
     const start = new Date();
     start.setDate(end.getDate() - days);
     setStartDate(start);
     setEndDate(end);
     setSelectedRange(days);
-  };
+  }, []);
 
-  const toggleMetric = (metric) => {
-    setSelectedMetrics(prev =>
-      prev.includes(metric.name) ? prev.filter(m => m !== metric.name) : [...prev, metric.name]
+  const toggleMetric = useCallback((metricName) => {
+    setSelectedMetrics((prev) =>
+      prev.includes(metricName) ? prev.filter((m) => m !== metricName) : [...prev, metricName]
     );
-  };
+  }, []);
 
-  const toggleGroupCollapse = (groupName) => {
-    setCollapsedGroups(prev => ({
+  const toggleGroupCollapse = useCallback((groupName) => {
+    setCollapsedGroups((prev) => ({
       ...prev,
       [groupName]: !prev[groupName],
     }));
-  };
+  }, []);
 
-  const toggleSidebar = () => {
-    setSidebarHidden(!sidebarHidden);
-  };
+  const toggleSidebar = useCallback(() => {
+    setSidebarHidden((prev) => !prev);
+  }, []);
 
   return (
     <div className={`min-h-screen bg-dark ${sidebarHidden ? 'sidebar-hidden' : ''}`}>
@@ -87,47 +108,51 @@ const HomePage = () => {
         <div className={`sidebar-container ${sidebarHidden ? 'hidden' : ''}`}>
           <div className="sidebar-content">
             <div className="date-buttons-grid">
-              <button className={selectedRange === 7 ? 'active' : ''} onClick={() => setDateRange(7)}>7D</button>
-              <button className={selectedRange === 30 ? 'active' : ''} onClick={() => setDateRange(30)}>30D</button>
-              <button className={selectedRange === 90 ? 'active' : ''} onClick={() => setDateRange(90)}>90D</button>
-              <button className={selectedRange === 180 ? 'active' : ''} onClick={() => setDateRange(180)}>180D</button>
-              <button className={selectedRange === 365 ? 'active' : ''} onClick={() => setDateRange(365)}>1Y</button>
-              <button className={selectedRange === 730 ? 'active' : ''} onClick={() => setDateRange(730)}>2Y</button>
-              <button className={selectedRange === 1095 ? 'active' : ''} onClick={() => setDateRange(1095)}>3Y</button>
-              <button className={selectedRange === 1460 ? 'active' : ''} onClick={() => setDateRange(1460)}>4Y</button>
-              <button className={selectedRange === 1825 ? 'active' : ''} onClick={() => setDateRange(1825)}>5Y</button>
+              {[7, 30, 90, 180, 365, 730, 1095, 1460, 1825].map((days) => (
+                <button
+                  key={days}
+                  className={selectedRange === days ? 'active' : ''}
+                  onClick={() => setDateRange(days)}
+                >
+                  {days >= 365 ? `${days / 365}Y` : `${days}D`}
+                </button>
+              ))}
             </div>
 
             <div className="metrics-section">
-              {Object.entries({
-                Prices: metricsList.filter(metric => ['Open', 'Close', 'High', 'Low'].includes(metric.name.replace('Ticker_', ''))),
-                Volume: metricsList.filter(metric => metric.name.includes('Volume')),
-                'Moving Averages': metricsList.filter(metric => metric.name.includes('SMA') || metric.name.includes('EMA')),
-                Oscillators: metricsList.filter(metric => metric.name.includes('MACD') || metric.name.includes('RSI')),
-                'Bollinger Bands': metricsList.filter(metric => metric.name.includes('Bollinger')),
-              }).map(([groupName, groupMetrics]) => (
+              {Object.entries(groupedMetrics).map(([groupName, groupMetrics]) => (
                 <div className="metrics-group" key={groupName}>
                   <h3 onClick={() => toggleGroupCollapse(groupName)} className="group-header">
                     {groupName}
-                    <span className={`collapse-icon ${collapsedGroups[groupName] ? 'collapsed' : ''}`}>▼</span>
+                    <span
+                      className={`collapse-icon ${collapsedGroups[groupName] ? 'collapsed' : ''}`}
+                    >
+                      ▼
+                    </span>
                   </h3>
                   {!collapsedGroups[groupName] && (
                     <div className="group-metrics">
                       {groupMetrics.map((metric) => (
                         <div
                           key={metric.name}
-                          className={`metric-item ${selectedMetrics.includes(metric.name) ? 'selected' : ''}`}
-                          onClick={() => toggleMetric(metric)}
+                          className={`metric-item ${
+                            selectedMetrics.includes(metric.name) ? 'selected' : ''
+                          }`}
+                          onClick={() => toggleMetric(metric.name)}
                           style={{
                             backgroundColor: selectedMetrics.includes(metric.name)
-                              ? `${metric.color.replace('hsl', 'hsla').replace('%)', '%, 0.5)')}` // Directly apply HSL color with 50% opacity
-                              : '#1f1f1f', // Use stock background color for unselected
+                              ? `${metric.color.replace('hsl', 'hsla').replace('%)', '%, 0.5)')}`
+                              : '#1f1f1f',
                             color: selectedMetrics.includes(metric.name) ? '#ffffff' : '#e5e5e5',
-                            textShadow: selectedMetrics.includes(metric.name) ? '1px 1px 2px #000000' : 'none',
-                            borderColor: '#444444',  /* Light grey border */
+                            textShadow: selectedMetrics.includes(metric.name)
+                              ? '1px 1px 2px #000000'
+                              : 'none',
+                            borderColor: '#444444',
                           }}
                         >
-                          <span className="metric-label-text">{metric.name.replace(/Ticker_/g, '').replace(/_/g, ' ')}</span>
+                          <span className="metric-label-text">
+                            {metric.name.replace(/Ticker_/g, '').replace(/_/g, ' ')}
+                          </span>
                         </div>
                       ))}
                     </div>
@@ -147,7 +172,6 @@ const HomePage = () => {
                 endDate={endDate}
                 metrics={selectedMetrics}
                 metricsList={metricsList}
-                roundToWholeNumber={true}
               />
             </div>
           ))}
