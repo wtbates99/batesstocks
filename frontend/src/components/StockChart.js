@@ -1,4 +1,3 @@
-
 // StockChart.js
 import React, { useState, useEffect, useMemo, useCallback, memo } from 'react';
 import {
@@ -17,6 +16,19 @@ import '../styles.css';
 // Simple in-memory cache
 const dataCache = {};
 
+// Function to parse date inputs as local dates
+function parseDateLocal(dateInput) {
+  if (typeof dateInput === 'string') {
+    const parts = dateInput.split('-');
+    return new Date(parts[0], parts[1] - 1, parts[2]);
+  } else if (dateInput instanceof Date) {
+    return new Date(dateInput.getFullYear(), dateInput.getMonth(), dateInput.getDate());
+  } else {
+    // Handle timestamp numbers or other date formats
+    return new Date(dateInput);
+  }
+}
+
 const StockChart = memo(({ initialTicker, startDate, endDate, metrics, metricsList }) => {
   const [ticker, setTicker] = useState(initialTicker);
   const [allData, setAllData] = useState([]);
@@ -30,6 +42,7 @@ const StockChart = memo(({ initialTicker, startDate, endDate, metrics, metricsLi
         setAllData(dataCache[cacheKey]);
       } else {
         const end = new Date();
+        end.setDate(end.getDate() - 0); // Adjust as needed
         const start = new Date();
         start.setFullYear(end.getFullYear() - 5); // Adjust as needed
 
@@ -43,7 +56,9 @@ const StockChart = memo(({ initialTicker, startDate, endDate, metrics, metricsLi
               `http://localhost:8000/stock/${ticker}?start_date=${startDateStr}&end_date=${endDateStr}&metrics=${metricsParam}`
             );
             const data = await response.json();
-            const sortedData = data.sort((a, b) => new Date(a.Date) - new Date(b.Date));
+            const sortedData = data.sort(
+              (a, b) => parseDateLocal(a.Date) - parseDateLocal(b.Date)
+            );
             dataCache[cacheKey] = sortedData;
             setAllData(sortedData);
           } catch (error) {
@@ -60,12 +75,12 @@ const StockChart = memo(({ initialTicker, startDate, endDate, metrics, metricsLi
   const filteredData = useMemo(() => {
     if (!allData.length) return [];
 
-    const start = new Date(startDate).setHours(0, 0, 0, 0);
-    const end = new Date(endDate).setHours(23, 59, 59, 999);
+    const start = parseDateLocal(startDate).setHours(0, 0, 0, 0);
+    const end = parseDateLocal(endDate).setHours(23, 59, 59, 999);
 
     return allData
       .filter((item) => {
-        const itemDate = new Date(item.Date).getTime();
+        const itemDate = parseDateLocal(item.Date).getTime();
         return itemDate >= start && itemDate <= end;
       })
       .map((item) => {
@@ -106,13 +121,14 @@ const StockChart = memo(({ initialTicker, startDate, endDate, metrics, metricsLi
 
   const formatXAxis = useCallback(
     (tick) => {
-      const date = new Date(tick);
-      const diffInDays = (endDate - startDate) / (1000 * 60 * 60 * 24);
+      const date = parseDateLocal(tick);
+      const diffInDays =
+        (parseDateLocal(endDate) - parseDateLocal(startDate)) / (1000 * 60 * 60 * 24);
 
       if (diffInDays <= 90) {
-        return `${('0' + (date.getMonth() + 1)).slice(-2)}-${(
-          '0' + date.getDate()
-        ).slice(-2)}-${date.getFullYear().toString().slice(-2)}`;
+        return `${('0' + (date.getMonth() + 1)).slice(-2)}-${('0' + date.getDate()).slice(
+          -2
+        )}-${date.getFullYear().toString().slice(-2)}`;
       }
       return `${date.toLocaleString('default', { month: 'short' })} '${date
         .getFullYear()
@@ -127,11 +143,14 @@ const StockChart = memo(({ initialTicker, startDate, endDate, metrics, metricsLi
 
     return (
       <div className="custom-tooltip">
-        <p className="tooltip-label">{`Date: ${new Date(label).toLocaleDateString(undefined, {
-          month: '2-digit',
-          day: '2-digit',
-          year: '2-digit',
-        })}`}</p>
+        <p className="tooltip-label">{`Date: ${parseDateLocal(label).toLocaleDateString(
+          undefined,
+          {
+            month: '2-digit',
+            day: '2-digit',
+            year: '2-digit',
+          }
+        )}`}</p>
         {payload.map((entry) => (
           <p key={entry.dataKey}>
             <span className="metric-name" style={{ color: entry.stroke }}>
