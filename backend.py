@@ -15,24 +15,32 @@ from pydantic import BaseModel
 from typing import List, Optional
 from databases import Database
 import datetime
-
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse
+import os
+
+app = FastAPI()
+
+app.mount("/static", StaticFiles(directory="frontend/build/static"), name="static")
 
 
-# Database setup
+@app.get("/", response_class=HTMLResponse)
+async def serve_react_app():
+    with open(os.path.join("frontend/build", "index.html")) as f:
+        return f.read()
+
+
 SQLALCHEMY_DATABASE_URL = "sqlite:///./stock_data.db"
 engine = create_engine(SQLALCHEMY_DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-# Async database
 database = Database(SQLALCHEMY_DATABASE_URL)
 
 
-# Define SQLAlchemy model
 class CombinedStockData(Base):
     __tablename__ = "combined_stock_data"
-
     id = Column(Integer, primary_key=True, index=True)
     Date = Column(DateTime, index=True)
     Ticker = Column(String, index=True)
@@ -92,7 +100,6 @@ class CombinedStockData(Base):
     FreeCashFlow = Column(String)
 
 
-# Pydantic models for request/response
 class StockData(BaseModel):
     Date: str
     Ticker: str
@@ -156,18 +163,15 @@ class CompanyInfo(BaseModel):
     FreeCashFlow: Optional[str] = None
 
 
-app = FastAPI()
-# Add this near the top of your FastAPI app file, after creating the FastAPI app instance
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # Allow requests from React app
+    allow_origins=["http://localhost:3000"],
     allow_credentials=True,
-    allow_methods=["*"],  # Allow all methods
-    allow_headers=["*"],  # Allow all headers
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
-# Startup and shutdown events
 @app.on_event("startup")
 async def startup():
     await database.connect()
@@ -178,7 +182,6 @@ async def shutdown():
     await database.disconnect()
 
 
-# Helper function for pagination
 async def paginate(query, page: int, page_size: int):
     total = await database.fetch_val(select(func.count()).select_from(query.alias()))
     items = await database.fetch_all(
@@ -191,9 +194,6 @@ async def paginate(query, page: int, page_size: int):
         "page_size": page_size,
         "pages": (total + page_size - 1) // page_size,
     }
-
-
-# Routes
 
 
 @app.get("/stock/{ticker}", response_model=List[StockData])
@@ -296,6 +296,13 @@ async def get_company_info(ticker: str):
         raise HTTPException(status_code=404, detail="Company not found")
 
     return CompanyInfo(**dict(result))
+
+
+# LAST!
+@app.get("/{full_path:path}", response_class=HTMLResponse)
+async def catch_all(full_path: str):
+    with open(os.path.join("frontend/build", "index.html")) as f:
+        return f.read()
 
 
 if __name__ == "__main__":
