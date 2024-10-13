@@ -14,6 +14,8 @@ def process_stock_data(conn: sqlite3.Connection):
         indicators = {
             f"{prefix}_SMA_10": ta.trend.sma_indicator(close, window=10),
             f"{prefix}_EMA_10": ta.trend.ema_indicator(close, window=10),
+            f"{prefix}_SMA_30": ta.trend.sma_indicator(close, window=30),
+            f"{prefix}_EMA_30": ta.trend.ema_indicator(close, window=30),
             f"{prefix}_RSI": ta.momentum.rsi(close, window=14),
             f"{prefix}_Stochastic_K": ta.momentum.stoch(
                 high, low, close, window=14, smooth_window=3
@@ -75,6 +77,8 @@ def process_stock_data(conn: sqlite3.Connection):
             t.Volume as Ticker_Volume,
             t.Ticker_SMA_10,
             t.Ticker_EMA_10,
+            t.Ticker_SMA_30,
+            t.Ticker_EMA_30,
             t.Ticker_RSI,
             t.Ticker_Stochastic_K,
             t.Ticker_Stochastic_D,
@@ -101,6 +105,8 @@ def process_stock_data(conn: sqlite3.Connection):
             s.Volume as Sector_Volume,
             s.Sector_SMA_10,
             s.Sector_EMA_10,
+            s.Sector_SMA_30,
+            s.Sector_EMA_30,
             s.Sector_RSI,
             s.Sector_Stochastic_K,
             s.Sector_Stochastic_D,
@@ -127,6 +133,8 @@ def process_stock_data(conn: sqlite3.Connection):
             ss.Volume as Subsector_Volume,
             ss.Subsector_SMA_10,
             ss.Subsector_EMA_10,
+            ss.Subsector_SMA_30,
+            ss.Subsector_EMA_30,
             ss.Subsector_RSI,
             ss.Subsector_Stochastic_K,
             ss.Subsector_Stochastic_D,

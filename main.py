@@ -34,6 +34,7 @@ def refresh_data():
     fetch_write_financial_data(conn)
     process_stock_data(conn)
 
+
 @app.get("/", response_class=HTMLResponse)
 async def serve_react_app():
     with open(os.path.join("frontend/build", "index.html")) as f:
@@ -60,6 +61,8 @@ class CombinedStockData(Base):
     Ticker_Volume = Column(Float)
     Ticker_SMA_10 = Column(Float)
     Ticker_EMA_10 = Column(Float)
+    Ticker_SMA_30 = Column(Float)
+    Ticker_EMA_30 = Column(Float)
     Ticker_RSI = Column(Float)
     Ticker_Stochastic_K = Column(Float)
     Ticker_Stochastic_D = Column(Float)
@@ -119,6 +122,8 @@ class StockData(BaseModel):
     Ticker_Volume: float
     Ticker_SMA_10: Optional[float] = None
     Ticker_EMA_10: Optional[float] = None
+    Ticker_SMA_30: Optional[float] = None
+    Ticker_EMA_30: Optional[float] = None
     Ticker_RSI: Optional[float] = None
     Ticker_Stochastic_K: Optional[float] = None
     Ticker_Stochastic_D: Optional[float] = None
@@ -224,6 +229,8 @@ async def get_stock_data(
         CombinedStockData.Ticker_Volume,
         CombinedStockData.Ticker_SMA_10,
         CombinedStockData.Ticker_EMA_10,
+        CombinedStockData.Ticker_SMA_30,
+        CombinedStockData.Ticker_EMA_30,
         CombinedStockData.Ticker_RSI,
         CombinedStockData.Ticker_Stochastic_K,
         CombinedStockData.Ticker_Stochastic_D,

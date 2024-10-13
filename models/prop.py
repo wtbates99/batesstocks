@@ -18,6 +18,8 @@ features = [
     "Ticker_Volume",
     "Ticker_SMA_10",
     "Ticker_EMA_10",
+    "Ticker_SMA_30",
+    "Ticker_EMA_30",
     "Ticker_RSI",
     "Ticker_Stochastic_K",
     "Ticker_Stochastic_D",
@@ -46,6 +48,7 @@ features = [
     "Subsector_Low",
     "Subsector_Volume",
     "Subsector_EMA_10",
+    "Subsector_EMA_30",
 ]
 
 # Prepare data
