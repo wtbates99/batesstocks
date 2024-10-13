@@ -350,3 +350,125 @@ label {
 .metric-value {
   color: #ffffff;
 }
+
+/* Responsive Styles */
+
+/* Medium Devices (Tablets, 768px and below) */
+@media (max-width: 768px) {
+
+  /* Adjust Grid Layout to Single Column */
+  .grid-container {
+    grid-template-columns: 1fr; /* Single column */
+    gap: 16px; /* Reduce gap for smaller screens */
+    padding: 10px; /* Reduce padding */
+  }
+
+  /* Reduce Header Padding and Font Size */
+  .header {
+    padding: 10px 15px; /* Reduced padding */
+    flex-direction: column; /* Stack header items vertically if needed */
+    align-items: flex-start; /* Align items to the start */
+  }
+
+  .header h1 {
+    font-size: 2rem; /* Reduced font size */
+    margin-bottom: 10px; /* Space between header elements */
+  }
+
+  /* Adjust Sidebar Toggle Button */
+  .sidebar-toggle-button {
+    font-size: 0.9rem; /* Slightly smaller font */
+    padding: 6px 10px; /* Reduced padding */
+  }
+
+  /* Adjust Sidebar Container Width */
+  .sidebar-container {
+    width: 200px; /* Narrower sidebar */
+  }
+
+  /* Adjust Chart Wrapper Padding */
+  .chart-wrapper {
+    padding: 12px; /* Reduced padding */
+  }
+
+  /* Adjust Date Buttons Grid */
+  .date-buttons-grid {
+    grid-template-columns: repeat(2, 1fr); /* Fewer columns */
+    gap: 4px; /* Reduced gap */
+  }
+
+  /* Adjust Metric Group Metrics Grid */
+  .group-metrics {
+    grid-template-columns: repeat(1, 1fr); /* Single column within groups */
+  }
+
+  /* Adjust Ticker Field Layout */
+  .ticker-field {
+    flex-direction: column; /* Stack input and button vertically */
+    align-items: stretch; /* Make elements take full width */
+  }
+
+  .ticker-input-field, .toggle-button {
+    width: 100%; /* Full width */
+    margin-bottom: 8px; /* Space between elements */
+  }
+}
+
+/* Small Devices (Phones, 480px and below) */
+@media (max-width: 480px) {
+
+  /* Further Adjust Grid Layout if Needed */
+  .grid-container {
+    padding: 5px; /* Further reduce padding */
+    gap: 12px; /* Further reduce gap */
+  }
+
+  /* Further Reduce Header Font Size */
+  .header h1 {
+    font-size: 1.5rem; /* Smaller font size */
+  }
+
+  /* Adjust Sidebar Toggle Button Even More */
+  .sidebar-toggle-button {
+    font-size: 0.8rem; /* Smaller font */
+    padding: 5px 8px; /* Smaller padding */
+  }
+
+  /* Adjust Sidebar Container Width */
+  .sidebar-container {
+    width: 180px; /* Even narrower sidebar */
+  }
+
+  /* Adjust Chart Wrapper Padding */
+  .chart-wrapper {
+    padding: 10px; /* Further reduced padding */
+  }
+
+  /* Adjust Date Buttons Grid */
+  .date-buttons-grid {
+    grid-template-columns: 1fr; /* Single column */
+    gap: 4px; /* Keep gap small */
+  }
+
+  /* Adjust Metric Group Metrics Grid */
+  .group-metrics {
+    grid-template-columns: 1fr; /* Ensure single column */
+  }
+
+  /* Adjust Ticker Field Layout */
+  .ticker-field {
+    flex-direction: column; /* Ensure vertical stacking */
+  }
+
+  .ticker-input-field, .toggle-button {
+    width: 100%; /* Full width */
+    margin-bottom: 6px; /* Space between elements */
+    font-size: 0.9rem; /* Slightly smaller font */
+    padding: 6px 10px; /* Reduced padding */
+  }
+
+  /* Optional: Adjust Chart Height for Mobile */
+  .chart-wrapper {
+    height: 250px; /* Adjust as needed */
+  }
+}
