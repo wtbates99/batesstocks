@@ -1,5 +1,4 @@
-// HomePage.js
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import StockChart from '../components/StockChart';
 import '../styles.css';
 
@@ -97,11 +96,36 @@ const HomePage = () => {
     setSidebarHidden((prev) => !prev);
   }, []);
 
+  const handleBackdropClick = useCallback(() => {
+    if (!sidebarHidden) {
+      setSidebarHidden(true);
+    }
+  }, [sidebarHidden]);
+
+  // Prevent body scrolling when sidebar is open
+  useEffect(() => {
+    if (!sidebarHidden) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = 'auto';
+    }
+
+    // Cleanup on unmount
+    return () => {
+      document.body.style.overflow = 'auto';
+    };
+  }, [sidebarHidden]);
+
   return (
     <div className={`min-h-screen bg-dark ${sidebarHidden ? 'sidebar-hidden' : ''}`}>
       <header className="header">
         <h1>Stock Indicators</h1>
-        <button className="sidebar-toggle-button" onClick={toggleSidebar}>
+        <button
+          className="sidebar-toggle-button"
+          onClick={toggleSidebar}
+          aria-label={sidebarHidden ? 'Expand Sidebar' : 'Collapse Sidebar'}
+          aria-expanded={!sidebarHidden}
+        >
           {sidebarHidden ? 'Expand Sidebar' : 'Collapse Sidebar'}
         </button>
       </header>
@@ -109,6 +133,13 @@ const HomePage = () => {
       <div className="main-content">
         <div className={`sidebar-container ${sidebarHidden ? 'hidden' : ''}`}>
           <div className="sidebar-content">
+            <button
+              className="close-sidebar-button"
+              onClick={toggleSidebar}
+              aria-label="Close Sidebar"
+            >
+              &times;
+            </button>
             <div className="date-buttons-grid">
               {[7, 30, 90, 180, 365, 730, 1095, 1460, 1825].map((days) => (
                 <button
@@ -179,6 +210,9 @@ const HomePage = () => {
           ))}
         </div>
       </div>
+
+      {/* Backdrop */}
+      {!sidebarHidden && <div className="backdrop" onClick={handleBackdropClick} />}
     </div>
   );
 };

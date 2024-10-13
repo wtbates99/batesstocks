@@ -1,9 +1,11 @@
+
 /* General Styles */
 html,
 body {
   min-height: 100%;
   height: 100%;
-  overflow: hidden;
+  /* Remove overflow: hidden to allow scrolling */
+  overflow: auto;
 }
 
 body::before {
@@ -20,7 +22,9 @@ body::before {
 html,
 body,
 #root {
-  overflow: auto !important;
+  height: 100%;
+  /* Remove overflow: hidden */
+  overflow: auto;
 }
 
 body,
@@ -91,7 +95,7 @@ label {
 /* Main Content */
 .main-content {
   display: flex;
-  margin-top: 100px;
+  margin-top: 100px; /* Header height */
   height: calc(100vh - 100px);
   overflow: hidden;
 }
@@ -101,7 +105,7 @@ label {
   position: relative;
   transition: transform 0.3s ease;
   width: 250px;
-  z-index: 2;
+  z-index: 160; /* Increased z-index to be above backdrop */
   background: linear-gradient(145deg, #2a2a2a, #1f1f1f);
   box-shadow: 0 2px 15px rgba(0, 0, 0, 0.2);
   border-radius: 8px;
@@ -272,6 +276,29 @@ label {
   color: #ffffff !important;
 }
 
+.custom-tooltip {
+  background-color: rgba(50, 50, 50, 0.8);
+  border-radius: 8px;
+  padding: 10px;
+  color: #ffffff;
+  font-family: 'Poppins', sans-serif;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.tooltip-label {
+  margin-bottom: 5px;
+  font-weight: bold;
+  color: #ffffff;
+}
+
+.metric-name {
+  font-weight: bold;
+}
+
+.metric-value {
+  color: #ffffff;
+}
+
 /* Spinner */
 .spinner:before {
   content: '';
@@ -328,45 +355,41 @@ label {
   box-shadow: 0 0 10px rgba(255, 255, 255, 0.2);
 }
 
-.custom-tooltip {
-  background-color: rgba(50, 50, 50, 0.8);
-  border-radius: 8px;
-  padding: 10px;
-  color: #ffffff;
-  font-family: 'Poppins', sans-serif;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
-}
-
-.tooltip-label {
-  margin-bottom: 5px;
-  font-weight: bold;
-  color: #ffffff;
-}
-
-.metric-name {
-  font-weight: bold;
-}
-
-.metric-value {
-  color: #ffffff;
+/* Backdrop Styles */
+.backdrop {
+  position: fixed;
+  top: 60px; /* Adjust based on header height */
+  left: 0;
+  width: 100%;
+  height: calc(100vh - 60px);
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 150;
 }
 
 /* Responsive Styles */
 
 /* Medium Devices (Tablets, 768px and below) */
 @media (max-width: 768px) {
-
   /* Adjust Grid Layout to Single Column */
   .grid-container {
     grid-template-columns: 1fr; /* Single column */
     gap: 16px; /* Reduce gap for smaller screens */
     padding: 10px; /* Reduce padding */
+    height: auto; /* Allow height to adjust */
+    overflow-y: visible; /* Allow content to expand */
+  }
+
+  /* Adjust Main Content */
+  .main-content {
+    height: auto; /* Allow height to adjust based on content */
+    flex-direction: column; /* Stack sidebar and content vertically */
+    overflow: visible; /* Allow scrolling */
   }
 
   /* Reduce Header Padding and Font Size */
   .header {
     padding: 10px 15px; /* Reduced padding */
-    flex-direction: column; /* Stack header items vertically if needed */
+    flex-direction: column; /* Stack header items vertically */
     align-items: flex-start; /* Align items to the start */
   }
 
@@ -381,14 +404,30 @@ label {
     padding: 6px 10px; /* Reduced padding */
   }
 
-  /* Adjust Sidebar Container Width */
+  /* Adjust Sidebar Container Width and Position */
   .sidebar-container {
     width: 200px; /* Narrower sidebar */
+    position: fixed;
+    top: 60px; /* Adjust based on header height */
+    left: 0;
+    height: calc(100vh - 60px);
+    transform: translateX(-100%);
+    transition: transform 0.3s ease;
+    z-index: 160; /* Ensure it's above the backdrop */
   }
 
-  /* Adjust Chart Wrapper Padding */
+  .sidebar-container.hidden {
+    transform: translateX(-100%);
+  }
+
+  .sidebar-container:not(.hidden) {
+    transform: translateX(0);
+  }
+
+  /* Ensure charts have enough vertical space */
   .chart-wrapper {
     padding: 12px; /* Reduced padding */
+    height: auto; /* Allow height to adjust */
   }
 
   /* Adjust Date Buttons Grid */
@@ -408,15 +447,21 @@ label {
     align-items: stretch; /* Make elements take full width */
   }
 
-  .ticker-input-field, .toggle-button {
+  .ticker-input-field,
+  .toggle-button {
     width: 100%; /* Full width */
     margin-bottom: 8px; /* Space between elements */
+  }
+
+  /* Adjust Backdrop z-index */
+  .backdrop {
+    top: 60px; /* Adjust based on header height */
+    height: calc(100vh - 60px);
   }
 }
 
 /* Small Devices (Phones, 480px and below) */
 @media (max-width: 480px) {
-
   /* Further Adjust Grid Layout if Needed */
   .grid-container {
     padding: 5px; /* Further reduce padding */
@@ -439,9 +484,10 @@ label {
     width: 180px; /* Even narrower sidebar */
   }
 
-  /* Adjust Chart Wrapper Padding */
+  /* Ensure charts have enough vertical space */
   .chart-wrapper {
     padding: 10px; /* Further reduced padding */
+    height: auto; /* Allow height to adjust */
   }
 
   /* Adjust Date Buttons Grid */
@@ -460,15 +506,17 @@ label {
     flex-direction: column; /* Ensure vertical stacking */
   }
 
-  .ticker-input-field, .toggle-button {
+  .ticker-input-field,
+  .toggle-button {
     width: 100%; /* Full width */
     margin-bottom: 6px; /* Space between elements */
     font-size: 0.9rem; /* Slightly smaller font */
     padding: 6px 10px; /* Reduced padding */
   }
 
-  /* Optional: Adjust Chart Height for Mobile */
-  .chart-wrapper {
-    height: 250px; /* Adjust as needed */
+  /* Adjust Backdrop for Small Devices */
+  .backdrop {
+    top: 60px; /* Adjust based on header height */
+    height: calc(100vh - 60px);
   }
 }

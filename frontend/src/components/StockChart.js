@@ -1,4 +1,3 @@
-// StockChart.js
 import React, { useState, useEffect, useMemo, useCallback, memo } from 'react';
 import {
   ResponsiveContainer,
@@ -12,6 +11,7 @@ import {
   AreaChart,
 } from 'recharts';
 import '../styles.css';
+import useWindowSize from '../hooks/useWindowSize'; // Adjust the path as necessary
 
 // Simple in-memory cache
 const dataCache = {};
@@ -33,6 +33,14 @@ const StockChart = memo(({ initialTicker, startDate, endDate, metrics, metricsLi
   const [ticker, setTicker] = useState(initialTicker);
   const [allData, setAllData] = useState([]);
   const [isWaterfall, setIsWaterfall] = useState(true);
+  const windowSize = useWindowSize();
+
+  // Determine chart height based on window width
+  const chartHeight = useMemo(() => {
+    if (windowSize.width <= 480) return 250; // Small devices
+    if (windowSize.width <= 768) return 300; // Medium devices
+    return 340; // Large devices
+  }, [windowSize.width]);
 
   // Fetch all data when the ticker changes
   useEffect(() => {
@@ -177,7 +185,7 @@ const StockChart = memo(({ initialTicker, startDate, endDate, metrics, metricsLi
           {isWaterfall ? 'Line Chart' : 'Waterfall Chart'}
         </button>
       </div>
-      <ResponsiveContainer width="100%" height={340}>
+      <ResponsiveContainer width="100%" height={chartHeight}>
         {isWaterfall ? (
           <AreaChart data={filteredData} margin={{ top: 10, right: 30, bottom: 10, left: 0 }}>
             <XAxis
