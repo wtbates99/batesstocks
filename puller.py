@@ -1,6 +1,6 @@
 import sqlite3
-from financial_data.data_pull import fetch_write_financial_data
-from financial_data.data_manipulation import process_stock_data
+from backend.data_pull import fetch_write_financial_data
+from backend.data_manipulation import process_stock_data
 
 conn = sqlite3.connect("stock_data.db")
 fetch_write_financial_data(conn)
@@ -8,7 +8,8 @@ process_stock_data(conn)
 
 cursor = conn.cursor()
 
-cursor.executescript("""
+cursor.executescript(
+    """
 DROP VIEW IF EXISTS signals_view;
 CREATE VIEW signals_view AS
 WITH signals AS (
@@ -68,10 +69,12 @@ SELECT
         ELSE NULL
     END AS Performance
 FROM signals;
-""")
+"""
+)
 
 # 2. Golden Cross and Death Cross Signals View (golden_death_cross_view)
-cursor.executescript("""
+cursor.executescript(
+    """
 DROP VIEW IF EXISTS golden_death_cross_view;
 CREATE VIEW golden_death_cross_view AS
 WITH cross_signals AS (
@@ -101,10 +104,12 @@ SELECT
   END AS Performance
 FROM cross_signals
 WHERE CrossSignal IS NOT NULL;
-""")
+"""
+)
 
 # 3. Bollinger Band Breakout Signals View (bollinger_breakouts_view)
-cursor.executescript("""
+cursor.executescript(
+    """
 DROP VIEW IF EXISTS bollinger_breakouts_view;
 CREATE VIEW bollinger_breakouts_view AS
 WITH bollinger_data AS (
@@ -135,10 +140,12 @@ SELECT
   END AS Performance
 FROM bollinger_data
 WHERE BollingerSignal IS NOT NULL;
-""")
+"""
+)
 
 # 4. Volume Breakout Signals View (volume_breakout_view)
-cursor.executescript("""
+cursor.executescript(
+    """
 DROP VIEW IF EXISTS volume_breakout_view;
 CREATE VIEW volume_breakout_view AS
 WITH volume_data AS (
@@ -165,10 +172,12 @@ SELECT
   END AS Performance
 FROM volume_data
 WHERE Ticker_Volume > Avg_Volume * 2;
-""")
+"""
+)
 
 # 5. MACD Histogram Reversal Signals View (macd_histogram_reversal_view)
-cursor.executescript("""
+cursor.executescript(
+    """
 DROP VIEW IF EXISTS macd_histogram_reversal_view;
 CREATE VIEW macd_histogram_reversal_view AS
 WITH macd_data AS (
@@ -197,7 +206,8 @@ SELECT
   END AS Performance
 FROM macd_data
 WHERE MACDReversal IS NOT NULL;
-""")
+"""
+)
 
 conn.commit()
 conn.close()

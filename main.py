@@ -7,8 +7,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
 import os
 import sqlite3
-from financial_data.data_pull import fetch_write_financial_data
-from financial_data.data_manipulation import process_stock_data
+from backend.data_pull import fetch_write_financial_data
+from backend.data_manipulation import process_stock_data
 from backend.models import StockData, CompanyInfo
 from backend.database import database, CombinedStockData
 
