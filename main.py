@@ -1,19 +1,6 @@
 from fastapi import FastAPI, HTTPException, Query
-from sqlalchemy import (
-    create_engine,
-    Column,
-    Integer,
-    String,
-    Float,
-    DateTime,
-    func,
-    select,
-)
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
-from pydantic import BaseModel
+from sqlalchemy import select
 from typing import List, Optional
-from databases import Database
 import datetime
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -22,6 +9,8 @@ import os
 import sqlite3
 from financial_data.data_pull import fetch_write_financial_data
 from financial_data.data_manipulation import process_stock_data
+from backend.models import StockData, CompanyInfo
+from backend.database import database, CombinedStockData
 
 app = FastAPI()
 
@@ -41,142 +30,6 @@ async def serve_react_app():
         return f.read()
 
 
-SQLALCHEMY_DATABASE_URL = "sqlite:///./stock_data.db"
-engine = create_engine(SQLALCHEMY_DATABASE_URL)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-Base = declarative_base()
-
-database = Database(SQLALCHEMY_DATABASE_URL)
-
-
-class CombinedStockData(Base):
-    __tablename__ = "combined_stock_data"
-    id = Column(Integer, primary_key=True, index=True)
-    Date = Column(DateTime, index=True)
-    Ticker = Column(String, index=True)
-    Ticker_Open = Column(Float)
-    Ticker_Close = Column(Float)
-    Ticker_High = Column(Float)
-    Ticker_Low = Column(Float)
-    Ticker_Volume = Column(Float)
-    Ticker_SMA_10 = Column(Float)
-    Ticker_EMA_10 = Column(Float)
-    Ticker_SMA_30 = Column(Float)
-    Ticker_EMA_30 = Column(Float)
-    Ticker_RSI = Column(Float)
-    Ticker_Stochastic_K = Column(Float)
-    Ticker_Stochastic_D = Column(Float)
-    Ticker_MACD = Column(Float)
-    Ticker_MACD_Signal = Column(Float)
-    Ticker_MACD_Diff = Column(Float)
-    Ticker_TSI = Column(Float)
-    Ticker_UO = Column(Float)
-    Ticker_ROC = Column(Float)
-    Ticker_Williams_R = Column(Float)
-    Ticker_Bollinger_High = Column(Float)
-    Ticker_Bollinger_Low = Column(Float)
-    Ticker_Bollinger_Mid = Column(Float)
-    Ticker_Bollinger_PBand = Column(Float)
-    Ticker_Bollinger_WBand = Column(Float)
-    Ticker_On_Balance_Volume = Column(Float)
-    Ticker_Chaikin_MF = Column(Float)
-    Ticker_Force_Index = Column(Float)
-    Ticker_MFI = Column(Float)
-    Sector = Column(String, index=True)
-    Subsector = Column(String, index=True)
-    FullName = Column(String)
-    MarketCap = Column(String)
-    Country = Column(String)
-    Website = Column(String)
-    Description = Column(String)
-    CEO = Column(String)
-    Employees = Column(String)
-    City = Column(String)
-    State = Column(String)
-    Zip = Column(String)
-    Address = Column(String)
-    Phone = Column(String)
-    Exchange = Column(String)
-    Currency = Column(String)
-    QuoteType = Column(String)
-    ShortName = Column(String)
-    Price = Column(String)
-    DividendRate = Column(String)
-    DividendYield = Column(String)
-    PayoutRatio = Column(String)
-    Beta = Column(String)
-    PE = Column(String)
-    EPS = Column(String)
-    Revenue = Column(String)
-    GrossProfit = Column(String)
-    FreeCashFlow = Column(String)
-
-
-class StockData(BaseModel):
-    Date: str
-    Ticker: str
-    Ticker_Open: float
-    Ticker_Close: float
-    Ticker_High: float
-    Ticker_Low: float
-    Ticker_Volume: float
-    Ticker_SMA_10: Optional[float] = None
-    Ticker_EMA_10: Optional[float] = None
-    Ticker_SMA_30: Optional[float] = None
-    Ticker_EMA_30: Optional[float] = None
-    Ticker_RSI: Optional[float] = None
-    Ticker_Stochastic_K: Optional[float] = None
-    Ticker_Stochastic_D: Optional[float] = None
-    Ticker_MACD: Optional[float] = None
-    Ticker_MACD_Signal: Optional[float] = None
-    Ticker_MACD_Diff: Optional[float] = None
-    Ticker_TSI: Optional[float] = None
-    Ticker_UO: Optional[float] = None
-    Ticker_ROC: Optional[float] = None
-    Ticker_Williams_R: Optional[float] = None
-    Ticker_Bollinger_High: Optional[float] = None
-    Ticker_Bollinger_Low: Optional[float] = None
-    Ticker_Bollinger_Mid: Optional[float] = None
-    Ticker_Bollinger_PBand: Optional[float] = None
-    Ticker_Bollinger_WBand: Optional[float] = None
-    Ticker_On_Balance_Volume: Optional[float] = None
-    Ticker_Chaikin_MF: Optional[float] = None
-    Ticker_Force_Index: Optional[float] = None
-    Ticker_MFI: Optional[float] = None
-
-
-class CompanyInfo(BaseModel):
-    Ticker: str
-    FullName: Optional[str] = None
-    Sector: Optional[str] = None
-    Subsector: Optional[str] = None
-    MarketCap: Optional[str] = None
-    Country: Optional[str] = None
-    Website: Optional[str] = None
-    Description: Optional[str] = None
-    CEO: Optional[str] = None
-    Employees: Optional[str] = None
-    City: Optional[str] = None
-    State: Optional[str] = None
-    Zip: Optional[str] = None
-    Address: Optional[str] = None
-    Phone: Optional[str] = None
-    Exchange: Optional[str] = None
-    Currency: Optional[str] = None
-    QuoteType: Optional[str] = None
-    ShortName: Optional[str] = None
-    Price: Optional[str] = None
-    DividendRate: Optional[str] = None
-    DividendYield: Optional[str] = None
-    PayoutRatio: Optional[str] = None
-    Beta: Optional[str] = None
-    PE: Optional[str] = None
-    EPS: Optional[str] = None
-    Revenue: Optional[str] = None
-    GrossProfit: Optional[str] = None
-    FreeCashFlow: Optional[str] = None
-
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000"],
@@ -194,20 +47,6 @@ async def startup():
 @app.on_event("shutdown")
 async def shutdown():
     await database.disconnect()
-
-
-async def paginate(query, page: int, page_size: int):
-    total = await database.fetch_val(select(func.count()).select_from(query.alias()))
-    items = await database.fetch_all(
-        query.offset((page - 1) * page_size).limit(page_size)
-    )
-    return {
-        "items": items,
-        "total": total,
-        "page": page,
-        "page_size": page_size,
-        "pages": (total + page_size - 1) // page_size,
-    }
 
 
 @app.get("/stock/{ticker}", response_model=List[StockData])
