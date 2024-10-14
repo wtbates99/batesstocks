@@ -65,3 +65,9 @@ class CompanyInfo(BaseModel):
     Revenue: Optional[str] = None
     GrossProfit: Optional[str] = None
     FreeCashFlow: Optional[str] = None
+
+
+class StockGroupings(BaseModel):
+    momentum: list[str]
+    breakout: list[str]
+    trend_strength: list[str]

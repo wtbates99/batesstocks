@@ -9,8 +9,9 @@ import os
 import sqlite3
 from backend.data_pull import fetch_write_financial_data
 from backend.data_manipulation import process_stock_data
-from backend.models import StockData, CompanyInfo
+from backend.models import StockData, CompanyInfo, StockGroupings
 from backend.database import database, CombinedStockData
+from queries import get_all_bullish_groups
 
 app = FastAPI()
 
@@ -151,6 +152,11 @@ async def get_company_info(ticker: str):
         raise HTTPException(status_code=404, detail="Company not found")
 
     return CompanyInfo(**dict(result))
+
+
+@app.get("/groupings", response_model=StockGroupings)
+async def get_stock_groupings():
+    return get_all_bullish_groups()
 
 
 # LAST!

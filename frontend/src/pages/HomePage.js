@@ -40,7 +40,7 @@ const HomePage = () => {
     new Date(new Date().setDate(new Date().getDate() - 30))
   );
   const [endDate, setEndDate] = useState(new Date());
-  const [selectedRange, setSelectedRange] = useState(30); // Default to Last 30 Days
+  const [selectedRange, setSelectedRange] = useState(30);
   const [selectedMetrics, setSelectedMetrics] = useState(
     metricsList.slice(0, 4).map((m) => m.name)
   );
@@ -52,6 +52,16 @@ const HomePage = () => {
     'Bollinger Bands': true,
   });
   const [sidebarHidden, setSidebarHidden] = useState(false);
+  const [tickerGroups, setTickerGroups] = useState(null);
+  const [selectedTickers, setSelectedTickers] = useState(defaultTickers);
+  const [selectedGroup, setSelectedGroup] = useState('default');
+
+  useEffect(() => {
+    fetch('/groupings')
+      .then(response => response.json())
+      .then(data => setTickerGroups(data))
+      .catch(error => console.error('Error fetching ticker groups:', error));
+  }, []);
 
   const groupedMetrics = useMemo(
     () => ({
@@ -102,7 +112,16 @@ const HomePage = () => {
     }
   }, [sidebarHidden]);
 
-  // Prevent body scrolling when sidebar is open
+  const handleGroupChange = useCallback((event) => {
+    const group = event.target.value;
+    setSelectedGroup(group);
+    if (group === 'default') {
+      setSelectedTickers(defaultTickers);
+    } else if (tickerGroups && tickerGroups[group]) {
+      setSelectedTickers(tickerGroups[group]);
+    }
+  }, [tickerGroups]);
+
   useEffect(() => {
     if (!sidebarHidden) {
       document.body.style.overflow = 'hidden';
@@ -110,7 +129,6 @@ const HomePage = () => {
       document.body.style.overflow = 'auto';
     }
 
-    // Cleanup on unmount
     return () => {
       document.body.style.overflow = 'auto';
     };
@@ -120,6 +138,14 @@ const HomePage = () => {
     <div className={`min-h-screen bg-dark ${sidebarHidden ? 'sidebar-hidden' : ''}`}>
       <header className="header">
         <h1>Stock Indicators</h1>
+        <div className="ticker-group-selector">
+          <select value={selectedGroup} onChange={handleGroupChange}>
+            <option value="default">Default Tickers</option>
+            {tickerGroups && Object.keys(tickerGroups).map(group => (
+              <option key={group} value={group}>{group.charAt(0).toUpperCase() + group.slice(1)}</option>
+            ))}
+          </select>
+        </div>
         <button
           className="sidebar-toggle-button"
           onClick={toggleSidebar}
@@ -197,7 +223,7 @@ const HomePage = () => {
         </div>
 
         <div className="grid-container">
-          {defaultTickers.map((ticker) => (
+          {selectedTickers.map((ticker) => (
             <div className="chart-wrapper" key={ticker}>
               <StockChart
                 initialTicker={ticker}
@@ -211,7 +237,6 @@ const HomePage = () => {
         </div>
       </div>
 
-      {/* Backdrop */}
       {!sidebarHidden && <div className="backdrop" onClick={handleBackdropClick} />}
     </div>
   );
