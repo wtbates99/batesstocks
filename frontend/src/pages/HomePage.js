@@ -69,25 +69,15 @@ const HomePage = () => {
   const [selectedGroup, setSelectedGroup] = useState('default');
   const [isHovering, setIsHovering] = useState(false);
 
-  // New function to fetch groupings with caching
-  const fetchGroupings = useCallback(async () => {
-    const cachedGroupings = localStorage.getItem('tickerGroupings');
-    const lastFetchTime = localStorage.getItem('lastGroupingsFetchTime');
-    const currentTime = new Date().getTime();
 
-    // Check if cache exists and is less than 12 hours old
-    if (cachedGroupings && lastFetchTime && currentTime - parseInt(lastFetchTime) < 12 * 60 * 60 * 1000) {
-      setTickerGroups(JSON.parse(cachedGroupings));
-    } else {
-      try {
-        const response = await fetch('/groupings');
-        const data = await response.json();
-        setTickerGroups(data);
-        localStorage.setItem('tickerGroupings', JSON.stringify(data));
-        localStorage.setItem('lastGroupingsFetchTime', currentTime.toString());
-      } catch (error) {
-        console.error('Error fetching ticker groups:', error);
-      }
+  // Simplified fetchGroupings function without caching
+  const fetchGroupings = useCallback(async () => {
+    try {
+      const response = await fetch('/groupings');
+      const data = await response.json();
+      setTickerGroups(data);
+    } catch (error) {
+      console.error('Error fetching ticker groups:', error);
     }
   }, []);
 

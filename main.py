@@ -11,7 +11,7 @@ from backend.data_pull import fetch_write_financial_data
 from backend.data_manipulation import process_stock_data
 from backend.models import StockData, CompanyInfo, StockGroupings
 from backend.database import database, CombinedStockData
-from queries import get_all_bullish_groups
+from queries import load_bullish_groups
 
 app = FastAPI()
 
@@ -33,7 +33,7 @@ async def serve_react_app():
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -156,7 +156,7 @@ async def get_company_info(ticker: str):
 
 @app.get("/groupings", response_model=StockGroupings)
 async def get_stock_groupings():
-    return get_all_bullish_groups()
+    return load_bullish_groups()
 
 
 # LAST!

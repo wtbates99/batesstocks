@@ -1,5 +1,6 @@
 import sqlite3
 from typing import List, Tuple
+import json
 
 
 def get_connection():
@@ -58,11 +59,17 @@ def get_bullish_trend_strength():
 
 
 def get_all_bullish_groups():
-    return {
+    bullish_groups = {
         "momentum": get_bullish_momentum(),
         "breakout": get_bullish_breakout(),
         "trend_strength": get_bullish_trend_strength(),
     }
 
+    # Save to JSON file
+    with open("bullish_groups.json", "w") as f:
+        json.dump(bullish_groups, f)
 
-print(get_all_bullish_groups())
+
+def load_bullish_groups():
+    with open("bullish_groups.json", "r") as f:
+        return json.load(f)
