@@ -75,8 +75,8 @@ const HomePage = () => {
     const lastFetchTime = localStorage.getItem('lastGroupingsFetchTime');
     const currentTime = new Date().getTime();
 
-    // Check if cache exists and is less than 24 hours old
-    if (cachedGroupings && lastFetchTime && currentTime - parseInt(lastFetchTime) < 24 * 60 * 60 * 1000) {
+    // Check if cache exists and is less than 12 hours old
+    if (cachedGroupings && lastFetchTime && currentTime - parseInt(lastFetchTime) < 12 * 60 * 60 * 1000) {
       setTickerGroups(JSON.parse(cachedGroupings));
     } else {
       try {

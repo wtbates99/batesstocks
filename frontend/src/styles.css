@@ -286,10 +286,20 @@ label {
 @media (max-width: 768px) {
   .sidebar-container {
     width: 100%;
+    transform: translateX(-100%);
+  }
+
+  .sidebar-container.visible {
+    transform: translateX(0);
   }
 
   .sidebar-visible .main-content {
     margin-left: 0;
+  }
+
+  /* Hide the sidebar when not visible on mobile */
+  .sidebar-container:not(.visible) {
+    display: none;
   }
 }
 
