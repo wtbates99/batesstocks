@@ -74,4 +74,6 @@ def load_bullish_groups():
     with open("bullish_groups.json", "r") as f:
         return json.load(f)
 
-get_all_bullish_groups()
+
+if __name__ == "__main__":
+    get_all_bullish_groups()
