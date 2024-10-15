@@ -37,7 +37,7 @@ cd stock-aggregator
 ### Step 3: Populate the SQLite Database
 
 ```bash
-python main.py
+python puller.py
 ```
 
 This fetches stock data and creates `stock_data.db`.
