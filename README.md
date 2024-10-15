@@ -47,9 +47,9 @@ This fetches stock data and creates `stock_data.db`.
 Navigate to the `frontend` directory and install dependencies:
 
 ```bash
-cd frontend
+cd frontend/src
 npm install
-npm start
+npm run build
 ```
 
 ### Step 5: Run the Backend
@@ -57,10 +57,9 @@ npm start
 In a separate terminal, start the FastAPI backend:
 
 ```bash
-uvicorn backend:app --reload
+python3 main.py
 ```
 
 ### Access the Application
 
-- Frontend: [http://localhost:3000](http://localhost:3000)
-- Backend: [http://localhost:8000](http://localhost:8000)
+- Application: [http://localhost:8000](http://localhost:8000)
