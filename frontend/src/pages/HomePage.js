@@ -35,6 +35,13 @@ const metricsList = [
 
 const defaultTickers = ['AAPL', 'GOOGL', 'AMZN', 'MSFT', 'TSLA', 'NKE', 'NVDA', 'NFLX', 'JPM'];
 
+const formatGroupName = (name) => {
+  return name
+    .split('_')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+};
+
 const HomePage = () => {
   const [startDate, setStartDate] = useState(
     new Date(new Date().setDate(new Date().getDate() - 30))
@@ -51,17 +58,37 @@ const HomePage = () => {
     Oscillators: true,
     'Bollinger Bands': true,
   });
-  const [sidebarHidden, setSidebarHidden] = useState(false);
+  const [sidebarHidden, setSidebarHidden] = useState(true);
   const [tickerGroups, setTickerGroups] = useState(null);
   const [selectedTickers, setSelectedTickers] = useState(defaultTickers);
   const [selectedGroup, setSelectedGroup] = useState('default');
+  const [isHovering, setIsHovering] = useState(false);
+
+  // New function to fetch groupings with caching
+  const fetchGroupings = useCallback(async () => {
+    const cachedGroupings = localStorage.getItem('tickerGroupings');
+    const lastFetchTime = localStorage.getItem('lastGroupingsFetchTime');
+    const currentTime = new Date().getTime();
+
+    // Check if cache exists and is less than 24 hours old
+    if (cachedGroupings && lastFetchTime && currentTime - parseInt(lastFetchTime) < 24 * 60 * 60 * 1000) {
+      setTickerGroups(JSON.parse(cachedGroupings));
+    } else {
+      try {
+        const response = await fetch('/groupings');
+        const data = await response.json();
+        setTickerGroups(data);
+        localStorage.setItem('tickerGroupings', JSON.stringify(data));
+        localStorage.setItem('lastGroupingsFetchTime', currentTime.toString());
+      } catch (error) {
+        console.error('Error fetching ticker groups:', error);
+      }
+    }
+  }, []);
 
   useEffect(() => {
-    fetch('/groupings')
-      .then(response => response.json())
-      .then(data => setTickerGroups(data))
-      .catch(error => console.error('Error fetching ticker groups:', error));
-  }, []);
+    fetchGroupings();
+  }, [fetchGroupings]);
 
   const groupedMetrics = useMemo(
     () => ({
@@ -112,8 +139,7 @@ const HomePage = () => {
     }
   }, [sidebarHidden]);
 
-  const handleGroupChange = useCallback((event) => {
-    const group = event.target.value;
+  const handleGroupChange = useCallback((group) => {
     setSelectedGroup(group);
     if (group === 'default') {
       setSelectedTickers(defaultTickers);
@@ -134,38 +160,68 @@ const HomePage = () => {
     };
   }, [sidebarHidden]);
 
+  useEffect(() => {
+    const handleMouseMove = (e) => {
+      if (e.clientX <= 10) {
+        setIsHovering(true);
+      } else if (e.clientX > 260) {
+        setIsHovering(false);
+      }
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+    };
+  }, []);
+
+  const sidebarVisible = !sidebarHidden || isHovering;
+
   return (
-    <div className={`min-h-screen bg-dark ${sidebarHidden ? 'sidebar-hidden' : ''}`}>
+    <div className={`min-h-screen bg-dark ${sidebarVisible ? 'sidebar-visible' : ''}`}>
       <header className="header">
         <h1>Stock Indicators</h1>
-        <div className="ticker-group-selector">
-          <select value={selectedGroup} onChange={handleGroupChange}>
-            <option value="default">Default Tickers</option>
-            {tickerGroups && Object.keys(tickerGroups).map(group => (
-              <option key={group} value={group}>{group.charAt(0).toUpperCase() + group.slice(1)}</option>
-            ))}
-          </select>
+        <div className="ticker-group-container">
+          <div
+            className={`ticker-group ${selectedGroup === 'default' ? 'selected' : ''}`}
+            onClick={() => handleGroupChange('default')}
+          >
+            <h3>Default</h3>
+            <div className="ticker-grid">
+              {defaultTickers.slice(0, 9).map(ticker => (
+                <div key={ticker} className="ticker-item">{ticker}</div>
+              ))}
+            </div>
+          </div>
+          {tickerGroups && Object.entries(tickerGroups).map(([group, tickers]) => (
+            <div
+              key={group}
+              className={`ticker-group ${selectedGroup === group ? 'selected' : ''}`}
+              onClick={() => handleGroupChange(group)}
+            >
+              <h3>{formatGroupName(group)}</h3>
+              <div className="ticker-grid">
+                {tickers.slice(0, 9).map(ticker => (
+                  <div key={ticker} className="ticker-item">{ticker}</div>
+                ))}
+              </div>
+            </div>
+          ))}
         </div>
         <button
           className="sidebar-toggle-button"
           onClick={toggleSidebar}
           aria-label={sidebarHidden ? 'Expand Sidebar' : 'Collapse Sidebar'}
-          aria-expanded={!sidebarHidden}
+          aria-expanded={sidebarVisible}
         >
           {sidebarHidden ? 'Expand Sidebar' : 'Collapse Sidebar'}
         </button>
       </header>
 
       <div className="main-content">
-        <div className={`sidebar-container ${sidebarHidden ? 'hidden' : ''}`}>
+        <div className={`sidebar-container ${sidebarVisible ? 'visible' : ''}`}>
           <div className="sidebar-content">
-            <button
-              className="close-sidebar-button"
-              onClick={toggleSidebar}
-              aria-label="Close Sidebar"
-            >
-              &times;
-            </button>
             <div className="date-buttons-grid">
               {[7, 30, 90, 180, 365, 730, 1095, 1460, 1825].map((days) => (
                 <button
@@ -237,7 +293,7 @@ const HomePage = () => {
         </div>
       </div>
 
-      {!sidebarHidden && <div className="backdrop" onClick={handleBackdropClick} />}
+      {sidebarVisible && <div className="backdrop" onClick={handleBackdropClick} />}
     </div>
   );
 };
