@@ -42,15 +42,20 @@ const formatGroupName = (name) => {
     .join(' ');
 };
 
+const defaultMetrics = {
+  default: ['Ticker_Low', 'Ticker_Close', 'Ticker_High', 'Ticker_Open'],
+  momentum: ['Ticker_Close', 'Ticker_SMA_10', 'Ticker_SMA_30'],
+  breakout: ['Ticker_Close', 'Ticker_Bollinger_High', 'Ticker_Bollinger_Low'],
+  trend_strength: ['Ticker_MACD', 'Ticker_MACD_Signal', 'Ticker_MACD_Diff']
+};
+
 const HomePage = () => {
   const [startDate, setStartDate] = useState(
     new Date(new Date().setDate(new Date().getDate() - 30))
   );
   const [endDate, setEndDate] = useState(new Date());
   const [selectedRange, setSelectedRange] = useState(30);
-  const [selectedMetrics, setSelectedMetrics] = useState(
-    metricsList.slice(0, 4).map((m) => m.name)
-  );
+  const [selectedMetrics, setSelectedMetrics] = useState(defaultMetrics.default);
   const [collapsedGroups, setCollapsedGroups] = useState({
     Prices: false,
     Volume: true,
@@ -143,8 +148,20 @@ const HomePage = () => {
     setSelectedGroup(group);
     if (group === 'default') {
       setSelectedTickers(defaultTickers);
+      setSelectedMetrics(defaultMetrics.default);
     } else if (tickerGroups && tickerGroups[group]) {
       setSelectedTickers(tickerGroups[group]);
+      // Set the appropriate metrics based on the group
+      if (group === 'momentum') {
+        setSelectedMetrics(defaultMetrics.momentum);
+      } else if (group === 'breakout') {
+        setSelectedMetrics(defaultMetrics.breakout);
+      } else if (group === 'trend_strength') {
+        setSelectedMetrics(defaultMetrics.trend_strength);
+      } else {
+        // For any other group, use the default metrics
+        setSelectedMetrics(defaultMetrics.default);
+      }
     }
   }, [tickerGroups]);
 
