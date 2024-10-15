@@ -18,8 +18,8 @@ This is a self-hosted application designed to aggregate stock data from multiple
 ### Step 1: Clone the Repository
 
 ```bash
-git clone https://github.com/your-username/stock_indicators.git
-cd stock-aggregator
+git clone https://github.com/your-username/Stock_TA_Charts.git
+cd Stock_TA_Charts
 ```
 
 ### Step 2: Python Environment Setup
