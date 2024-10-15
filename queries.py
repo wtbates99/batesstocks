@@ -73,3 +73,5 @@ def get_all_bullish_groups():
 def load_bullish_groups():
     with open("bullish_groups.json", "r") as f:
         return json.load(f)
+
+get_all_bullish_groups()
