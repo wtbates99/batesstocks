@@ -97,15 +97,22 @@ const HomePage = () => {
 
   const groupedMetrics = useMemo(
     () => ({
-      Prices: metricsList.filter((metric) =>
+      'Price Data': metricsList.filter((metric) =>
         ['Open', 'Close', 'High', 'Low'].includes(metric.name.replace('Ticker_', ''))
       ),
-      Volume: metricsList.filter((metric) => metric.name.includes('Volume')),
+      'Volume Indicators': metricsList.filter((metric) =>
+        metric.name.includes('Volume') ||
+        ['Chaikin_MF', 'Force_Index', 'MFI'].some(indicator => metric.name.includes(indicator))
+      ),
       'Moving Averages': metricsList.filter(
         (metric) => metric.name.includes('SMA') || metric.name.includes('EMA')
       ),
-      Oscillators: metricsList.filter(
-        (metric) => metric.name.includes('MACD') || metric.name.includes('RSI')
+      'Momentum Oscillators': metricsList.filter(
+        (metric) =>
+          metric.name.includes('MACD') ||
+          metric.name.includes('RSI') ||
+          metric.name.includes('Stochastic') ||
+          ['TSI', 'UO', 'ROC', 'Williams_R'].some(indicator => metric.name.includes(indicator))
       ),
       'Bollinger Bands': metricsList.filter((metric) => metric.name.includes('Bollinger')),
     }),
