@@ -27,6 +27,7 @@ const CompanyPage = () => {
       try {
         const response = await fetch(`/company/${ticker}`);
         const data = await response.json();
+        console.log('Fetched company data:', data); // Add this line
         setCompanyInfo(data);
       } catch (error) {
         console.error('Error fetching company info:', error);
@@ -58,8 +59,65 @@ const CompanyPage = () => {
     }));
   }, []);
 
+  const renderCompanyInfo = () => {
+    if (!companyInfo) return null;
+
+    const infoGroups = {
+      'General Info': ['FullName', 'Sector', 'Subsector', 'Country', 'Exchange', 'Currency', 'QuoteType'],
+      'Financial': ['MarketCap', 'Price', 'DividendRate', 'DividendYield', 'PayoutRatio', 'Beta', 'PE', 'EPS', 'Revenue', 'GrossProfit', 'FreeCashFlow'],
+      'Company Details': ['CEO', 'Employees', 'City', 'State', 'Zip', 'Address', 'Phone', 'Website'],
+    };
+
+    const formatValue = (key, value) => {
+      if (value === null || value === undefined) return 'N/A';
+      switch (key) {
+        case 'MarketCap':
+        case 'Revenue':
+        case 'GrossProfit':
+        case 'FreeCashFlow':
+          return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', notation: 'compact', maximumFractionDigits: 1 }).format(value);
+        case 'Price':
+        case 'DividendRate':
+        case 'EPS':
+          return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
+        case 'DividendYield':
+        case 'PayoutRatio':
+          return new Intl.NumberFormat('en-US', { style: 'percent', maximumFractionDigits: 2 }).format(value);
+        case 'Beta':
+        case 'PE':
+          return new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(value);
+        case 'Employees':
+          return new Intl.NumberFormat('en-US').format(value);
+        default:
+          return value;
+      }
+    };
+
+    return (
+      <div className="company-info-grid">
+        {Object.entries(infoGroups).map(([groupName, fields]) => (
+          <div key={groupName} className="info-group">
+            <h3>{groupName}</h3>
+            <div className="info-items">
+              {fields.map(field => {
+                const value = companyInfo[field];
+                if (value === null || value === undefined || value === '') return null;
+                return (
+                  <div key={field} className="info-item">
+                    <span className="info-label">{field.replace(/([A-Z])/g, ' $1').trim()}:</span>
+                    <span className="info-value">{formatValue(field, value)}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
   if (!companyInfo) {
-    return <div className="loading">Loading...</div>;
+    return <div className="loading">Loading company information...</div>;
   }
 
   return (
@@ -108,6 +166,16 @@ const CompanyPage = () => {
                           key={metric.name}
                           className={`metric-item ${selectedMetrics.includes(metric.name) ? 'selected' : ''}`}
                           onClick={() => toggleMetric(metric.name)}
+                          style={{
+                            backgroundColor: selectedMetrics.includes(metric.name)
+                              ? `${metric.color.replace('hsl', 'hsla').replace('%)', '%, 0.5)')}`
+                              : '#2d2d2d',
+                            color: selectedMetrics.includes(metric.name) ? '#ffffff' : '#e5e5e5',
+                            textShadow: selectedMetrics.includes(metric.name)
+                              ? '1px 1px 2px #000000'
+                              : 'none',
+                            borderColor: '#444444',
+                          }}
                         >
                           <span className="metric-label-text">
                             {metric.name.replace(/Ticker_/g, '').replace(/_/g, ' ')}
@@ -122,16 +190,7 @@ const CompanyPage = () => {
           </div>
           <div className="company-info">
             <h2>Company Information</h2>
-            <table>
-              <tbody>
-                {Object.entries(companyInfo).map(([key, value]) => (
-                  <tr key={key}>
-                    <td>{key.replace(/([A-Z])/g, ' $1').trim()}</td>
-                    <td>{value !== null ? value : 'N/A'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            {renderCompanyInfo()}
           </div>
         </div>
       </div>

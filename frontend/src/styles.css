@@ -823,17 +823,24 @@ label {
 
 .company-header {
   background-color: #1a1a1a;
-  padding: 20px;
+  padding: 10px 20px;
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 20px;
   border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
 .company-header h1 {
-  font-size: 1.5rem;
+  font-size: 1.2rem;
   margin: 0;
+}
+
+.header-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .back-button {
@@ -841,25 +848,28 @@ label {
   color: #e5e5e5;
   border: 1px solid #444444;
   border-radius: 4px;
-  padding: 8px 16px;
+  padding: 6px 12px;
   text-decoration: none;
-  transition: background-color 0.3s ease;
+  transition: background-color 0.3s ease, box-shadow 0.3s ease;
+  font-size: 0.9rem;
 }
 
 .back-button:hover {
-  background-color: #444444;
+  background-color: #3d3d3d;
+  box-shadow: 0 0 10px rgba(255, 255, 255, 0.1);
 }
 
 .company-content {
   display: flex;
   flex-direction: column;
+  gap: 20px;
 }
 
 .company-chart-container {
   background-color: #1a1a1a;
   padding: 20px;
   border-radius: 8px;
-  margin-bottom: 20px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
 .company-details {
@@ -872,6 +882,7 @@ label {
   background-color: #1a1a1a;
   padding: 20px;
   border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
 .company-info {
@@ -879,12 +890,91 @@ label {
   background-color: #1a1a1a;
   padding: 20px;
   border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  overflow-y: auto;
+  max-height: 600px;
+}
+
+.company-info h2 {
+  margin-top: 0;
+  margin-bottom: 20px;
+  font-size: 1.2rem;
+  border-bottom: 1px solid #444444;
+  padding-bottom: 10px;
+}
+
+.company-info-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 20px;
+}
+
+.info-group {
+  background-color: #222222;
+  border-radius: 8px;
+  padding: 15px;
+}
+
+.info-group h3 {
+  font-size: 1rem;
+  margin-top: 0;
+  margin-bottom: 10px;
+  color: #ffffff;
+}
+
+.info-items {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px;
+}
+
+.info-item {
+  font-size: 0.9rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.info-label {
+  color: #b0b0b0;
+  margin-right: 10px;
+}
+
+.info-value {
+  font-weight: 600;
+  color: #ffffff;
+}
+
+/* Responsive styles */
+@media (max-width: 1024px) {
+  .company-details {
+    flex-direction: column;
+  }
+
+  .company-sidebar,
+  .company-info {
+    flex: 1 1 auto;
+  }
+
+  .company-info {
+    max-height: none;
+  }
+}
+
+@media (max-width: 768px) {
+  .company-info-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .info-items {
+    grid-template-columns: 1fr;
+  }
 }
 
 .date-buttons-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
+  gap: 8px;
   margin-bottom: 20px;
 }
 
@@ -893,13 +983,15 @@ label {
   color: #e5e5e5;
   border: 1px solid #444444;
   border-radius: 4px;
-  padding: 8px;
+  padding: 6px 8px;
   cursor: pointer;
-  transition: background-color 0.3s ease;
+  transition: background-color 0.3s ease, box-shadow 0.3s ease;
+  font-size: 0.9rem;
 }
 
 .date-button:hover {
-  background-color: #444444;
+  background-color: #3d3d3d;
+  box-shadow: 0 0 10px rgba(255, 255, 255, 0.1);
 }
 
 .date-button.active {
@@ -920,9 +1012,15 @@ label {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 10px;
+  padding: 8px 10px;
   background-color: #2d2d2d;
   border-radius: 4px;
+  font-size: 1rem;
+  transition: background-color 0.3s ease;
+}
+
+.group-header:hover {
+  background-color: #3d3d3d;
 }
 
 .collapse-icon {
@@ -936,46 +1034,67 @@ label {
 .group-metrics {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 10px;
-  margin-top: 10px;
+  gap: 8px;
+  margin-top: 8px;
 }
 
 .metric-item {
   background-color: #2d2d2d;
   border: 1px solid #444444;
   border-radius: 4px;
-  padding: 8px;
+  padding: 6px 8px;
   cursor: pointer;
-  transition: background-color 0.3s ease;
+  transition: background-color 0.3s ease, box-shadow 0.3s ease, transform 0.2s ease;
+  font-size: 0.9rem;
+  text-align: center;
 }
 
 .metric-item:hover {
-  background-color: #3d3d3d;
+  transform: translateY(-2px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
 .metric-item.selected {
-  background-color: #4d4d4d;
-  border-color: #ffffff;
+  transform: translateY(-2px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
 .company-info h2 {
   margin-top: 0;
   margin-bottom: 20px;
+  font-size: 1.2rem;
+  border-bottom: 1px solid #444444;
+  padding-bottom: 10px;
 }
 
 .company-info table {
   width: 100%;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0 8px;
+}
+
+.company-info tr {
+  background-color: #1f1f1f;
+  transition: background-color 0.3s ease;
+}
+
+.company-info tr:hover {
+  background-color: #2a2a2a;
 }
 
 .company-info td {
-  padding: 8px;
-  border-bottom: 1px solid #444444;
+  padding: 10px;
+  border: none;
 }
 
 .company-info td:first-child {
   font-weight: bold;
   width: 40%;
+  border-radius: 4px 0 0 4px;
+}
+
+.company-info td:last-child {
+  border-radius: 0 4px 4px 0;
 }
 
 .loading {
@@ -983,7 +1102,8 @@ label {
   justify-content: center;
   align-items: center;
   height: 100vh;
-  font-size: 1.5rem;
+  font-size: 1.2rem;
+  color: #e5e5e5;
 }
 
 /* Responsive styles */
@@ -1002,18 +1122,25 @@ label {
   .company-header {
     flex-direction: column;
     align-items: flex-start;
+    padding: 15px;
   }
 
-  .back-button {
+  .header-controls {
     margin-top: 10px;
+    width: 100%;
+    justify-content: space-between;
   }
 
   .date-buttons-grid {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(3, 1fr);
   }
 
   .group-metrics {
     grid-template-columns: 1fr;
+  }
+
+  .company-info td {
+    padding: 8px;
   }
 }
 
