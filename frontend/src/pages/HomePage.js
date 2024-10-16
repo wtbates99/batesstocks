@@ -1,37 +1,9 @@
-import React, { useState, useMemo, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import StockChart from '../components/StockChart';
+import SearchBar from '../components/SearchBar';
 import '../styles.css';
-
-const metricsList = [
-  { name: 'Ticker_Low', color: 'hsl(0, 70%, 50%)' },
-  { name: 'Ticker_Close', color: 'hsl(60, 70%, 50%)' },
-  { name: 'Ticker_High', color: 'hsl(120, 70%, 50%)' },
-  { name: 'Ticker_Open', color: 'hsl(0, 0%, 80%)' },
-  { name: 'Ticker_Volume', color: 'hsl(280, 70%, 60%)' },
-  { name: 'Ticker_On_Balance_Volume', color: 'hsl(310, 70%, 50%)' },
-  { name: 'Ticker_Chaikin_MF', color: 'hsl(340, 70%, 60%)' },
-  { name: 'Ticker_Force_Index', color: 'hsl(270, 70%, 50%)' },
-  { name: 'Ticker_MFI', color: 'hsl(300, 70%, 60%)' },
-  { name: 'Ticker_SMA_10', color: 'hsl(180, 70%, 50%)' },
-  { name: 'Ticker_EMA_10', color: 'hsl(200, 70%, 60%)' },
-  { name: 'Ticker_SMA_30', color: 'hsl(220, 70%, 50%)' },
-  { name: 'Ticker_EMA_30', color: 'hsl(240, 70%, 60%)' },
-  { name: 'Ticker_RSI', color: 'hsl(20, 80%, 50%)' },
-  { name: 'Ticker_Stochastic_K', color: 'hsl(45, 80%, 60%)' },
-  { name: 'Ticker_Stochastic_D', color: 'hsl(70, 80%, 50%)' },
-  { name: 'Ticker_MACD', color: 'hsl(95, 80%, 60%)' },
-  { name: 'Ticker_MACD_Signal', color: 'hsl(120, 80%, 50%)' },
-  { name: 'Ticker_MACD_Diff', color: 'hsl(145, 80%, 60%)' },
-  { name: 'Ticker_TSI', color: 'hsl(170, 80%, 50%)' },
-  { name: 'Ticker_UO', color: 'hsl(195, 80%, 60%)' },
-  { name: 'Ticker_ROC', color: 'hsl(220, 80%, 50%)' },
-  { name: 'Ticker_Williams_R', color: 'hsl(245, 80%, 60%)' },
-  { name: 'Ticker_Bollinger_High', color: 'hsl(260, 70%, 60%)' },
-  { name: 'Ticker_Bollinger_Low', color: 'hsl(290, 70%, 50%)' },
-  { name: 'Ticker_Bollinger_Mid', color: 'hsl(320, 70%, 60%)' },
-  { name: 'Ticker_Bollinger_PBand', color: 'hsl(350, 70%, 50%)' },
-  { name: 'Ticker_Bollinger_WBand', color: 'hsl(230, 70%, 60%)' },
-];
+import { metricsList, groupedMetrics } from '../metricsList';
 
 const defaultTickers = ['AAPL', 'GOOGL', 'AMZN', 'MSFT', 'TSLA', 'NKE', 'NVDA', 'NFLX', 'JPM'];
 
@@ -69,8 +41,6 @@ const HomePage = () => {
   const [selectedGroup, setSelectedGroup] = useState('default');
   const [isHovering, setIsHovering] = useState(false);
 
-
-  // Simplified fetchGroupings function without caching
   const fetchGroupings = useCallback(async () => {
     try {
       const response = await fetch('/groupings');
@@ -84,30 +54,6 @@ const HomePage = () => {
   useEffect(() => {
     fetchGroupings();
   }, [fetchGroupings]);
-
-  const groupedMetrics = useMemo(
-    () => ({
-      'Price Data': metricsList.filter((metric) =>
-        ['Open', 'Close', 'High', 'Low'].includes(metric.name.replace('Ticker_', ''))
-      ),
-      'Volume Indicators': metricsList.filter((metric) =>
-        metric.name.includes('Volume') ||
-        ['Chaikin_MF', 'Force_Index', 'MFI'].some(indicator => metric.name.includes(indicator))
-      ),
-      'Moving Averages': metricsList.filter(
-        (metric) => metric.name.includes('SMA') || metric.name.includes('EMA')
-      ),
-      'Momentum Oscillators': metricsList.filter(
-        (metric) =>
-          metric.name.includes('MACD') ||
-          metric.name.includes('RSI') ||
-          metric.name.includes('Stochastic') ||
-          ['TSI', 'UO', 'ROC', 'Williams_R'].some(indicator => metric.name.includes(indicator))
-      ),
-      'Bollinger Bands': metricsList.filter((metric) => metric.name.includes('Bollinger')),
-    }),
-    []
-  );
 
   const setDateRange = useCallback((days) => {
     const end = new Date();
@@ -148,7 +94,6 @@ const HomePage = () => {
       setSelectedMetrics(defaultMetrics.default);
     } else if (tickerGroups && tickerGroups[group]) {
       setSelectedTickers(tickerGroups[group]);
-      // Set the appropriate metrics based on the group
       if (group === 'momentum') {
         setSelectedMetrics(defaultMetrics.momentum);
       } else if (group === 'breakout') {
@@ -156,7 +101,6 @@ const HomePage = () => {
       } else if (group === 'trend_strength') {
         setSelectedMetrics(defaultMetrics.trend_strength);
       } else {
-        // For any other group, use the default metrics
         setSelectedMetrics(defaultMetrics.default);
       }
     }
@@ -195,42 +139,29 @@ const HomePage = () => {
   return (
     <div className={`min-h-screen bg-dark ${sidebarVisible ? 'sidebar-visible' : ''}`}>
       <header className="header">
-        <h1>Stock Indicators</h1>
-        <div className="ticker-group-container">
-          <div
-            className={`ticker-group ${selectedGroup === 'default' ? 'selected' : ''}`}
-            onClick={() => handleGroupChange('default')}
+        <h1 className="header-title">Stock Indicators</h1>
+        <div className="header-controls">
+          <select
+            className="group-selector"
+            value={selectedGroup}
+            onChange={(e) => handleGroupChange(e.target.value)}
           >
-            <h3>Default</h3>
-            <div className="ticker-grid">
-              {defaultTickers.slice(0, 9).map(ticker => (
-                <div key={ticker} className="ticker-item">{ticker}</div>
-              ))}
-            </div>
-          </div>
-          {tickerGroups && Object.entries(tickerGroups).map(([group, tickers]) => (
-            <div
-              key={group}
-              className={`ticker-group ${selectedGroup === group ? 'selected' : ''}`}
-              onClick={() => handleGroupChange(group)}
-            >
-              <h3>{formatGroupName(group)}</h3>
-              <div className="ticker-grid">
-                {tickers.slice(0, 9).map(ticker => (
-                  <div key={ticker} className="ticker-item">{ticker}</div>
-                ))}
-              </div>
-            </div>
-          ))}
+            <option value="default">Default</option>
+            {tickerGroups && Object.keys(tickerGroups).map((group) => (
+              <option key={group} value={group}>
+                {formatGroupName(group)}
+              </option>
+            ))}
+          </select>
+          <SearchBar />
+          <button
+            className="sidebar-toggle-button"
+            onClick={toggleSidebar}
+            aria-label={sidebarHidden ? 'Expand Sidebar' : 'Collapse Sidebar'}
+          >
+            {sidebarHidden ? '☰' : '✕'}
+          </button>
         </div>
-        <button
-          className="sidebar-toggle-button"
-          onClick={toggleSidebar}
-          aria-label={sidebarHidden ? 'Expand Sidebar' : 'Collapse Sidebar'}
-          aria-expanded={sidebarVisible}
-        >
-          {sidebarHidden ? 'Expand Sidebar' : 'Collapse Sidebar'}
-        </button>
       </header>
 
       <div className="main-content">
@@ -295,6 +226,9 @@ const HomePage = () => {
         <div className="grid-container">
           {selectedTickers.map((ticker) => (
             <div className="chart-wrapper" key={ticker}>
+              <Link to={`/spotlight/${ticker}`} className="company-link">
+                <h3>{ticker}</h3>
+              </Link>
               <StockChart
                 initialTicker={ticker}
                 startDate={startDate}
