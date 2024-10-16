@@ -139,43 +139,29 @@ const HomePage = () => {
   return (
     <div className={`min-h-screen bg-dark ${sidebarVisible ? 'sidebar-visible' : ''}`}>
       <header className="header">
-        <h1>Stock Indicators</h1>
-        <div className="ticker-group-container">
-          <div
-            className={`ticker-group ${selectedGroup === 'default' ? 'selected' : ''}`}
-            onClick={() => handleGroupChange('default')}
+        <h1 className="header-title">Stock Indicators</h1>
+        <div className="header-controls">
+          <select
+            className="group-selector"
+            value={selectedGroup}
+            onChange={(e) => handleGroupChange(e.target.value)}
           >
-            <h3>Default</h3>
-            <div className="ticker-grid">
-              {defaultTickers.slice(0, 9).map(ticker => (
-                <div key={ticker} className="ticker-item">{ticker}</div>
-              ))}
-            </div>
-          </div>
-          {tickerGroups && Object.entries(tickerGroups).map(([group, tickers]) => (
-            <div
-              key={group}
-              className={`ticker-group ${selectedGroup === group ? 'selected' : ''}`}
-              onClick={() => handleGroupChange(group)}
-            >
-              <h3>{formatGroupName(group)}</h3>
-              <div className="ticker-grid">
-                {tickers.slice(0, 9).map(ticker => (
-                  <div key={ticker} className="ticker-item">{ticker}</div>
-                ))}
-              </div>
-            </div>
-          ))}
+            <option value="default">Default</option>
+            {tickerGroups && Object.keys(tickerGroups).map((group) => (
+              <option key={group} value={group}>
+                {formatGroupName(group)}
+              </option>
+            ))}
+          </select>
+          <SearchBar />
+          <button
+            className="sidebar-toggle-button"
+            onClick={toggleSidebar}
+            aria-label={sidebarHidden ? 'Expand Sidebar' : 'Collapse Sidebar'}
+          >
+            {sidebarHidden ? '☰' : '✕'}
+          </button>
         </div>
-        <SearchBar />
-        <button
-          className="sidebar-toggle-button"
-          onClick={toggleSidebar}
-          aria-label={sidebarHidden ? 'Expand Sidebar' : 'Collapse Sidebar'}
-          aria-expanded={sidebarVisible}
-        >
-          {sidebarHidden ? 'Expand Sidebar' : 'Collapse Sidebar'}
-        </button>
       </header>
 
       <div className="main-content">
