@@ -40,12 +40,12 @@ class CompanyInfo(BaseModel):
     FullName: Optional[str] = None
     Sector: Optional[str] = None
     Subsector: Optional[str] = None
-    MarketCap: Optional[str] = None
+    MarketCap: Optional[int] = None
     Country: Optional[str] = None
     Website: Optional[str] = None
     Description: Optional[str] = None
     CEO: Optional[str] = None
-    Employees: Optional[str] = None
+    Employees: Optional[int] = None
     City: Optional[str] = None
     State: Optional[str] = None
     Zip: Optional[str] = None
@@ -55,19 +55,24 @@ class CompanyInfo(BaseModel):
     Currency: Optional[str] = None
     QuoteType: Optional[str] = None
     ShortName: Optional[str] = None
-    Price: Optional[str] = None
-    DividendRate: Optional[str] = None
-    DividendYield: Optional[str] = None
-    PayoutRatio: Optional[str] = None
-    Beta: Optional[str] = None
-    PE: Optional[str] = None
-    EPS: Optional[str] = None
-    Revenue: Optional[str] = None
-    GrossProfit: Optional[str] = None
-    FreeCashFlow: Optional[str] = None
+    Price: Optional[float] = None
+    DividendRate: Optional[float] = None
+    DividendYield: Optional[float] = None
+    PayoutRatio: Optional[float] = None
+    Beta: Optional[float] = None
+    PE: Optional[float] = None
+    EPS: Optional[float] = None
+    Revenue: Optional[int] = None
+    GrossProfit: Optional[int] = None
+    FreeCashFlow: Optional[int] = None
 
 
 class StockGroupings(BaseModel):
     momentum: list[str]
     breakout: list[str]
     trend_strength: list[str]
+
+
+class SearchResult(BaseModel):
+    ticker: str
+    name: str

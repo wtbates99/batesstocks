@@ -30,9 +30,7 @@ function parseDateLocal(dateInput) {
 }
 
 const StockChart = memo(({ initialTicker, startDate, endDate, metrics, metricsList }) => {
-  const [ticker, setTicker] = useState(initialTicker);
   const [allData, setAllData] = useState([]);
-  const [isWaterfall, setIsWaterfall] = useState(true);
   const windowSize = useWindowSize();
 
   // Determine chart height based on window width
@@ -42,10 +40,10 @@ const StockChart = memo(({ initialTicker, startDate, endDate, metrics, metricsLi
     return 340; // Large devices
   }, [windowSize.width]);
 
-  // Fetch all data when the ticker changes
+  // Fetch all data when the component mounts or initialTicker changes
   useEffect(() => {
-    if (ticker) {
-      const cacheKey = `allData-${ticker}`;
+    if (initialTicker) {
+      const cacheKey = `allData-${initialTicker}`;
       if (dataCache[cacheKey]) {
         setAllData(dataCache[cacheKey]);
       } else {
@@ -61,7 +59,7 @@ const StockChart = memo(({ initialTicker, startDate, endDate, metrics, metricsLi
         const fetchData = async () => {
           try {
             const response = await fetch(
-              `http://localhost:8000/stock/${ticker}?start_date=${startDateStr}&end_date=${endDateStr}&metrics=${metricsParam}`
+              `http://localhost:8000/stock/${initialTicker}?start_date=${startDateStr}&end_date=${endDateStr}&metrics=${metricsParam}`
             );
             const data = await response.json();
             const sortedData = data.sort(
@@ -77,7 +75,7 @@ const StockChart = memo(({ initialTicker, startDate, endDate, metrics, metricsLi
         fetchData();
       }
     }
-  }, [ticker, metricsList]);
+  }, [initialTicker, metricsList]);
 
   // Filter data based on startDate, endDate, and metrics
   const filteredData = useMemo(() => {
@@ -100,14 +98,6 @@ const StockChart = memo(({ initialTicker, startDate, endDate, metrics, metricsLi
         return newItem;
       });
   }, [allData, startDate, endDate, metrics]);
-
-  const handleTickerChange = useCallback((e) => {
-    setTicker(e.target.value.toUpperCase());
-  }, []);
-
-  const toggleWaterfall = useCallback(() => {
-    setIsWaterfall((prev) => !prev);
-  }, []);
 
   const yAxisDomain = useMemo(() => {
     if (filteredData.length === 0) return ['auto', 'auto'];
@@ -173,85 +163,42 @@ const StockChart = memo(({ initialTicker, startDate, endDate, metrics, metricsLi
 
   return (
     <div className="chart-container">
-      <div className="ticker-field">
-        <input
-          type="text"
-          value={ticker}
-          onChange={handleTickerChange}
-          className="ticker-input-field"
-          placeholder="Enter Ticker"
-        />
-        <button onClick={toggleWaterfall} className="toggle-button">
-          {isWaterfall ? 'Line Chart' : 'Waterfall Chart'}
-        </button>
-      </div>
       <ResponsiveContainer width="100%" height={chartHeight}>
-        {isWaterfall ? (
-          <AreaChart data={filteredData} margin={{ top: 10, right: 30, bottom: 10, left: 0 }}>
-            <XAxis
-              dataKey="Date"
-              stroke="#cccccc"
-              tickFormatter={formatXAxis}
-              interval="preserveStartEnd"
-              minTickGap={20}
-            />
-            <YAxis stroke="#cccccc" domain={yAxisDomain} tickFormatter={formatYAxis} />
-            <CartesianGrid strokeDasharray="3 3" stroke="#333333" />
-            <Tooltip content={renderCustomTooltip} />
-            {metrics.map((metric) => {
-              const cleanMetric = metric.replace('Ticker_', '');
-              const metricColor =
-                metricsList.find((m) => m.name === metric)?.color || '#00bfff';
+        <AreaChart data={filteredData} margin={{ top: 10, right: 30, bottom: 10, left: 0 }}>
+          <XAxis
+            dataKey="Date"
+            stroke="#cccccc"
+            tickFormatter={formatXAxis}
+            interval="preserveStartEnd"
+            minTickGap={20}
+          />
+          <YAxis stroke="#cccccc" domain={yAxisDomain} tickFormatter={formatYAxis} />
+          <CartesianGrid strokeDasharray="3 3" stroke="#333333" />
+          <Tooltip content={renderCustomTooltip} />
+          {metrics.map((metric) => {
+            const cleanMetric = metric.replace('Ticker_', '');
+            const metricColor =
+              metricsList.find((m) => m.name === metric)?.color || '#00bfff';
 
-              return (
-                <React.Fragment key={cleanMetric}>
-                  <defs>
-                    <linearGradient id={`gradient_${cleanMetric}`} x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor={metricColor} stopOpacity={0.7} />
-                      <stop offset="100%" stopColor={metricColor} stopOpacity={0.1} />
-                    </linearGradient>
-                  </defs>
-                  <Area
-                    type="monotone"
-                    dataKey={metric}
-                    stroke={metricColor}
-                    fill={`url(#gradient_${cleanMetric})`}
-                    fillOpacity={0.2}
-                  />
-                </React.Fragment>
-              );
-            })}
-          </AreaChart>
-        ) : (
-          <LineChart data={filteredData} margin={{ top: 10, right: 30, bottom: 10, left: 0 }}>
-            <XAxis
-              dataKey="Date"
-              stroke="#cccccc"
-              tickFormatter={formatXAxis}
-              interval="preserveStartEnd"
-              minTickGap={20}
-            />
-            <YAxis stroke="#cccccc" domain={yAxisDomain} tickFormatter={formatYAxis} />
-            <CartesianGrid strokeDasharray="3 3" stroke="#333333" />
-            <Tooltip content={renderCustomTooltip} />
-            {metrics.map((metric) => {
-              const cleanMetric = metric.replace('Ticker_', '');
-              const metricColor =
-                metricsList.find((m) => m.name === metric)?.color || '#00bfff';
-              return (
-                <Line
-                  key={cleanMetric}
+            return (
+              <React.Fragment key={cleanMetric}>
+                <defs>
+                  <linearGradient id={`gradient_${cleanMetric}`} x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor={metricColor} stopOpacity={0.7} />
+                    <stop offset="100%" stopColor={metricColor} stopOpacity={0.1} />
+                  </linearGradient>
+                </defs>
+                <Area
                   type="monotone"
                   dataKey={metric}
                   stroke={metricColor}
-                  strokeWidth={2}
-                  dot={false}
-                  activeDot={{ r: 6, strokeWidth: 2, stroke: '#ffffff' }}
+                  fill={`url(#gradient_${cleanMetric})`}
+                  fillOpacity={0.2}
                 />
-              );
-            })}
-          </LineChart>
-        )}
+              </React.Fragment>
+            );
+          })}
+        </AreaChart>
       </ResponsiveContainer>
     </div>
   );

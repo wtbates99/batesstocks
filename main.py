@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException, Query
 from sqlalchemy import select
-from typing import List, Optional
+from typing import List, Optional, Union
 import datetime
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -9,13 +9,32 @@ import os
 import sqlite3
 from backend.data_pull import fetch_write_financial_data
 from backend.data_manipulation import process_stock_data
-from backend.models import StockData, CompanyInfo, StockGroupings
+from backend.models import StockData, CompanyInfo, StockGroupings, SearchResult
 from backend.database import database, CombinedStockData
 from queries import load_bullish_groups
+from cachetools import TTLCache
+import re
+from collections import defaultdict
+
+
+def safe_convert(value: Union[str, int, float], target_type: type):
+    if value == "N/A" or value is None:
+        return None
+    try:
+        return target_type(value)
+    except (ValueError, TypeError):
+        return None
+
 
 app = FastAPI()
 
 app.mount("/static", StaticFiles(directory="frontend/build/static"), name="static")
+
+# Initialize cache
+search_cache = TTLCache(maxsize=1000, ttl=3600)  # Cache for 1 hour
+
+# Prefix-based search index
+prefix_index = defaultdict(set)
 
 
 @app.get("/refresh_data")
@@ -43,6 +62,28 @@ app.add_middleware(
 @app.on_event("startup")
 async def startup():
     await database.connect()
+    await build_search_index()
+
+
+async def build_search_index():
+    query = select(CombinedStockData.Ticker, CombinedStockData.FullName)
+    results = await database.fetch_all(query)
+
+    for result in results:
+        ticker = result["Ticker"]
+        full_name = result["FullName"]
+
+        # Index ticker
+        for i in range(1, len(ticker) + 1):
+            prefix = ticker[:i].lower()
+            prefix_index[prefix].add((ticker, full_name))
+
+        # Index company name
+        words = re.findall(r"\w+", full_name.lower())
+        for word in words:
+            for i in range(1, len(word) + 1):
+                prefix = word[:i]
+                prefix_index[prefix].add((ticker, full_name))
 
 
 @app.on_event("shutdown")
@@ -151,7 +192,22 @@ async def get_company_info(ticker: str):
     if not result:
         raise HTTPException(status_code=404, detail="Company not found")
 
-    return CompanyInfo(**dict(result))
+    company_data = dict(result)
+    for key, value in company_data.items():
+        if key in ["MarketCap", "Employees", "Revenue", "GrossProfit", "FreeCashFlow"]:
+            company_data[key] = safe_convert(value, int)
+        elif key in [
+            "Price",
+            "DividendRate",
+            "DividendYield",
+            "PayoutRatio",
+            "Beta",
+            "PE",
+            "EPS",
+        ]:
+            company_data[key] = safe_convert(value, float)
+
+    return CompanyInfo(**company_data)
 
 
 @app.get("/groupings", response_model=StockGroupings)
@@ -159,7 +215,47 @@ async def get_stock_groupings():
     return load_bullish_groups()
 
 
-# LAST!
+@app.get("/search", response_model=List[SearchResult])
+async def search_companies(query: str):
+    if query in search_cache:
+        return search_cache[query]
+
+    query = query.lower()
+    results = set()
+
+    # Search in prefix index
+    for prefix, items in prefix_index.items():
+        if prefix.startswith(query):
+            results.update(items)
+
+    # Additional filtering based on the full query
+    filtered_results = [
+        (ticker, full_name)
+        for ticker, full_name in results
+        if query in ticker.lower() or query in full_name.lower()
+    ]
+
+    # Sort and limit results
+    sorted_results = sorted(
+        filtered_results,
+        key=lambda x: (
+            x[0].lower().startswith(query),
+            x[1].lower().startswith(query),
+            len(x[0]),
+            x[0].lower(),
+            x[1].lower(),
+        ),
+    )[:5]
+
+    search_results = [
+        SearchResult(ticker=ticker, name=full_name)
+        for ticker, full_name in sorted_results
+    ]
+
+    search_cache[query] = search_results
+    return search_results
+
+
 @app.get("/{full_path:path}", response_class=HTMLResponse)
 async def catch_all(full_path: str):
     with open(os.path.join("frontend/build", "index.html")) as f:
