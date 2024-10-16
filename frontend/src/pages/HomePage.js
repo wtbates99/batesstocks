@@ -1,9 +1,9 @@
-import React, { useState, useMemo, useCallback, useEffect } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import React, { useState, useCallback, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import StockChart from '../components/StockChart';
+import SearchBar from '../components/SearchBar';
 import '../styles.css';
 import { metricsList, groupedMetrics } from '../metricsList';
-import debounce from 'lodash/debounce';
 
 const defaultTickers = ['AAPL', 'GOOGL', 'AMZN', 'MSFT', 'TSLA', 'NKE', 'NVDA', 'NFLX', 'JPM'];
 
@@ -22,7 +22,6 @@ const defaultMetrics = {
 };
 
 const HomePage = () => {
-  const navigate = useNavigate();
   const [startDate, setStartDate] = useState(
     new Date(new Date().setDate(new Date().getDate() - 30))
   );
@@ -41,9 +40,6 @@ const HomePage = () => {
   const [selectedTickers, setSelectedTickers] = useState(defaultTickers);
   const [selectedGroup, setSelectedGroup] = useState('default');
   const [isHovering, setIsHovering] = useState(false);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [searchResults, setSearchResults] = useState([]);
-  const [searchCache, setSearchCache] = useState({});
 
   const fetchGroupings = useCallback(async () => {
     try {
@@ -110,47 +106,6 @@ const HomePage = () => {
     }
   }, [tickerGroups]);
 
-  const debouncedSearch = useMemo(
-    () =>
-      debounce(async (term) => {
-        if (term.length > 0) {
-          if (searchCache[term]) {
-            setSearchResults(searchCache[term]);
-          } else {
-            try {
-              const response = await fetch(`/search?query=${encodeURIComponent(term)}`);
-              if (response.ok) {
-                const data = await response.json();
-                setSearchResults(data);
-                setSearchCache(prev => ({ ...prev, [term]: data }));
-              } else {
-                console.error('Search request failed');
-                setSearchResults([]);
-              }
-            } catch (error) {
-              console.error('Error during search:', error);
-              setSearchResults([]);
-            }
-          }
-        } else {
-          setSearchResults([]);
-        }
-      }, 150),
-    [searchCache]
-  );
-
-  const handleSearch = useCallback((event) => {
-    const term = event.target.value;
-    setSearchTerm(term);
-    debouncedSearch(term);
-  }, [debouncedSearch]);
-
-  const handleSearchResultClick = useCallback((ticker) => {
-    setSearchTerm('');
-    setSearchResults([]);
-    navigate(`/spotlight/${ticker}`);
-  }, [navigate]);
-
   useEffect(() => {
     if (!sidebarHidden) {
       document.body.style.overflow = 'hidden';
@@ -212,28 +167,7 @@ const HomePage = () => {
             </div>
           ))}
         </div>
-        <div className="search-container">
-          <input
-            type="text"
-            placeholder="Search companies..."
-            value={searchTerm}
-            onChange={handleSearch}
-            className="search-input"
-          />
-          {searchResults.length > 0 && (
-            <ul className="search-results">
-              {searchResults.map((result) => (
-                <li
-                  key={result.ticker}
-                  onClick={() => handleSearchResultClick(result.ticker)}
-                  className="search-result-item"
-                >
-                  {result.name} ({result.ticker})
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+        <SearchBar />
         <button
           className="sidebar-toggle-button"
           onClick={toggleSidebar}

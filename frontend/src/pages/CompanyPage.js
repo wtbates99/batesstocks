@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import StockChart from '../components/StockChart';
+import SearchBar from '../components/SearchBar';
 import { metricsList, groupedMetrics } from '../metricsList';
 import '../styles.css';
 
@@ -65,7 +66,10 @@ const CompanyPage = () => {
     <div className="company-page">
       <header className="company-header">
         <h1>{companyInfo.FullName} ({ticker})</h1>
-        <Link to="/" className="back-button">Back to Home</Link>
+        <div className="header-controls">
+          <SearchBar />
+          <Link to="/" className="back-button">Back to Home</Link>
+        </div>
       </header>
       <div className="company-content">
         <div className="company-chart-container">

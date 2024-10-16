@@ -1056,3 +1056,21 @@ label {
 .search-result-item:hover {
   background-color: #3a3a3a;
 }
+
+.header-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.back-button {
+  padding: 5px 10px;
+  background-color: #444;
+  color: white;
+  text-decoration: none;
+  border-radius: 4px;
+}
+
+.back-button:hover {
+  background-color: #555;
+}
