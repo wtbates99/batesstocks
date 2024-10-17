@@ -1,7 +1,7 @@
 export const metricsList = [
   // Price Data (Unchanged)
-  { name: 'Ticker_Open', color: 'hsl(0, 0%, 100%)' },          // White
-  { name: 'Ticker_Close', color: 'hsl(60, 100%, 50%)' },      // Yellow
+  { name: 'Ticker_Open', color: 'hsl(60, 100%, 50%)' },      // Yellow
+  { name: 'Ticker_Close', color: 'hsl(0, 0%, 100%)' },          // White
   { name: 'Ticker_High', color: 'hsl(120, 100%, 40%)' },      // Green
   { name: 'Ticker_Low', color: 'hsl(0, 100%, 50%)' },         // Red
 
