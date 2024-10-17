@@ -32,7 +32,7 @@ export const metricsList = [
 
   // Bollinger Bands (Earth tones)
   { name: 'Ticker_Bollinger_High', color: 'hsl(120, 70%, 40%)' },        // Forest Green
-  { name: 'Ticker_Bollinger_Low', color: 'hsl(280, 100%, 50%)'      // Purple
+  { name: 'Ticker_Bollinger_Low', color: 'hsl(280, 100%, 50%)' },          // Purple
   { name: 'Ticker_Bollinger_Mid', color: 'hsl(60, 90%, 50%)' },          // Yellow
   { name: 'Ticker_Bollinger_PBand', color: 'hsl(180, 50%, 50%)' },       // Muted Teal
   { name: 'Ticker_Bollinger_WBand', color: 'hsl(0, 60%, 50%)' },         // Muted Red
