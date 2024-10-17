@@ -12,9 +12,10 @@ from backend.data_manipulation import process_stock_data
 from backend.models import StockData, CompanyInfo, StockGroupings, SearchResult
 from backend.database import database, CombinedStockData
 from queries import load_bullish_groups
-from cachetools import TTLCache
 import re
 from collections import defaultdict
+import json
+import fakeredis
 
 
 def safe_convert(value: Union[str, int, float], target_type: type):
@@ -30,8 +31,8 @@ app = FastAPI()
 
 app.mount("/static", StaticFiles(directory="frontend/build/static"), name="static")
 
-# Initialize cache
-search_cache = TTLCache(maxsize=1000, ttl=3600)  # Cache for 1 hour
+# In-memory Redis instance
+redis = None
 
 # Prefix-based search index
 prefix_index = defaultdict(set)
@@ -61,7 +62,9 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def startup():
+    global redis
     await database.connect()
+    redis = fakeredis.FakeRedis()
     await build_search_index()
 
 
@@ -89,6 +92,7 @@ async def build_search_index():
 @app.on_event("shutdown")
 async def shutdown():
     await database.disconnect()
+    redis.close()
 
 
 @app.get("/stock/{ticker}", response_model=List[StockData])
@@ -100,6 +104,12 @@ async def get_stock_data(
     page: int = Query(1, ge=1),
     page_size: int = Query(100, ge=1, le=1000),
 ):
+    cache_key = f"stock_data:{ticker}:{start_date}:{end_date}:{page}:{page_size}"
+    cached_data = redis.get(cache_key)
+
+    if cached_data:
+        return json.loads(cached_data)
+
     selected_metrics = [
         CombinedStockData.Date,
         CombinedStockData.Ticker,
@@ -145,7 +155,7 @@ async def get_stock_data(
     query = query.order_by(CombinedStockData.Date.desc())
     result = await database.fetch_all(query)
 
-    return [
+    stock_data = [
         StockData(
             Date=record["Date"].strftime("%Y-%m-%d"),
             **{k: record[k] for k in record.keys() if k != "Date"},
@@ -153,9 +163,22 @@ async def get_stock_data(
         for record in result
     ]
 
+    # Cache the result
+    redis.set(
+        cache_key, json.dumps([sd.dict() for sd in stock_data]), ex=3600
+    )  # Cache for 1 hour
+
+    return stock_data
+
 
 @app.get("/company/{ticker}", response_model=CompanyInfo)
 async def get_company_info(ticker: str):
+    cache_key = f"company_info:{ticker}"
+    cached_data = redis.get(cache_key)
+
+    if cached_data:
+        return CompanyInfo(**json.loads(cached_data))
+
     query = select(
         CombinedStockData.Ticker,
         CombinedStockData.FullName,
@@ -207,6 +230,9 @@ async def get_company_info(ticker: str):
         ]:
             company_data[key] = safe_convert(value, float)
 
+    # Cache the result
+    redis.set(cache_key, json.dumps(company_data), ex=600)  # Cache for 10 minutes
+
     return CompanyInfo(**company_data)
 
 
@@ -217,8 +243,11 @@ async def get_stock_groupings():
 
 @app.get("/search", response_model=List[SearchResult])
 async def search_companies(query: str):
-    if query in search_cache:
-        return search_cache[query]
+    cache_key = f"search:{query}"
+    cached_data = redis.get(cache_key)
+
+    if cached_data:
+        return json.loads(cached_data)
 
     query = query.lower()
     results = set()
@@ -252,7 +281,11 @@ async def search_companies(query: str):
         for ticker, full_name in sorted_results
     ]
 
-    search_cache[query] = search_results
+    # Cache the result
+    redis.set(
+        cache_key, json.dumps([sr.dict() for sr in search_results]), ex=3600
+    )  # Cache for 1 hour
+
     return search_results
 
 
