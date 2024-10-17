@@ -13,7 +13,7 @@ const CompanyPage = () => {
   );
   const [endDate, setEndDate] = useState(new Date());
   const [selectedRange, setSelectedRange] = useState(30);
-  const [selectedMetrics, setSelectedMetrics] = useState(['Ticker_Close']);
+  const [selectedMetrics, setSelectedMetrics] = useState(['Ticker_Close', 'Ticker_SMA_10', 'Ticker_EMA_10', 'Ticker_Bollinger_High', 'Ticker_Bollinger_Low'])
   const [collapsedGroups, setCollapsedGroups] = useState({
     'Price Data': false,
     'Volume Indicators': true,
