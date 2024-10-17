@@ -31,10 +31,8 @@ app = FastAPI()
 
 app.mount("/static", StaticFiles(directory="frontend/build/static"), name="static")
 
-# In-memory Redis instance
 redis = None
 
-# Prefix-based search index
 prefix_index = defaultdict(set)
 
 
@@ -51,9 +49,16 @@ async def serve_react_app():
         return f.read()
 
 
+origins = [
+    "http://localhost:8000",
+    "http://localhost:3000",
+    "https://stock-indicators.com",
+    "https://www.stock-indicators.com",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -76,12 +81,10 @@ async def build_search_index():
         ticker = result["Ticker"]
         full_name = result["FullName"]
 
-        # Index ticker
         for i in range(1, len(ticker) + 1):
             prefix = ticker[:i].lower()
             prefix_index[prefix].add((ticker, full_name))
 
-        # Index company name
         words = re.findall(r"\w+", full_name.lower())
         for word in words:
             for i in range(1, len(word) + 1):
@@ -163,7 +166,6 @@ async def get_stock_data(
         for record in result
     ]
 
-    # Cache the result
     redis.set(
         cache_key, json.dumps([sd.dict() for sd in stock_data]), ex=3600
     )  # Cache for 1 hour
@@ -230,7 +232,6 @@ async def get_company_info(ticker: str):
         ]:
             company_data[key] = safe_convert(value, float)
 
-    # Cache the result
     redis.set(cache_key, json.dumps(company_data), ex=600)  # Cache for 10 minutes
 
     return CompanyInfo(**company_data)
@@ -252,19 +253,16 @@ async def search_companies(query: str):
     query = query.lower()
     results = set()
 
-    # Search in prefix index
     for prefix, items in prefix_index.items():
         if prefix.startswith(query):
             results.update(items)
 
-    # Additional filtering based on the full query
     filtered_results = [
         (ticker, full_name)
         for ticker, full_name in results
         if query in ticker.lower() or query in full_name.lower()
     ]
 
-    # Sort and limit results
     sorted_results = sorted(
         filtered_results,
         key=lambda x: (
@@ -281,7 +279,6 @@ async def search_companies(query: str):
         for ticker, full_name in sorted_results
     ]
 
-    # Cache the result
     redis.set(
         cache_key, json.dumps([sr.dict() for sr in search_results]), ex=3600
     )  # Cache for 1 hour
