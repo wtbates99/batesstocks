@@ -59,7 +59,7 @@ const StockChart = memo(({ initialTicker, startDate, endDate, metrics, metricsLi
         const fetchData = async () => {
           try {
             const response = await fetch(
-              `http://localhost:8000/stock/${initialTicker}?start_date=${startDateStr}&end_date=${endDateStr}&metrics=${metricsParam}`
+              `/stock/${initialTicker}?start_date=${startDateStr}&end_date=${endDateStr}&metrics=${metricsParam}`
             );
             const data = await response.json();
             const sortedData = data.sort(
