@@ -64,6 +64,7 @@ def get_all_bullish_groups():
         "breakout": get_bullish_breakout(),
         "trend_strength": get_bullish_trend_strength(),
     }
+    print(bullish_groups)
 
     # Save to JSON file
     with open("bullish_groups.json", "w") as f:
