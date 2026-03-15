@@ -7,104 +7,87 @@ import '../styles.css';
 
 const CompanyPage = () => {
   const { ticker } = useParams();
-  const [companyInfo, setCompanyInfo] = useState(null);
-  const [startDate, setStartDate] = useState(
-    new Date(new Date().setDate(new Date().getDate() - 30))
-  );
-  const [endDate, setEndDate] = useState(new Date());
-  const [selectedRange, setSelectedRange] = useState(30);
-  const [selectedMetrics, setSelectedMetrics] = useState(['Ticker_Close', 'Ticker_SMA_10', 'Ticker_Bollinger_High', 'Ticker_Bollinger_Low'])
-  const [collapsedGroups, setCollapsedGroups] = useState({
-    'Price Data': false,
-    'Volume Indicators': true,
-    'Moving Averages': true,
+  const [companyInfo, setCompanyInfo]           = useState(null);
+  const [priceData, setPriceData]               = useState(null);
+  const [startDate, setStartDate]               = useState(new Date(Date.now() - 30 * 86400000));
+  const [endDate, setEndDate]                   = useState(new Date());
+  const [selectedRange, setSelectedRange]       = useState(30);
+  const [selectedMetrics, setSelectedMetrics]   = useState([
+    'Ticker_Close', 'Ticker_SMA_10', 'Ticker_Bollinger_High', 'Ticker_Bollinger_Low',
+  ]);
+  const [collapsedGroups, setCollapsedGroups]   = useState({
+    'Price Data':           false,
+    'Volume Indicators':    true,
+    'Moving Averages':      true,
     'Momentum Oscillators': true,
-    'Bollinger Bands': true,
+    'Bollinger Bands':      true,
   });
 
   useEffect(() => {
-    const fetchCompanyInfo = async () => {
-      try {
-        const response = await fetch(`/company/${ticker}`);
-        const data = await response.json();
-        console.log('Fetched company data:', data); // Add this line
-        setCompanyInfo(data);
-      } catch (error) {
-        console.error('Error fetching company info:', error);
-      }
-    };
-
-    fetchCompanyInfo();
+    setCompanyInfo(null);
+    setPriceData(null);
+    fetch(`/company/${ticker}`)
+      .then((r) => r.json())
+      .then(setCompanyInfo)
+      .catch(console.error);
   }, [ticker]);
 
   const setDateRange = useCallback((days) => {
-    const end = new Date();
-    const start = new Date();
-    start.setDate(end.getDate() - days);
-    setStartDate(start);
-    setEndDate(end);
+    setStartDate(new Date(Date.now() - days * 86400000));
+    setEndDate(new Date());
     setSelectedRange(days);
   }, []);
 
-  const toggleMetric = useCallback((metricName) => {
+  const toggleMetric = useCallback((name) => {
     setSelectedMetrics((prev) =>
-      prev.includes(metricName) ? prev.filter((m) => m !== metricName) : [...prev, metricName]
+      prev.includes(name) ? prev.filter((m) => m !== name) : [...prev, name]
     );
   }, []);
 
-  const toggleGroupCollapse = useCallback((groupName) => {
-    setCollapsedGroups((prev) => ({
-      ...prev,
-      [groupName]: !prev[groupName],
-    }));
+  const toggleGroupCollapse = useCallback((name) => {
+    setCollapsedGroups((prev) => ({ ...prev, [name]: !prev[name] }));
   }, []);
+
+  const formatValue = (key, value) => {
+    if (value === null || value === undefined) return 'N/A';
+    switch (key) {
+      case 'MarketCap': case 'Revenue': case 'GrossProfit': case 'FreeCashFlow':
+        return new Intl.NumberFormat('en-US', {
+          style: 'currency', currency: 'USD', notation: 'compact', maximumFractionDigits: 1,
+        }).format(value);
+      case 'Price': case 'DividendRate': case 'EPS':
+        return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
+      case 'DividendYield': case 'PayoutRatio':
+        return new Intl.NumberFormat('en-US', { style: 'percent', maximumFractionDigits: 2 }).format(value);
+      case 'Beta': case 'PE':
+        return new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(value);
+      case 'Employees':
+        return new Intl.NumberFormat('en-US').format(value);
+      default:
+        return value;
+    }
+  };
 
   const renderCompanyInfo = () => {
     if (!companyInfo) return null;
-
-    const infoGroups = {
-      'General Info': ['FullName', 'Sector', 'Subsector', 'Country', 'Exchange', 'Currency', 'QuoteType'],
-      'Financial': ['MarketCap', 'Price', 'DividendRate', 'DividendYield', 'PayoutRatio', 'Beta', 'PE', 'EPS', 'Revenue', 'GrossProfit', 'FreeCashFlow'],
-      'Company Details': ['CEO', 'Employees', 'City', 'State', 'Zip', 'Address', 'Phone', 'Website'],
-    };
-
-    const formatValue = (key, value) => {
-      if (value === null || value === undefined) return 'N/A';
-      switch (key) {
-        case 'MarketCap':
-        case 'Revenue':
-        case 'GrossProfit':
-        case 'FreeCashFlow':
-          return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', notation: 'compact', maximumFractionDigits: 1 }).format(value);
-        case 'Price':
-        case 'DividendRate':
-        case 'EPS':
-          return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
-        case 'DividendYield':
-        case 'PayoutRatio':
-          return new Intl.NumberFormat('en-US', { style: 'percent', maximumFractionDigits: 2 }).format(value);
-        case 'Beta':
-        case 'PE':
-          return new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(value);
-        case 'Employees':
-          return new Intl.NumberFormat('en-US').format(value);
-        default:
-          return value;
-      }
+    const groups = {
+      'General':    ['FullName', 'Sector', 'Subsector', 'Country', 'Exchange', 'Currency', 'QuoteType'],
+      'Financials': ['MarketCap', 'Price', 'DividendRate', 'DividendYield', 'PayoutRatio', 'Beta', 'PE', 'EPS', 'Revenue', 'GrossProfit', 'FreeCashFlow'],
+      'Company':    ['CEO', 'Employees', 'City', 'State', 'Address', 'Phone', 'Website'],
     };
 
     return (
       <div className="company-info-grid">
-        {Object.entries(infoGroups).map(([groupName, fields]) => (
+        {Object.entries(groups).map(([groupName, fields]) => (
           <div key={groupName} className="info-group">
             <h3>{groupName}</h3>
             <div className="info-items">
-              {fields.map(field => {
+              {fields.map((field) => {
                 const value = companyInfo[field];
                 if (value === null || value === undefined || value === '') return null;
                 return (
                   <div key={field} className="info-item">
-                    <span className="info-label">{field.replace(/([A-Z])/g, ' $1').trim()}:</span>
+                    <span className="info-label">{field.replace(/([A-Z])/g, ' $1').trim()}</span>
                     <span className="info-value">{formatValue(field, value)}</span>
                   </div>
                 );
@@ -116,19 +99,32 @@ const CompanyPage = () => {
     );
   };
 
-  if (!companyInfo) {
-    return <div className="loading">Loading company information...</div>;
-  }
+  if (!companyInfo) return <div className="loading">Loading {ticker}...</div>;
+
+  const change = priceData ? priceData.latestClose - priceData.prevClose : 0;
+  const pct    = priceData?.prevClose ? (change / priceData.prevClose) * 100 : 0;
+  const isPos  = change >= 0;
 
   return (
     <div className="company-page">
       <header className="company-header">
-        <h1>{companyInfo.FullName} ({ticker})</h1>
+        <div className="company-header-left">
+          <h1>{companyInfo.FullName} ({ticker})</h1>
+          {priceData && (
+            <div className="company-header-price">
+              <span className="company-current-price">${priceData.latestClose.toFixed(2)}</span>
+              <span className={`company-price-change ${isPos ? 'positive' : 'negative'}`}>
+                {isPos ? '▲' : '▼'} {Math.abs(change).toFixed(2)} ({Math.abs(pct).toFixed(2)}%)
+              </span>
+            </div>
+          )}
+        </div>
         <div className="header-controls">
           <SearchBar />
-          <Link to="/" className="back-button">Back to Home</Link>
+          <Link to="/" className="back-button">← Back</Link>
         </div>
       </header>
+
       <div className="company-content">
         <div className="company-chart-container">
           <StockChart
@@ -137,8 +133,10 @@ const CompanyPage = () => {
             endDate={endDate}
             metrics={selectedMetrics}
             metricsList={metricsList}
+            onDataLoaded={setPriceData}
           />
         </div>
+
         <div className="company-details">
           <div className="company-sidebar">
             <div className="date-buttons-grid">
@@ -152,42 +150,42 @@ const CompanyPage = () => {
                 </button>
               ))}
             </div>
+
             <div className="metrics-section">
-              {Object.entries(groupedMetrics).map(([groupName, groupMetrics]) => (
+              {Object.entries(groupedMetrics).map(([groupName, gMetrics]) => (
                 <div className="metrics-group" key={groupName}>
-                  <h3 onClick={() => toggleGroupCollapse(groupName)} className="group-header">
+                  <h3 className="group-header" onClick={() => toggleGroupCollapse(groupName)}>
                     {groupName}
                     <span className={`collapse-icon ${collapsedGroups[groupName] ? 'collapsed' : ''}`}>▼</span>
                   </h3>
                   {!collapsedGroups[groupName] && (
                     <div className="group-metrics">
-                      {groupMetrics.map((metric) => (
-                        <div
-                          key={metric.name}
-                          className={`metric-item ${selectedMetrics.includes(metric.name) ? 'selected' : ''}`}
-                          onClick={() => toggleMetric(metric.name)}
-                          style={{
-                            backgroundColor: selectedMetrics.includes(metric.name)
-                              ? `${metric.color.replace('hsl', 'hsla').replace('%)', '%, 0.5)')}`
-                              : '#2d2d2d',
-                            color: selectedMetrics.includes(metric.name) ? '#ffffff' : '#e5e5e5',
-                            textShadow: selectedMetrics.includes(metric.name)
-                              ? '1px 1px 2px #000000'
-                              : 'none',
-                            borderColor: '#444444',
-                          }}
-                        >
-                          <span className="metric-label-text">
-                            {metric.name.replace(/Ticker_/g, '').replace(/_/g, ' ')}
-                          </span>
-                        </div>
-                      ))}
+                      {gMetrics.map((metric) => {
+                        const isSelected = selectedMetrics.includes(metric.name);
+                        return (
+                          <div
+                            key={metric.name}
+                            className={`metric-item ${isSelected ? 'selected' : ''}`}
+                            onClick={() => toggleMetric(metric.name)}
+                            style={isSelected ? {
+                              backgroundColor: metric.color.replace('hsl', 'hsla').replace('%)', '%, 0.12)'),
+                              borderColor:     metric.color.replace('hsl', 'hsla').replace('%)', '%, 0.35)'),
+                            } : undefined}
+                          >
+                            <span className="metric-color-dot" style={{ backgroundColor: metric.color }} />
+                            <span className="metric-label-text">
+                              {metric.name.replace(/Ticker_/g, '').replace(/_/g, ' ')}
+                            </span>
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
               ))}
             </div>
           </div>
+
           <div className="company-info">
             <h2>Company Information</h2>
             {renderCompanyInfo()}

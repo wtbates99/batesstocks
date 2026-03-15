@@ -16,6 +16,8 @@ import re
 from collections import defaultdict
 import json
 import fakeredis
+import httpx
+from pydantic import BaseModel
 
 
 def safe_convert(value: Union[str, int, float], target_type: type):
@@ -41,6 +43,124 @@ def refresh_data():
     conn = sqlite3.connect("stock_data.db")
     fetch_write_financial_data(conn)
     process_stock_data(conn)
+
+
+class AiChatRequest(BaseModel):
+    provider: str
+    model: str
+    api_key: Optional[str] = None
+    message: str
+    context: Optional[dict] = None
+
+
+def build_system_prompt(context: dict) -> str:
+    tickers = context.get("tickers", [])
+    date_range = context.get("dateRange", "recent period")
+    metrics = context.get("metrics", [])
+    data_summary = context.get("dataSummary", "")
+
+    readable_metrics = ", ".join(
+        m.replace("Ticker_", "").replace("_", " ") for m in metrics
+    )
+
+    prompt = f"""You are an expert financial analyst specializing in technical analysis of equity markets.
+Currently displayed: {", ".join(tickers)} over {date_range}
+Active indicators: {readable_metrics}"""
+
+    if data_summary:
+        prompt += f"\n\nLatest indicator readings (most recent session):\n{data_summary}"
+
+    prompt += """
+
+Provide concise, actionable technical analysis. Reference specific tickers and indicator values when relevant.
+
+Interpretation guide:
+- RSI > 70: overbought | RSI < 30: oversold | RSI 50-70: bullish momentum
+- MACD above signal line: bullish divergence | below: bearish
+- Price above Bollinger High: potential breakout or overbought condition
+- Price below Bollinger Low: potential breakdown or oversold condition
+- SMA10 crossing above SMA30: golden cross (bullish) | below: death cross (bearish)
+- Williams %R > -20: overbought | < -80: oversold
+
+Keep responses focused and under 300 words. Always note that technical analysis is probabilistic, not predictive."""
+
+    return prompt
+
+
+@app.post("/ai/chat")
+async def ai_chat(request: AiChatRequest):
+    system_prompt = build_system_prompt(request.context or {})
+
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            if request.provider == "ollama":
+                resp = await client.post(
+                    "http://localhost:11434/api/chat",
+                    json={
+                        "model": request.model,
+                        "messages": [
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": request.message},
+                        ],
+                        "stream": False,
+                    },
+                )
+                resp.raise_for_status()
+                return {"response": resp.json()["message"]["content"]}
+
+            elif request.provider == "anthropic":
+                if not request.api_key:
+                    raise HTTPException(status_code=400, detail="API key required for Anthropic")
+                resp = await client.post(
+                    "https://api.anthropic.com/v1/messages",
+                    headers={
+                        "x-api-key": request.api_key,
+                        "anthropic-version": "2023-06-01",
+                        "content-type": "application/json",
+                    },
+                    json={
+                        "model": request.model,
+                        "max_tokens": 1024,
+                        "system": system_prompt,
+                        "messages": [{"role": "user", "content": request.message}],
+                    },
+                )
+                if resp.status_code != 200:
+                    raise HTTPException(status_code=resp.status_code, detail=resp.text)
+                return {"response": resp.json()["content"][0]["text"]}
+
+            elif request.provider == "openai":
+                if not request.api_key:
+                    raise HTTPException(status_code=400, detail="API key required for OpenAI")
+                resp = await client.post(
+                    "https://api.openai.com/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {request.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": request.model,
+                        "messages": [
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": request.message},
+                        ],
+                    },
+                )
+                if resp.status_code != 200:
+                    raise HTTPException(status_code=resp.status_code, detail=resp.text)
+                return {"response": resp.json()["choices"][0]["message"]["content"]}
+
+            else:
+                raise HTTPException(status_code=400, detail=f"Unknown provider: {request.provider}")
+
+    except HTTPException:
+        raise
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="AI service timed out — is Ollama running?")
+    except httpx.ConnectError:
+        raise HTTPException(status_code=503, detail="Could not connect to AI service")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/", response_class=HTMLResponse)
