@@ -1,8 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback, memo } from 'react';
 import {
   ResponsiveContainer,
-  LineChart,
-  Line,
   XAxis,
   YAxis,
   Tooltip,
@@ -11,149 +9,119 @@ import {
   AreaChart,
 } from 'recharts';
 import '../styles.css';
-import useWindowSize from '../hooks/useWindowSize'; // Adjust the path as necessary
+import useWindowSize from '../hooks/useWindowSize';
 
-// Simple in-memory cache
 const dataCache = {};
 
-// Function to parse date inputs as local dates
 function parseDateLocal(dateInput) {
   if (typeof dateInput === 'string') {
-    const parts = dateInput.split('-');
-    return new Date(parts[0], parts[1] - 1, parts[2]);
-  } else if (dateInput instanceof Date) {
-    return new Date(dateInput.getFullYear(), dateInput.getMonth(), dateInput.getDate());
-  } else {
-    // Handle timestamp numbers or other date formats
-    return new Date(dateInput);
+    const [y, m, d] = dateInput.split('-');
+    return new Date(y, m - 1, d);
   }
+  if (dateInput instanceof Date) {
+    return new Date(dateInput.getFullYear(), dateInput.getMonth(), dateInput.getDate());
+  }
+  return new Date(dateInput);
 }
 
-const StockChart = memo(({ initialTicker, startDate, endDate, metrics, metricsList }) => {
+const StockChart = memo(({ initialTicker, startDate, endDate, metrics, metricsList, onDataLoaded }) => {
   const [allData, setAllData] = useState([]);
-  const windowSize = useWindowSize();
+  const { width } = useWindowSize();
 
-  // Determine chart height based on window width
   const chartHeight = useMemo(() => {
-    if (windowSize.width <= 480) return 250; // Small devices
-    if (windowSize.width <= 768) return 300; // Medium devices
-    return 340; // Large devices
-  }, [windowSize.width]);
+    if (width <= 480) return 220;
+    if (width <= 768) return 280;
+    return 310;
+  }, [width]);
 
-  // Fetch all data when the component mounts or initialTicker changes
   useEffect(() => {
-    if (initialTicker) {
-      const cacheKey = `allData-${initialTicker}`;
-      if (dataCache[cacheKey]) {
-        setAllData(dataCache[cacheKey]);
-      } else {
-        const end = new Date();
-        end.setDate(end.getDate() - 0); // Adjust as needed
-        const start = new Date();
-        start.setFullYear(end.getFullYear() - 5); // Adjust as needed
+    if (!initialTicker) return;
 
-        const startDateStr = start.toISOString().split('T')[0];
-        const endDateStr = end.toISOString().split('T')[0];
-        const metricsParam = metricsList.map((m) => m.name).join(',');
+    const cacheKey = `allData-${initialTicker}`;
+    const cached = dataCache[cacheKey];
 
-        const fetchData = async () => {
-          try {
-            const response = await fetch(
-              `/stock/${initialTicker}?start_date=${startDateStr}&end_date=${endDateStr}&metrics=${metricsParam}`
-            );
-            const data = await response.json();
-            const sortedData = data.sort(
-              (a, b) => parseDateLocal(a.Date) - parseDateLocal(b.Date)
-            );
-            dataCache[cacheKey] = sortedData;
-            setAllData(sortedData);
-          } catch (error) {
-            console.error('Error fetching data:', error);
-          }
-        };
-
-        fetchData();
+    const notifyLoaded = (data) => {
+      if (onDataLoaded && data.length >= 2) {
+        const last = data[data.length - 1];
+        const prev = data[data.length - 2];
+        onDataLoaded({
+          latestClose: parseFloat(last.Ticker_Close || 0),
+          prevClose:   parseFloat(prev.Ticker_Close || 0),
+        });
       }
-    }
-  }, [initialTicker, metricsList]);
+    };
 
-  // Filter data based on startDate, endDate, and metrics
+    if (cached) {
+      setAllData(cached);
+      notifyLoaded(cached);
+      return;
+    }
+
+    const end   = new Date().toISOString().split('T')[0];
+    const start = new Date(Date.now() - 5 * 365 * 86400000).toISOString().split('T')[0];
+    const metricsParam = metricsList.map((m) => m.name).join(',');
+
+    fetch(`/stock/${initialTicker}?start_date=${start}&end_date=${end}&metrics=${metricsParam}`)
+      .then((r) => r.json())
+      .then((data) => {
+        const sorted = [...data].sort((a, b) => parseDateLocal(a.Date) - parseDateLocal(b.Date));
+        dataCache[cacheKey] = sorted;
+        setAllData(sorted);
+        notifyLoaded(sorted);
+      })
+      .catch((e) => console.error(`StockChart fetch error [${initialTicker}]:`, e));
+  }, [initialTicker, metricsList]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const filteredData = useMemo(() => {
     if (!allData.length) return [];
-
     const start = parseDateLocal(startDate).setHours(0, 0, 0, 0);
-    const end = parseDateLocal(endDate).setHours(23, 59, 59, 999);
+    const end   = parseDateLocal(endDate).setHours(23, 59, 59, 999);
 
     return allData
       .filter((item) => {
-        const itemDate = parseDateLocal(item.Date).getTime();
-        return itemDate >= start && itemDate <= end;
+        const t = parseDateLocal(item.Date).getTime();
+        return t >= start && t <= end;
       })
       .map((item) => {
-        // Include only the selected metrics
-        const newItem = { Date: item.Date };
-        metrics.forEach((metric) => {
-          newItem[metric] = item[metric];
-        });
-        return newItem;
+        const row = { Date: item.Date };
+        metrics.forEach((m) => { row[m] = item[m]; });
+        return row;
       });
   }, [allData, startDate, endDate, metrics]);
 
   const yAxisDomain = useMemo(() => {
-    if (filteredData.length === 0) return ['auto', 'auto'];
-
-    const allYValues = filteredData.flatMap((d) =>
-      metrics.map((metric) => parseFloat(d[metric] || 0))
-    );
-    const minY = Math.floor(Math.min(...allYValues));
-    const maxY = Math.ceil(Math.max(...allYValues));
-
-    return [minY, maxY];
+    if (!filteredData.length) return ['auto', 'auto'];
+    const vals = filteredData.flatMap((d) => metrics.map((m) => parseFloat(d[m] || 0)));
+    return [Math.floor(Math.min(...vals)), Math.ceil(Math.max(...vals))];
   }, [filteredData, metrics]);
 
-  const formatYAxis = useCallback((tick) => {
-    if (tick >= 1e6) return `${Math.round(tick / 1e6)}M`;
-    if (tick >= 1e3) return `${Math.round(tick / 1e3)}K`;
-    return Math.round(tick).toString();
+  const formatYAxis = useCallback((v) => {
+    if (v >= 1e6) return `${(v / 1e6).toFixed(1)}M`;
+    if (v >= 1e3) return `${(v / 1e3).toFixed(0)}K`;
+    return v.toFixed(v < 10 ? 1 : 0);
   }, []);
 
-  const formatXAxis = useCallback(
-    (tick) => {
-      const date = parseDateLocal(tick);
-      const diffInDays =
-        (parseDateLocal(endDate) - parseDateLocal(startDate)) / (1000 * 60 * 60 * 24);
+  const formatXAxis = useCallback((tick) => {
+    const date = parseDateLocal(tick);
+    const diffDays = (parseDateLocal(endDate) - parseDateLocal(startDate)) / 86400000;
+    if (diffDays <= 90) {
+      return `${String(date.getMonth() + 1).padStart(2, '0')}/${String(date.getDate()).padStart(2, '0')}`;
+    }
+    return `${date.toLocaleString('default', { month: 'short' })} '${String(date.getFullYear()).slice(-2)}`;
+  }, [startDate, endDate]);
 
-      if (diffInDays <= 90) {
-        return `${('0' + (date.getMonth() + 1)).slice(-2)}-${('0' + date.getDate()).slice(
-          -2
-        )}-${date.getFullYear().toString().slice(-2)}`;
-      }
-      return `${date.toLocaleString('default', { month: 'short' })} '${date
-        .getFullYear()
-        .toString()
-        .slice(-2)}`;
-    },
-    [startDate, endDate]
-  );
-
-  const renderCustomTooltip = useCallback(({ payload, label }) => {
-    if (!payload || !payload.length) return null;
-
+  const renderTooltip = useCallback(({ payload, label }) => {
+    if (!payload?.length) return null;
     return (
       <div className="custom-tooltip">
-        <p className="tooltip-label">{`Date: ${parseDateLocal(label).toLocaleDateString(
-          undefined,
-          {
-            month: '2-digit',
-            day: '2-digit',
-            year: '2-digit',
-          }
-        )}`}</p>
+        <p className="tooltip-label">
+          {parseDateLocal(label).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: '2-digit' })}
+        </p>
         {payload.map((entry) => (
           <p key={entry.dataKey}>
             <span className="metric-name" style={{ color: entry.stroke }}>
-              {entry.dataKey.replace('Ticker_', '')}:
-            </span>{' '}
+              {entry.dataKey.replace('Ticker_', '').replace(/_/g, ' ')}:{' '}
+            </span>
             <span className="metric-value">{parseFloat(entry.value).toFixed(2)}</span>
           </p>
         ))}
@@ -164,36 +132,47 @@ const StockChart = memo(({ initialTicker, startDate, endDate, metrics, metricsLi
   return (
     <div className="chart-container">
       <ResponsiveContainer width="100%" height={chartHeight}>
-        <AreaChart data={filteredData} margin={{ top: 10, right: 30, bottom: 10, left: 0 }}>
+        <AreaChart data={filteredData} margin={{ top: 6, right: 48, bottom: 2, left: 0 }}>
           <XAxis
             dataKey="Date"
-            stroke="#cccccc"
+            tick={{ fill: '#3e3e58', fontSize: 9, fontFamily: 'JetBrains Mono, Fira Code, monospace' }}
             tickFormatter={formatXAxis}
             interval="preserveStartEnd"
-            minTickGap={20}
+            minTickGap={28}
+            axisLine={{ stroke: '#1c1c2e' }}
+            tickLine={false}
           />
-          <YAxis stroke="#cccccc" domain={yAxisDomain} tickFormatter={formatYAxis} />
-          <CartesianGrid strokeDasharray="3 3" stroke="#333333" />
-          <Tooltip content={renderCustomTooltip} />
+          <YAxis
+            orientation="right"
+            tick={{ fill: '#3e3e58', fontSize: 9, fontFamily: 'JetBrains Mono, Fira Code, monospace' }}
+            domain={yAxisDomain}
+            tickFormatter={formatYAxis}
+            axisLine={{ stroke: '#1c1c2e' }}
+            tickLine={false}
+            width={46}
+          />
+          <CartesianGrid strokeDasharray="1 5" stroke="#1c1c2e" vertical={false} />
+          <Tooltip content={renderTooltip} />
           {metrics.map((metric) => {
-            const cleanMetric = metric.replace('Ticker_', '');
-            const metricColor =
-              metricsList.find((m) => m.name === metric)?.color || '#00bfff';
-
+            const key   = metric.replace('Ticker_', '');
+            const color = metricsList.find((m) => m.name === metric)?.color || '#f97316';
             return (
-              <React.Fragment key={cleanMetric}>
+              <React.Fragment key={key}>
                 <defs>
-                  <linearGradient id={`gradient_${cleanMetric}`} x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor={metricColor} stopOpacity={0.7} />
-                    <stop offset="100%" stopColor={metricColor} stopOpacity={0.1} />
+                  <linearGradient id={`g_${key}`} x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%"   stopColor={color} stopOpacity={0.15} />
+                    <stop offset="100%" stopColor={color} stopOpacity={0}    />
                   </linearGradient>
                 </defs>
                 <Area
                   type="monotone"
                   dataKey={metric}
-                  stroke={metricColor}
-                  fill={`url(#gradient_${cleanMetric})`}
-                  fillOpacity={0.2}
+                  stroke={color}
+                  strokeWidth={1.5}
+                  dot={false}
+                  fill={`url(#g_${key})`}
+                  fillOpacity={1}
+                  activeDot={{ r: 3, strokeWidth: 0, fill: color }}
                 />
               </React.Fragment>
             );
