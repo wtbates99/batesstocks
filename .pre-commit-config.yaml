@@ -32,3 +32,17 @@ repos:
     hooks:
       - id: terraform_fmt
       - id: terraform_validate
+  - repo: local
+    hooks:
+      - id: frontend-prettier
+        name: Prettier (frontend)
+        language: system
+        entry: frontend/node_modules/.bin/prettier
+        args: ["--write"]
+        files: ^frontend/src/.*\.(js|jsx|css)$
+      - id: frontend-eslint
+        name: ESLint (frontend)
+        language: system
+        entry: frontend/node_modules/.bin/eslint
+        args: ["--max-warnings", "0", "--fix"]
+        files: ^frontend/src/.*\.jsx?$
