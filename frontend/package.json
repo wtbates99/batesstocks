@@ -46,7 +46,7 @@
       "react-app/jest"
     ]
   },
-  "name": "frontend",
+  "name": "batesstocks",
   "private": true,
   "scripts": {
     "build": "react-scripts build",
