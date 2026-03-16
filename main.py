@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
 import os
 import sqlite3
-from backend.data_pull import fetch_write_financial_data
+from backend.data_pull import fetch_write_financial_data, get_sp500_table
 from backend.data_manipulation import process_stock_data
 from backend.models import StockData, CompanyInfo, StockGroupings, SearchResult
 from backend.database import database, CombinedStockData
@@ -36,9 +36,9 @@ async def lifespan(app: FastAPI):
     redis = fakeredis.FakeRedis()
     if not _db_has_data():
         import threading
-        t = threading.Thread(target=run_full_pipeline, daemon=True)
-        t.start()
+        threading.Thread(target=run_full_pipeline, daemon=True).start()
     else:
+        pipeline_status["phase"] = "complete"
         await build_search_index()
     yield
     await database.disconnect()
@@ -51,7 +51,21 @@ app.mount("/static", StaticFiles(directory="frontend/build/static"), name="stati
 
 redis = None
 prefix_index = defaultdict(set)
-pipeline_running = False
+
+# Tickers loaded in phase 1 — fast startup so the default view works immediately.
+# Must include the defaultTickers from HomePage.js.
+PRIORITY_TICKERS = [
+    'AAPL', 'GOOGL', 'AMZN', 'MSFT', 'TSLA', 'NKE', 'NVDA', 'NFLX', 'JPM',
+    'META', 'AVGO', 'LLY', 'V',    'UNH',  'XOM',  'MA',   'COST', 'HD',
+    'BAC',  'WMT',  'PG',  'AMD',  'ORCL', 'QCOM', 'TXN',  'CVX',  'MRK',
+]
+
+pipeline_status = {
+    "running": False,
+    "phase": "idle",   # idle | fast_load | full_load | complete
+    "loaded": 0,
+    "total": 0,
+}
 
 
 # ── Data pipeline ──────────────────────────────────────────────────────────────
@@ -191,18 +205,41 @@ def _build_search_index_sync():
         print(f"Search index build failed: {e}")
 
 
+def _run_phase(conn, table, tickers, append):
+    fetch_write_financial_data(conn, table, tickers, append=append)
+    process_stock_data(conn)
+    create_signal_views(conn)
+    _build_search_index_sync()
+
+
 def run_full_pipeline():
-    global pipeline_running
-    pipeline_running = True
+    global pipeline_status
     try:
+        table = get_sp500_table()
+        all_tickers = table["Symbol"].tolist()
+        priority = [t for t in PRIORITY_TICKERS if t in set(all_tickers)]
+        remaining = [t for t in all_tickers if t not in set(priority)]
+
+        pipeline_status.update({"running": True, "phase": "fast_load",
+                                 "loaded": 0, "total": len(all_tickers)})
+
         conn = sqlite3.connect("stock_data.db")
-        fetch_write_financial_data(conn)
-        process_stock_data(conn)
-        create_signal_views(conn)
+        _run_phase(conn, table, priority, append=False)
         conn.close()
-        _build_search_index_sync()
+        pipeline_status["loaded"] = len(priority)
+
+        pipeline_status["phase"] = "full_load"
+        conn = sqlite3.connect("stock_data.db")
+        _run_phase(conn, table, remaining, append=True)
+        conn.close()
+        pipeline_status["loaded"] = len(all_tickers)
+
+        pipeline_status["phase"] = "complete"
+    except Exception as e:
+        print(f"Pipeline error: {e}")
+        pipeline_status["phase"] = "error"
     finally:
-        pipeline_running = False
+        pipeline_status["running"] = False
 
 
 def _db_has_data() -> bool:
@@ -405,7 +442,7 @@ async def build_search_index():
 
 @app.post("/refresh_data")
 async def refresh_data(background_tasks: BackgroundTasks):
-    if pipeline_running:
+    if pipeline_status["running"]:
         return {"status": "already_running", "message": "Data refresh already in progress"}
     background_tasks.add_task(run_full_pipeline)
     return {"status": "started", "message": "Data refresh started in background"}
@@ -413,7 +450,7 @@ async def refresh_data(background_tasks: BackgroundTasks):
 
 @app.get("/refresh_status")
 async def refresh_status():
-    return {"running": pipeline_running}
+    return pipeline_status
 
 
 @app.get("/stock/{ticker}", response_model=List[StockData])

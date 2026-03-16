@@ -1,74 +1,91 @@
+import concurrent.futures
 import pandas as pd
 import yfinance as yf
 
 
-def fetch_write_financial_data(conn):
+def get_sp500_table():
     table = pd.read_html(
         "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies",
         storage_options={"User-Agent": "Mozilla/5.0"},
     )[0]
-    tickers = table[~table["Symbol"].str.contains(r"\.")]["Symbol"].tolist()
-    batch_size = 503
+    return table[~table["Symbol"].str.contains(r"\.")].copy()
 
-    def quant_data(tickers) -> pd.DataFrame:
-        all_data = []
-        for i in range(0, len(tickers), batch_size):
-            batch = tickers[i : i + batch_size]
-            data = yf.download(
-                batch, interval="1d", group_by="ticker", auto_adjust=True
-            )
-            all_data.append(data)
-        concatenated_data = pd.concat(all_data)
-        quant_data = (
-            concatenated_data.stack(level=0)
-            .reset_index()
-            .rename(columns={"level_1": "Ticker"})
+
+def fetch_write_financial_data(conn, table, tickers, append=False):
+    if_exists = "append" if append else "replace"
+    filtered = table[table["Symbol"].isin(set(tickers))].copy()
+
+    def quant_data():
+        data = yf.download(
+            tickers, interval="1d", group_by="ticker", auto_adjust=True, progress=False
         )
+        result = data.stack(level=0, future_stack=True).reset_index()
+        result.to_sql("stock_data", conn, if_exists=if_exists, index=False)
 
-        quant_data.to_sql("stock_data", conn, if_exists="replace", index=False)
+    def qual_data():
+        wiki = (
+            filtered[["Symbol", "Security", "GICS Sector", "GICS Sub-Industry", "Headquarters Location"]]
+            .rename(columns={
+                "Symbol": "Ticker",
+                "Security": "FullName",
+                "GICS Sector": "Sector",
+                "GICS Sub-Industry": "Subsector",
+                "Headquarters Location": "_HQ",
+            })
+        )
+        wiki = wiki.copy()
+        wiki["City"] = wiki["_HQ"].str.split(",").str[0].str.strip()
+        wiki["State"] = wiki["_HQ"].str.split(",").str[-1].str.strip()
+        wiki["Country"] = "United States"
+        wiki = wiki.drop(columns=["_HQ"])
 
-    def qual_data(tickers) -> pd.DataFrame:
-        stock_information = []
-        for i in range(0, len(tickers), batch_size):
-            batch = tickers[i : i + batch_size]
-            for ticker in batch:
-                stock_info = yf.Ticker(ticker).info
-                stock_data = {
-                    "Ticker": ticker,
-                    "Sector": stock_info.get("sector", "N/A"),
-                    "Subsector": stock_info.get("industry", "N/A"),
-                    "FullName": stock_info.get("longName", "N/A"),
-                    "MarketCap": stock_info.get("marketCap", "N/A"),
-                    "Country": stock_info.get("country", "N/A"),
-                    "Website": stock_info.get("website", "N/A"),
-                    "Description": stock_info.get("longBusinessSummary", "N/A"),
-                    "CEO": stock_info.get("ceo", "N/A"),
-                    "Employees": stock_info.get("fullTimeEmployees", "N/A"),
-                    "City": stock_info.get("city", "N/A"),
-                    "State": stock_info.get("state", "N/A"),
-                    "Zip": stock_info.get("zip", "N/A"),
-                    "Address": stock_info.get("address1", "N/A"),
-                    "Phone": stock_info.get("phone", "N/A"),
-                    "Exchange": stock_info.get("exchange", "N/A"),
-                    "Currency": stock_info.get("currency", "N/A"),
-                    "QuoteType": stock_info.get("quoteType", "N/A"),
-                    "ShortName": stock_info.get("shortName", "N/A"),
-                    "Price": stock_info.get("regularMarketPrice", "N/A"),
-                    "52WeekHigh": stock_info.get("fiftyTwoWeekHigh", "N/A"),
-                    "52WeekLow": stock_info.get("fiftyTwoWeekLow", "N/A"),
-                    "DividendRate": stock_info.get("dividendRate", "N/A"),
-                    "DividendYield": stock_info.get("dividendYield", "N/A"),
-                    "PayoutRatio": stock_info.get("payoutRatio", "N/A"),
-                    "Beta": stock_info.get("beta", "N/A"),
-                    "PE": stock_info.get("trailingPE", "N/A"),
-                    "EPS": stock_info.get("trailingEps", "N/A"),
-                    "Revenue": stock_info.get("totalRevenue", "N/A"),
-                    "GrossProfit": stock_info.get("grossProfits", "N/A"),
-                    "FreeCashFlow": stock_info.get("freeCashflow", "N/A"),
-                }
-                stock_information.append(stock_data)
-        qual_data = pd.DataFrame(stock_information)
-        qual_data.to_sql("stock_information", conn, if_exists="replace", index=False)
+        def fetch_financials(ticker):
+            row = {"Ticker": ticker}
+            t = yf.Ticker(ticker)
+            try:
+                fi = t.fast_info
+                row.update({
+                    "MarketCap":  getattr(fi, "market_cap", None),
+                    "Price":      getattr(fi, "last_price", None),
+                    "52WeekHigh": getattr(fi, "year_high", None),
+                    "52WeekLow":  getattr(fi, "year_low", None),
+                    "Exchange":   getattr(fi, "exchange", None),
+                    "Currency":   getattr(fi, "currency", None),
+                    "QuoteType":  getattr(fi, "quote_type", None),
+                })
+            except Exception:
+                pass
+            try:
+                info = t.info
+                row.update({
+                    "ShortName":    info.get("shortName"),
+                    "Website":      info.get("website"),
+                    "Description":  info.get("longBusinessSummary"),
+                    "CEO":          info.get("ceo"),
+                    "Employees":    info.get("fullTimeEmployees"),
+                    "Zip":          info.get("zip"),
+                    "Address":      info.get("address1"),
+                    "Phone":        info.get("phone"),
+                    "DividendRate": info.get("dividendRate"),
+                    "DividendYield": info.get("dividendYield"),
+                    "PayoutRatio":  info.get("payoutRatio"),
+                    "Beta":         info.get("beta"),
+                    "PE":           info.get("trailingPE"),
+                    "EPS":          info.get("trailingEps"),
+                    "Revenue":      info.get("totalRevenue"),
+                    "GrossProfit":  info.get("grossProfits"),
+                    "FreeCashFlow": info.get("freeCashflow"),
+                })
+            except Exception:
+                pass
+            return row
 
-    qual_data = qual_data(tickers)
-    quant_data = quant_data(tickers)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+            results = list(executor.map(fetch_financials, tickers))
+
+        financials = pd.DataFrame(results)
+        qual = wiki.merge(financials, on="Ticker", how="left")
+        qual.to_sql("stock_information", conn, if_exists=if_exists, index=False)
+
+    qual_data()
+    quant_data()

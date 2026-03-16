@@ -46,10 +46,30 @@ const HomePage = () => {
   const [selectedGroup, setSelectedGroup]     = useState('default');
   const [priceData, setPriceData]             = useState({});
   const [marketOpen, setMarketOpen]           = useState(isMarketOpen());
+  const [pipelineStatus, setPipelineStatus]   = useState(null);
 
   // Re-check market status every 60 s
   useEffect(() => {
     const id = setInterval(() => setMarketOpen(isMarketOpen()), 60_000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Poll pipeline status while loading
+  useEffect(() => {
+    let id;
+    const poll = () => {
+      fetch('/refresh_status')
+        .then(r => r.json())
+        .then(s => {
+          setPipelineStatus(s);
+          if (!s.running && (s.phase === 'complete' || s.phase === 'idle')) {
+            clearInterval(id);
+          }
+        })
+        .catch(console.error);
+    };
+    poll();
+    id = setInterval(poll, 3000);
     return () => clearInterval(id);
   }, []);
 
@@ -120,8 +140,9 @@ const HomePage = () => {
 
   const rootClass = [
     'bg-dark',
-    sidebarVisible ? 'sidebar-visible' : '',
-    aiPanelOpen    ? 'ai-panel-open'   : '',
+    sidebarVisible            ? 'sidebar-visible'  : '',
+    aiPanelOpen               ? 'ai-panel-open'    : '',
+    pipelineStatus?.running   ? 'pipeline-loading' : '',
   ].filter(Boolean).join(' ');
 
   return (
@@ -158,6 +179,20 @@ const HomePage = () => {
           </button>
         </div>
       </header>
+
+      {/* ── Pipeline loading banner ── */}
+      {pipelineStatus?.running && (
+        <div className="pipeline-banner">
+          <div
+            className="pipeline-bar"
+            style={{ width: pipelineStatus.total > 0 ? `${(pipelineStatus.loaded / pipelineStatus.total) * 100}%` : '4%' }}
+          />
+          <span className="pipeline-label">
+            {pipelineStatus.phase === 'fast_load' ? 'Loading core tickers…' : 'Loading full S&P 500…'}
+            {pipelineStatus.total > 0 && ` ${pipelineStatus.loaded} / ${pipelineStatus.total}`}
+          </span>
+        </div>
+      )}
 
       {/* ── Ticker Strip ── */}
       <div className="ticker-strip">
