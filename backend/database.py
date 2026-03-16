@@ -1,8 +1,13 @@
+import os
+from dotenv import load_dotenv
 from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime
 from sqlalchemy.orm import declarative_base, sessionmaker
 from databases import Database
 
-SQLALCHEMY_DATABASE_URL = "sqlite:///./stock_data.db"
+load_dotenv()
+
+_db_path = os.getenv("DB_PATH", "stock_data.db")
+SQLALCHEMY_DATABASE_URL = f"sqlite:///./{_db_path}"
 engine = create_engine(SQLALCHEMY_DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()

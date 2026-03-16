@@ -17,7 +17,7 @@ const SearchBar = () => {
       if (!term) { setSearchResults([]); return; }
       if (cacheRef.current[term]) { setSearchResults(cacheRef.current[term]); return; }
       try {
-        const res = await fetch(`/search?query=${encodeURIComponent(term)}`);
+        const res = await fetch(`/search?query=${encodeURIComponent(term)}&limit=10`);
         if (!res.ok) { setSearchResults([]); return; }
         const data = await res.json();
         cacheRef.current[term] = data;

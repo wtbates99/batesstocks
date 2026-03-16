@@ -1,12 +1,24 @@
+import logging
+import os
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, Query, BackgroundTasks
+from dotenv import load_dotenv
+
+load_dotenv()
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%Y-%m-%dT%H:%M:%S",
+)
+logger = logging.getLogger("batesstocks.main")
+
+from fastapi import FastAPI, HTTPException, Query, BackgroundTasks, Request
 from sqlalchemy import select
 from typing import List, Optional, Union
 import datetime
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
-import os
 import sqlite3
 from backend.data_pull import fetch_write_financial_data, get_sp500_table
 from backend.data_manipulation import process_stock_data
@@ -18,6 +30,16 @@ import json
 import fakeredis
 import httpx
 from pydantic import BaseModel
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+
+DB_PATH = os.getenv("DB_PATH", "stock_data.db")
+OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+CORS_ORIGINS = os.getenv(
+    "CORS_ORIGINS",
+    "http://localhost:8000,http://localhost:3000,https://batesstocks.com,https://www.batesstocks.com",
+).split(",")
 
 
 def safe_convert(value: Union[str, int, float], target_type: type):
@@ -33,7 +55,23 @@ def safe_convert(value: Union[str, int, float], target_type: type):
 async def lifespan(app: FastAPI):
     global redis
     await database.connect()
-    redis = fakeredis.FakeRedis()
+
+    # Try real Redis first, fall back to fakeredis
+    try:
+        import redis as redis_lib
+        real_redis = redis_lib.Redis(
+            host=os.getenv("REDIS_HOST", "localhost"),
+            port=int(os.getenv("REDIS_PORT", 6379)),
+            db=0,
+            socket_connect_timeout=2,
+        )
+        real_redis.ping()
+        redis = real_redis
+        logger.info("Connected to Redis at %s:%s", os.getenv("REDIS_HOST", "localhost"), os.getenv("REDIS_PORT", 6379))
+    except Exception as e:
+        logger.warning("Redis unavailable (%s), falling back to fakeredis", e)
+        redis = fakeredis.FakeRedis()
+
     if not _db_has_data():
         import threading
         threading.Thread(target=run_full_pipeline, daemon=True).start()
@@ -45,7 +83,10 @@ async def lifespan(app: FastAPI):
     redis.close()
 
 
+limiter = Limiter(key_func=get_remote_address)
 app = FastAPI(lifespan=lifespan)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.mount("/static", StaticFiles(directory="frontend/build/static"), name="static")
 
@@ -187,7 +228,7 @@ FROM macd_data WHERE MACDReversal IS NOT NULL;
 def _build_search_index_sync():
     """Populate prefix_index from the database synchronously (safe to call from any thread)."""
     try:
-        conn = sqlite3.connect("stock_data.db")
+        conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         cursor.execute("SELECT DISTINCT Ticker, FullName FROM combined_stock_data")
         rows = cursor.fetchall()
@@ -202,7 +243,7 @@ def _build_search_index_sync():
                 for i in range(1, len(word) + 1):
                     prefix_index[word[:i]].add((ticker, full_name))
     except Exception as e:
-        print(f"Search index build failed: {e}")
+        logger.error("Search index build failed: %s", e)
 
 
 def _run_phase(conn, table, tickers, append):
@@ -223,20 +264,22 @@ def run_full_pipeline():
         pipeline_status.update({"running": True, "phase": "fast_load",
                                  "loaded": 0, "total": len(all_tickers)})
 
-        conn = sqlite3.connect("stock_data.db")
+        conn = sqlite3.connect(DB_PATH)
         _run_phase(conn, table, priority, append=False)
         conn.close()
         pipeline_status["loaded"] = len(priority)
+        logger.info("Phase 1 complete: %d priority tickers loaded", len(priority))
 
         pipeline_status["phase"] = "full_load"
-        conn = sqlite3.connect("stock_data.db")
+        conn = sqlite3.connect(DB_PATH)
         _run_phase(conn, table, remaining, append=True)
         conn.close()
         pipeline_status["loaded"] = len(all_tickers)
+        logger.info("Phase 2 complete: %d total tickers loaded", len(all_tickers))
 
         pipeline_status["phase"] = "complete"
     except Exception as e:
-        print(f"Pipeline error: {e}")
+        logger.error("Pipeline error: %s", e)
         pipeline_status["phase"] = "error"
     finally:
         pipeline_status["running"] = False
@@ -244,7 +287,7 @@ def run_full_pipeline():
 
 def _db_has_data() -> bool:
     try:
-        conn = sqlite3.connect("stock_data.db")
+        conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         cursor.execute("SELECT COUNT(*) FROM combined_stock_data LIMIT 1")
         count = cursor.fetchone()[0]
@@ -256,7 +299,7 @@ def _db_has_data() -> bool:
 
 def _get_bullish_groupings_from_db() -> dict:
     try:
-        conn = sqlite3.connect("stock_data.db")
+        conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
 
         momentum = [r[0] for r in cursor.execute("""
@@ -286,7 +329,8 @@ def _get_bullish_groupings_from_db() -> dict:
 
         conn.close()
         return {"momentum": momentum, "breakout": breakout, "trend_strength": trend_strength}
-    except Exception:
+    except Exception as e:
+        logger.error("Failed to get bullish groupings: %s", e)
         return {"momentum": [], "breakout": [], "trend_strength": []}
 
 
@@ -335,19 +379,20 @@ Keep responses focused and under 300 words. Always note that technical analysis 
 
 
 @app.post("/ai/chat")
-async def ai_chat(request: AiChatRequest):
-    system_prompt = build_system_prompt(request.context or {})
+@limiter.limit("10/minute")
+async def ai_chat(request: Request, body: AiChatRequest):
+    system_prompt = build_system_prompt(body.context or {})
 
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
-            if request.provider == "ollama":
+            if body.provider == "ollama":
                 resp = await client.post(
-                    "http://localhost:11434/api/chat",
+                    f"{OLLAMA_HOST}/api/chat",
                     json={
-                        "model": request.model,
+                        "model": body.model,
                         "messages": [
                             {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": request.message},
+                            {"role": "user", "content": body.message},
                         ],
                         "stream": False,
                     },
@@ -355,41 +400,41 @@ async def ai_chat(request: AiChatRequest):
                 resp.raise_for_status()
                 return {"response": resp.json()["message"]["content"]}
 
-            elif request.provider == "anthropic":
-                if not request.api_key:
+            elif body.provider == "anthropic":
+                if not body.api_key:
                     raise HTTPException(status_code=400, detail="API key required for Anthropic")
                 resp = await client.post(
                     "https://api.anthropic.com/v1/messages",
                     headers={
-                        "x-api-key": request.api_key,
+                        "x-api-key": body.api_key,
                         "anthropic-version": "2023-06-01",
                         "content-type": "application/json",
                     },
                     json={
-                        "model": request.model,
+                        "model": body.model,
                         "max_tokens": 1024,
                         "system": system_prompt,
-                        "messages": [{"role": "user", "content": request.message}],
+                        "messages": [{"role": "user", "content": body.message}],
                     },
                 )
                 if resp.status_code != 200:
                     raise HTTPException(status_code=resp.status_code, detail=resp.text)
                 return {"response": resp.json()["content"][0]["text"]}
 
-            elif request.provider == "openai":
-                if not request.api_key:
+            elif body.provider == "openai":
+                if not body.api_key:
                     raise HTTPException(status_code=400, detail="API key required for OpenAI")
                 resp = await client.post(
                     "https://api.openai.com/v1/chat/completions",
                     headers={
-                        "Authorization": f"Bearer {request.api_key}",
+                        "Authorization": f"Bearer {body.api_key}",
                         "Content-Type": "application/json",
                     },
                     json={
-                        "model": request.model,
+                        "model": body.model,
                         "messages": [
                             {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": request.message},
+                            {"role": "user", "content": body.message},
                         ],
                     },
                 )
@@ -398,7 +443,7 @@ async def ai_chat(request: AiChatRequest):
                 return {"response": resp.json()["choices"][0]["message"]["content"]}
 
             else:
-                raise HTTPException(status_code=400, detail=f"Unknown provider: {request.provider}")
+                raise HTTPException(status_code=400, detail=f"Unknown provider: {body.provider}")
 
     except HTTPException:
         raise
@@ -418,16 +463,9 @@ async def serve_react_app():
         return f.read()
 
 
-origins = [
-    "http://localhost:8000",
-    "http://localhost:3000",
-    "https://batesstocks.com",
-    "https://www.batesstocks.com",
-]
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -441,7 +479,8 @@ async def build_search_index():
 # ── API routes ─────────────────────────────────────────────────────────────────
 
 @app.post("/refresh_data")
-async def refresh_data(background_tasks: BackgroundTasks):
+@limiter.limit("2/minute")
+async def refresh_data(request: Request, background_tasks: BackgroundTasks):
     if pipeline_status["running"]:
         return {"status": "already_running", "message": "Data refresh already in progress"}
     background_tasks.add_task(run_full_pipeline)
@@ -449,12 +488,15 @@ async def refresh_data(background_tasks: BackgroundTasks):
 
 
 @app.get("/refresh_status")
-async def refresh_status():
+@limiter.limit("20/minute")
+async def refresh_status(request: Request):
     return pipeline_status
 
 
 @app.get("/stock/{ticker}", response_model=List[StockData])
+@limiter.limit("60/minute")
 async def get_stock_data(
+    request: Request,
     ticker: str,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
@@ -527,7 +569,8 @@ async def get_stock_data(
 
 
 @app.get("/company/{ticker}", response_model=CompanyInfo)
-async def get_company_info(ticker: str):
+@limiter.limit("30/minute")
+async def get_company_info(request: Request, ticker: str):
     cache_key = f"company_info:{ticker}"
     cached_data = redis.get(cache_key)
 
@@ -583,20 +626,21 @@ async def get_company_info(ticker: str):
 
 
 @app.get("/groupings", response_model=StockGroupings)
-async def get_stock_groupings():
+@limiter.limit("20/minute")
+async def get_stock_groupings(request: Request):
     return _get_bullish_groupings_from_db()
 
 
 @app.get("/search", response_model=List[SearchResult])
-async def search_companies(query: str):
-    cache_key = f"search:{query}"
+@limiter.limit("30/minute")
+async def search_companies(request: Request, query: str, limit: int = Query(10, ge=1, le=50)):
+    cache_key = f"search:{query}:{limit}"
     cached_data = redis.get(cache_key)
 
     if cached_data:
         return json.loads(cached_data)
 
     term = query.lower().strip()
-    # O(1) prefix index lookup — index already maps every prefix to matching items
     results = set(prefix_index.get(term, set()))
 
     sorted_results = sorted(
@@ -607,7 +651,7 @@ async def search_companies(query: str):
             len(x[0]),                            # shorter tickers first
             x[0].lower(),
         ),
-    )[:5]
+    )[:limit]
 
     search_results = [
         SearchResult(ticker=ticker, name=full_name)
@@ -628,4 +672,4 @@ async def catch_all(full_path: str):
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host=os.getenv("APP_HOST", "0.0.0.0"), port=int(os.getenv("APP_PORT", 8000)))

@@ -34,6 +34,35 @@
   --t:            0.18s var(--ease);
 }
 
+/* ── Light mode overrides ────────────────────────────────────── */
+[data-theme="light"] {
+  --bg:           #f0f0f8;
+  --surface:      #ffffff;
+  --surface-2:    #f5f5fc;
+  --surface-3:    #ebebf8;
+  --border:       #d0d0e0;
+  --border-2:     #b8b8cc;
+  --text:         #1a1a2e;
+  --muted:        #5a5a7a;
+  --dim:          #8888aa;
+  --accent:       #e06010;
+  --accent-bg:    rgba(224, 96, 16, 0.10);
+  --accent-glow:  rgba(224, 96, 16, 0.25);
+  --green:        #16a34a;
+  --green-bg:     rgba(22, 163, 74, 0.10);
+  --red:          #dc2626;
+  --red-bg:       rgba(220, 38, 38, 0.10);
+  --cyan:         #0891b2;
+}
+
+[data-theme="light"] .header {
+  background: rgba(240, 240, 248, 0.97);
+}
+
+[data-theme="light"] .custom-tooltip {
+  background: rgba(255, 255, 255, 0.98);
+}
+
 /* ── Reset / Base ────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -500,7 +529,238 @@ h1, h2, h3, h4, h5, h6 { font-weight: 600; }
 .chart-container {
   width: 100%;
   overflow: hidden;
+  position: relative;
 }
+
+/* ── CSV Download Button ─────────────────────────────────────── */
+.chart-download-btn {
+  position: absolute;
+  top: 4px;
+  right: 52px;
+  z-index: 10;
+  height: 18px;
+  padding: 0 5px;
+  background: var(--surface-2);
+  color: var(--dim);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--t), color var(--t), border-color var(--t);
+  white-space: nowrap;
+}
+
+.chart-wrapper:hover .chart-download-btn { opacity: 1; }
+.chart-download-btn:hover { color: var(--accent); border-color: var(--accent); }
+
+/* ── Preset Manager ──────────────────────────────────────────── */
+.preset-manager {
+  margin-bottom: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.preset-manager-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 9px;
+  background: var(--surface-2);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--dim);
+  cursor: pointer;
+  user-select: none;
+  transition: color var(--t), background var(--t);
+}
+
+.preset-manager-header:hover { color: var(--muted); background: var(--surface-3); }
+
+.preset-manager-body { background: var(--surface); padding: 6px; }
+
+.preset-save-row {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.preset-name-input {
+  flex: 1;
+  height: 24px;
+  padding: 0 7px;
+  background: var(--surface-3);
+  color: var(--text);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  font-family: var(--mono);
+  font-size: 10px;
+  transition: border-color var(--t);
+}
+
+.preset-name-input:focus { outline: none; border-color: var(--accent); }
+.preset-name-input::placeholder { color: var(--dim); }
+
+.preset-save-btn {
+  height: 24px;
+  padding: 0 8px;
+  background: var(--accent-bg);
+  color: var(--accent);
+  border: 1px solid rgba(249, 115, 22, 0.35);
+  border-radius: var(--radius-sm);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all var(--t);
+  white-space: nowrap;
+}
+
+.preset-save-btn:hover { background: var(--accent); color: #000; }
+
+.preset-list { display: flex; flex-direction: column; gap: 2px; }
+
+.preset-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  transition: border-color var(--t);
+}
+
+.preset-item:hover { border-color: var(--border-2); }
+
+.preset-item-name {
+  flex: 1;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.preset-load-btn, .preset-delete-btn {
+  height: 18px;
+  padding: 0 6px;
+  background: transparent;
+  border-radius: var(--radius-sm);
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all var(--t);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.preset-load-btn {
+  color: var(--accent);
+  border: 1px solid rgba(249, 115, 22, 0.3);
+}
+
+.preset-load-btn:hover { background: var(--accent-bg); }
+
+.preset-delete-btn {
+  color: var(--dim);
+  border: 1px solid var(--border);
+}
+
+.preset-delete-btn:hover { color: var(--red); border-color: var(--red); }
+
+.preset-empty {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--dim);
+  text-align: center;
+  padding: 6px 0;
+}
+
+/* ── Keyboard Shortcuts Modal ────────────────────────────────── */
+.shortcuts-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(4px);
+}
+
+.shortcuts-modal {
+  background: var(--surface);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius);
+  padding: 16px 20px;
+  min-width: 280px;
+  max-width: 360px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.8);
+}
+
+.shortcuts-modal h2 {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+  font-family: var(--mono);
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.shortcuts-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+
+.shortcut-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.shortcut-key {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text);
+  background: var(--surface-3);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  padding: 1px 6px;
+  flex-shrink: 0;
+}
+
+.shortcut-desc {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--muted);
+  text-align: right;
+}
+
+.shortcuts-close-btn {
+  width: 100%;
+  height: 28px;
+  background: var(--surface-2);
+  color: var(--muted);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  font-family: var(--mono);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all var(--t);
+}
+
+.shortcuts-close-btn:hover { color: var(--accent); border-color: var(--accent); }
 
 /* ── Pipeline banner ─────────────────────────────────────────── */
 --pipeline-banner-h: 20px;
@@ -1053,6 +1313,19 @@ h1, h2, h3, h4, h5, h6 { font-weight: 600; }
   .company-sidebar { flex: none; width: 100%; }
   .company-info { max-height: none; }
   .company-info-grid { grid-template-columns: repeat(2, 1fr); }
+  /* Sidebar overlays on tablet — don't push content */
+  .sidebar-visible .main-content { margin-left: 0; }
+  .ai-panel { left: 0 !important; }
+  .header-controls { gap: 4px; }
+  .search-input { width: 140px; }
+  .group-selector { width: 100px; }
+  .ai-model-input { width: 100px; }
+}
+
+@media (max-width: 900px) {
+  .grid-container { grid-template-columns: repeat(2, 1fr); gap: 6px; padding: 6px; }
+  .chart-card-header { flex-wrap: wrap; }
+  .ai-panel-header { flex-wrap: wrap; height: auto; min-height: 36px; padding: 4px 8px; }
 }
 
 @media (max-width: 768px) {
