@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, BackgroundTasks
 from sqlalchemy import select
 from typing import List, Optional, Union
 import datetime
@@ -11,7 +11,6 @@ from backend.data_pull import fetch_write_financial_data
 from backend.data_manipulation import process_stock_data
 from backend.models import StockData, CompanyInfo, StockGroupings, SearchResult
 from backend.database import database, CombinedStockData
-from queries import load_bullish_groups
 import re
 from collections import defaultdict
 import json
@@ -34,16 +33,188 @@ app = FastAPI()
 app.mount("/static", StaticFiles(directory="frontend/build/static"), name="static")
 
 redis = None
-
 prefix_index = defaultdict(set)
+pipeline_running = False
 
 
-@app.get("/refresh_data")
-def refresh_data():
-    conn = sqlite3.connect("stock_data.db")
-    fetch_write_financial_data(conn)
-    process_stock_data(conn)
+# ── Data pipeline ──────────────────────────────────────────────────────────────
 
+def create_signal_views(conn: sqlite3.Connection):
+    cursor = conn.cursor()
+    cursor.executescript("""
+DROP VIEW IF EXISTS signals_view;
+CREATE VIEW signals_view AS
+WITH signals AS (
+    SELECT Date, Ticker, 'Bullish' AS Signal,
+        Ticker_MACD, Ticker_MACD_Signal, Ticker_RSI,
+        Ticker_Stochastic_K, Ticker_Stochastic_D, Ticker_Close,
+        LEAD(Ticker_Close, 1) OVER (PARTITION BY Ticker ORDER BY Date) AS Next_Close
+    FROM combined_stock_data
+    WHERE Ticker_MACD > Ticker_MACD_Signal
+        AND Ticker_MACD - Ticker_MACD_Signal > 0.01
+        AND Ticker_RSI < 30
+        AND Ticker_Stochastic_K > Ticker_Stochastic_D
+    UNION ALL
+    SELECT Date, Ticker, 'Bearish' AS Signal,
+        Ticker_MACD, Ticker_MACD_Signal, Ticker_RSI,
+        Ticker_Stochastic_K, Ticker_Stochastic_D, Ticker_Close,
+        LEAD(Ticker_Close, 1) OVER (PARTITION BY Ticker ORDER BY Date) AS Next_Close
+    FROM combined_stock_data
+    WHERE Ticker_MACD < Ticker_MACD_Signal
+        AND Ticker_MACD_Signal - Ticker_MACD > 0.01
+        AND Ticker_RSI > 70
+        AND Ticker_Stochastic_K < Ticker_Stochastic_D
+)
+SELECT Date, Ticker, Signal, Ticker_MACD, Ticker_MACD_Signal, Ticker_RSI,
+    Ticker_Stochastic_K, Ticker_Stochastic_D, Ticker_Close, Next_Close,
+    CASE WHEN Next_Close IS NOT NULL
+        THEN ROUND(((Next_Close - Ticker_Close) / Ticker_Close) * 100, 2)
+        ELSE NULL END AS Performance
+FROM signals;
+
+DROP VIEW IF EXISTS golden_death_cross_view;
+CREATE VIEW golden_death_cross_view AS
+WITH cross_signals AS (
+    SELECT Date, Ticker, Ticker_SMA_10,
+        LAG(Ticker_SMA_10, 1) OVER (PARTITION BY Ticker ORDER BY Date) AS Prev_SMA_10,
+        Ticker_EMA_10,
+        LAG(Ticker_EMA_10, 1) OVER (PARTITION BY Ticker ORDER BY Date) AS Prev_EMA_10,
+        Ticker_Close,
+        LEAD(Ticker_Close, 1) OVER (PARTITION BY Ticker ORDER BY Date) AS Next_Close
+    FROM combined_stock_data
+)
+SELECT Date, Ticker,
+    CASE
+        WHEN Ticker_SMA_10 > Ticker_EMA_10 AND Prev_SMA_10 <= Prev_EMA_10 THEN 'Golden Cross (Buy)'
+        WHEN Ticker_SMA_10 < Ticker_EMA_10 AND Prev_SMA_10 >= Prev_EMA_10 THEN 'Death Cross (Sell)'
+    END AS CrossSignal,
+    Ticker_Close, Next_Close,
+    CASE WHEN Next_Close IS NOT NULL
+        THEN ROUND(((Next_Close - Ticker_Close) / Ticker_Close) * 100, 2)
+        ELSE NULL END AS Performance
+FROM cross_signals
+WHERE CrossSignal IS NOT NULL;
+
+DROP VIEW IF EXISTS bollinger_breakouts_view;
+CREATE VIEW bollinger_breakouts_view AS
+WITH bollinger_data AS (
+    SELECT Date, Ticker, Ticker_Close, Ticker_Bollinger_High, Ticker_Bollinger_Low,
+        LEAD(Ticker_Close, 1) OVER (PARTITION BY Ticker ORDER BY Date) AS Next_Close,
+        CASE
+            WHEN Ticker_Close > Ticker_Bollinger_High THEN 'Breakout Above (Potential Buy)'
+            WHEN Ticker_Close < Ticker_Bollinger_Low THEN 'Breakout Below (Potential Sell)'
+        END AS BollingerSignal
+    FROM combined_stock_data
+)
+SELECT Date, Ticker, Ticker_Close, Ticker_Bollinger_High, Ticker_Bollinger_Low,
+    BollingerSignal, Next_Close,
+    CASE WHEN Next_Close IS NOT NULL
+        THEN ROUND(((Next_Close - Ticker_Close) / Ticker_Close) * 100, 2)
+        ELSE NULL END AS Performance
+FROM bollinger_data WHERE BollingerSignal IS NOT NULL;
+
+DROP VIEW IF EXISTS volume_breakout_view;
+CREATE VIEW volume_breakout_view AS
+WITH volume_data AS (
+    SELECT Date, Ticker, Ticker_Volume,
+        AVG(Ticker_Volume) OVER (PARTITION BY Ticker ORDER BY Date ROWS BETWEEN 10 PRECEDING AND 1 PRECEDING) AS Avg_Volume,
+        Ticker_Close,
+        LEAD(Ticker_Close, 1) OVER (PARTITION BY Ticker ORDER BY Date) AS Next_Close
+    FROM combined_stock_data
+)
+SELECT Date, Ticker, Ticker_Volume, Avg_Volume,
+    'Volume Breakout (Potential Signal)' AS VolumeSignal,
+    Ticker_Close, Next_Close,
+    CASE WHEN Next_Close IS NOT NULL
+        THEN ROUND(((Next_Close - Ticker_Close) / Ticker_Close) * 100, 2)
+        ELSE NULL END AS Performance
+FROM volume_data WHERE Ticker_Volume > Avg_Volume * 2;
+
+DROP VIEW IF EXISTS macd_histogram_reversal_view;
+CREATE VIEW macd_histogram_reversal_view AS
+WITH macd_data AS (
+    SELECT Date, Ticker, Ticker_MACD_Diff,
+        LAG(Ticker_MACD_Diff, 1) OVER (PARTITION BY Ticker ORDER BY Date) AS Prev_MACD_Diff,
+        Ticker_Close,
+        LEAD(Ticker_Close, 1) OVER (PARTITION BY Ticker ORDER BY Date) AS Next_Close
+    FROM combined_stock_data
+)
+SELECT Date, Ticker, Ticker_MACD_Diff,
+    CASE
+        WHEN Ticker_MACD_Diff > 0 AND Prev_MACD_Diff <= 0 THEN 'MACD Histogram Reversal (Potential Buy)'
+        WHEN Ticker_MACD_Diff < 0 AND Prev_MACD_Diff >= 0 THEN 'MACD Histogram Reversal (Potential Sell)'
+    END AS MACDReversal,
+    Ticker_Close, Next_Close,
+    CASE WHEN Next_Close IS NOT NULL
+        THEN ROUND(((Next_Close - Ticker_Close) / Ticker_Close) * 100, 2)
+        ELSE NULL END AS Performance
+FROM macd_data WHERE MACDReversal IS NOT NULL;
+""")
+    conn.commit()
+
+
+def run_full_pipeline():
+    global pipeline_running
+    pipeline_running = True
+    try:
+        conn = sqlite3.connect("stock_data.db")
+        fetch_write_financial_data(conn)
+        process_stock_data(conn)
+        create_signal_views(conn)
+        conn.close()
+    finally:
+        pipeline_running = False
+
+
+def _db_has_data() -> bool:
+    try:
+        conn = sqlite3.connect("stock_data.db")
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM combined_stock_data LIMIT 1")
+        count = cursor.fetchone()[0]
+        conn.close()
+        return count > 0
+    except Exception:
+        return False
+
+
+def _get_bullish_groupings_from_db() -> dict:
+    try:
+        conn = sqlite3.connect("stock_data.db")
+        cursor = conn.cursor()
+
+        momentum = [r[0] for r in cursor.execute("""
+            SELECT Ticker FROM combined_stock_data
+            WHERE Date = (SELECT MAX(Date) FROM combined_stock_data)
+            AND Ticker_Close > Ticker_SMA_10 AND Ticker_SMA_10 > Ticker_SMA_30
+            AND Ticker_RSI > 50 AND Ticker_MACD > Ticker_MACD_Signal
+            ORDER BY (Ticker_Close / Ticker_SMA_10) DESC LIMIT 9
+        """).fetchall()]
+
+        breakout = [r[0] for r in cursor.execute("""
+            SELECT Ticker FROM combined_stock_data
+            WHERE Date = (SELECT MAX(Date) FROM combined_stock_data)
+            AND Ticker_Close > Ticker_Bollinger_High
+            AND Ticker_Volume > Ticker_SMA_30 * 1.5
+            AND Ticker_Williams_R > -20
+            ORDER BY (Ticker_Close / Ticker_Bollinger_High) DESC LIMIT 9
+        """).fetchall()]
+
+        trend_strength = [r[0] for r in cursor.execute("""
+            SELECT Ticker FROM combined_stock_data
+            WHERE Date = (SELECT MAX(Date) FROM combined_stock_data)
+            AND Ticker_TSI > 0 AND Ticker_UO > 50
+            AND Ticker_MFI > 50 AND Ticker_Chaikin_MF > 0
+            ORDER BY (Ticker_TSI + Ticker_UO + Ticker_MFI) DESC LIMIT 9
+        """).fetchall()]
+
+        conn.close()
+        return {"momentum": momentum, "breakout": breakout, "trend_strength": trend_strength}
+    except Exception:
+        return {"momentum": [], "breakout": [], "trend_strength": []}
+
+
+# ── AI chat ────────────────────────────────────────────────────────────────────
 
 class AiChatRequest(BaseModel):
     provider: str
@@ -163,6 +334,8 @@ async def ai_chat(request: AiChatRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ── App lifecycle ──────────────────────────────────────────────────────────────
+
 @app.get("/", response_class=HTMLResponse)
 async def serve_react_app():
     with open(os.path.join("frontend/build", "index.html")) as f:
@@ -172,8 +345,8 @@ async def serve_react_app():
 origins = [
     "http://localhost:8000",
     "http://localhost:3000",
-    "https://stock-indicators.com",
-    "https://www.stock-indicators.com",
+    "https://batesstocks.com",
+    "https://www.batesstocks.com",
 ]
 
 app.add_middleware(
@@ -190,7 +363,14 @@ async def startup():
     global redis
     await database.connect()
     redis = fakeredis.FakeRedis()
-    await build_search_index()
+
+    # Auto-initialize if DB is empty
+    if not _db_has_data():
+        import threading
+        t = threading.Thread(target=run_full_pipeline, daemon=True)
+        t.start()
+    else:
+        await build_search_index()
 
 
 async def build_search_index():
@@ -202,20 +382,32 @@ async def build_search_index():
         full_name = result["FullName"]
 
         for i in range(1, len(ticker) + 1):
-            prefix = ticker[:i].lower()
-            prefix_index[prefix].add((ticker, full_name))
+            prefix_index[ticker[:i].lower()].add((ticker, full_name))
 
-        words = re.findall(r"\w+", full_name.lower())
-        for word in words:
+        for word in re.findall(r"\w+", full_name.lower()):
             for i in range(1, len(word) + 1):
-                prefix = word[:i]
-                prefix_index[prefix].add((ticker, full_name))
+                prefix_index[word[:i]].add((ticker, full_name))
 
 
 @app.on_event("shutdown")
 async def shutdown():
     await database.disconnect()
     redis.close()
+
+
+# ── API routes ─────────────────────────────────────────────────────────────────
+
+@app.post("/refresh_data")
+async def refresh_data(background_tasks: BackgroundTasks):
+    if pipeline_running:
+        return {"status": "already_running", "message": "Data refresh already in progress"}
+    background_tasks.add_task(run_full_pipeline)
+    return {"status": "started", "message": "Data refresh started in background"}
+
+
+@app.get("/refresh_status")
+async def refresh_status():
+    return {"running": pipeline_running}
 
 
 @app.get("/stock/{ticker}", response_model=List[StockData])
@@ -286,9 +478,7 @@ async def get_stock_data(
         for record in result
     ]
 
-    redis.set(
-        cache_key, json.dumps([sd.dict() for sd in stock_data]), ex=3600
-    )  # Cache for 1 hour
+    redis.set(cache_key, json.dumps([sd.dict() for sd in stock_data]), ex=3600)
 
     return stock_data
 
@@ -341,25 +531,17 @@ async def get_company_info(ticker: str):
     for key, value in company_data.items():
         if key in ["MarketCap", "Employees", "Revenue", "GrossProfit", "FreeCashFlow"]:
             company_data[key] = safe_convert(value, int)
-        elif key in [
-            "Price",
-            "DividendRate",
-            "DividendYield",
-            "PayoutRatio",
-            "Beta",
-            "PE",
-            "EPS",
-        ]:
+        elif key in ["Price", "DividendRate", "DividendYield", "PayoutRatio", "Beta", "PE", "EPS"]:
             company_data[key] = safe_convert(value, float)
 
-    redis.set(cache_key, json.dumps(company_data), ex=600)  # Cache for 10 minutes
+    redis.set(cache_key, json.dumps(company_data), ex=600)
 
     return CompanyInfo(**company_data)
 
 
 @app.get("/groupings", response_model=StockGroupings)
 async def get_stock_groupings():
-    return load_bullish_groups()
+    return _get_bullish_groupings_from_db()
 
 
 @app.get("/search", response_model=List[SearchResult])
@@ -370,24 +552,24 @@ async def search_companies(query: str):
     if cached_data:
         return json.loads(cached_data)
 
-    query = query.lower()
+    q = query.lower()
     results = set()
 
     for prefix, items in prefix_index.items():
-        if prefix.startswith(query):
+        if prefix.startswith(q):
             results.update(items)
 
     filtered_results = [
         (ticker, full_name)
         for ticker, full_name in results
-        if query in ticker.lower() or query in full_name.lower()
+        if q in ticker.lower() or q in full_name.lower()
     ]
 
     sorted_results = sorted(
         filtered_results,
         key=lambda x: (
-            x[0].lower().startswith(query),
-            x[1].lower().startswith(query),
+            x[0].lower().startswith(q),
+            x[1].lower().startswith(q),
             len(x[0]),
             x[0].lower(),
             x[1].lower(),
@@ -399,9 +581,7 @@ async def search_companies(query: str):
         for ticker, full_name in sorted_results
     ]
 
-    redis.set(
-        cache_key, json.dumps([sr.dict() for sr in search_results]), ex=3600
-    )  # Cache for 1 hour
+    redis.set(cache_key, json.dumps([sr.dict() for sr in search_results]), ex=3600)
 
     return search_results
 

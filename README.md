@@ -1,51 +1,64 @@
-# stock-indicators
+# BatesStocks
 
-A self-hosted application for stock data aggregation and visualization, featuring a FastAPI backend and React frontend.
+A self-hosted stock analysis dashboard with technical indicators, interactive charts, and AI-powered analysis. Built with FastAPI and React.
 
 ## Features
-- Multi-source data aggregation (yfinance)
-- SQLite3 database storage
-- Interactive stock charts with customizable indicators
-- Dynamic stock grid layout
-- Real-time data updates
-- Comprehensive financial metrics
 
-## Installation
+- S&P 500 data via Yahoo Finance (5+ years of daily OHLCV)
+- 24 technical indicators across trend, momentum, volatility, and volume categories
+- Interactive charts with customizable metrics and date ranges
+- AI analysis chat (Ollama, Anthropic Claude, OpenAI)
+- Bullish stock groupings: momentum, breakout, trend strength
+- Auto-initializes on first run — no manual data scripts needed
 
-**Prerequisites**: Python 3.7+, Node.js 14+, npm 6+
+## Setup
+
+**Prerequisites**: Python 3.11+, Node.js 14+, uv
 
 ```bash
-# Clone and setup
-git clone https://github.com/your-username/Stock_TA_Charts.git
-cd Stock_TA_Charts
+# Backend
+uv sync
 
-# Backend setup
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-python puller.py
-
-# Frontend setup
-cd frontend/src
+# Frontend
+cd frontend
 npm install
 npm run build
+cd ..
 
-# Start server
-python3 main.py
+# Start — data pulls automatically on first run
+uv run python main.py
 ```
 
-Access at `http://localhost:8000`
+Access at `http://localhost:8000`. On first launch the server fetches all S&P 500 data in the background (~10 min). The UI is usable immediately; charts populate as data arrives.
 
-## API Endpoints
-- `GET /stock/{ticker}`: Stock data
-- `GET /indicators/{ticker}`: Technical indicators
-- `GET /company/{ticker}`: Company information
+## Refreshing Data
 
-Full API documentation: `http://localhost:8000/docs`
+Trigger a full data refresh from the API — no CLI scripts needed:
 
-## Contributing
-1. Fork repository
-2. Create feature branch
-3. Submit pull request
+```
+POST /refresh_data
+GET  /refresh_status   # {"running": true/false}
+```
 
-For issues: Check database connectivity, run `python puller.py` for fresh data, or clear browser cache.
+Or hit the refresh button in the UI.
+
+## API
+
+| Endpoint | Description |
+|---|---|
+| `GET /stock/{ticker}` | OHLCV + indicators (supports `start_date`, `end_date`, `page`) |
+| `GET /company/{ticker}` | Company info and financials |
+| `GET /groupings` | Live bullish stock groupings (momentum / breakout / trend strength) |
+| `GET /search?query=` | Ticker and company name autocomplete |
+| `POST /ai/chat` | AI technical analysis (Ollama / Anthropic / OpenAI) |
+| `POST /refresh_data` | Trigger full data pipeline in background |
+| `GET /refresh_status` | Check if pipeline is running |
+
+Interactive docs: `http://localhost:8000/docs`
+
+## Tech Stack
+
+- **Backend**: FastAPI, SQLAlchemy, SQLite, `ta` library
+- **Frontend**: React 18, Recharts, Tailwind CSS, Radix UI
+- **Data**: yfinance, BeautifulSoup (S&P 500 list from Wikipedia)
+- **AI**: Ollama (local), Anthropic Claude, OpenAI

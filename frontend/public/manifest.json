@@ -18,8 +18,8 @@
       "type": "image/png"
     }
   ],
-  "name": "Create React App Sample",
-  "short_name": "React App",
+  "name": "BatesStocks",
+  "short_name": "BatesStocks",
   "start_url": ".",
   "theme_color": "#000000"
 }
