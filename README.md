@@ -5,60 +5,203 @@ A self-hosted stock analysis dashboard with technical indicators, interactive ch
 ## Features
 
 - S&P 500 data via Yahoo Finance (5+ years of daily OHLCV)
-- 24 technical indicators across trend, momentum, volatility, and volume categories
-- Interactive charts with customizable metrics and date ranges
-- AI analysis chat (Ollama, Anthropic Claude, OpenAI)
+- 24 technical indicators: trend, momentum, volatility, volume
+- Interactive multi-ticker charts with customizable metrics and date ranges
+- AI analysis chat (Ollama, Anthropic Claude, OpenAI) with full ticker context
 - Bullish stock groupings: momentum, breakout, trend strength
+- Save/load view presets (ticker + metric combinations)
+- CSV export of any chart's current data
+- Dark/light mode with keyboard shortcuts
 - Auto-initializes on first run — no manual data scripts needed
+- Redis caching with automatic fakeredis fallback
+- Rate-limited API endpoints
 
-## Setup
+---
 
-**Prerequisites**: Python 3.11+, Node.js 14+, uv
+## Quick Start (Docker)
+
+The easiest way to run the app. Requires Docker and Docker Compose.
 
 ```bash
-# Backend
+git clone https://github.com/wtbates99/batesstocks.git
+cd batesstocks
+cp .env.example .env        # edit if needed
+docker compose up --build
+```
+
+Access at `http://localhost:8000`. Redis runs as a sidecar container. The SQLite database is persisted via a volume mount at `./stock_data.db`.
+
+On first launch the server fetches all S&P 500 data in the background (~10 min). The UI is usable immediately; charts populate as data arrives.
+
+### Docker commands
+
+```bash
+docker compose up --build       # build and start
+docker compose up -d            # run in background
+docker compose down             # stop
+docker compose logs -f app      # tail app logs
+docker compose logs -f redis    # tail redis logs
+```
+
+---
+
+## Manual Setup
+
+**Prerequisites**: Python 3.11+, Node.js 20+, [uv](https://github.com/astral-sh/uv)
+
+```bash
+# 1. Clone
+git clone https://github.com/wtbates99/batesstocks.git
+cd batesstocks
+
+# 2. Configure environment
+cp .env.example .env
+# Edit .env if you want a custom DB path, Redis host, etc.
+
+# 3. Install Python dependencies
 uv sync
 
-# Frontend
+# 4. Build the frontend
 cd frontend
 npm install
 npm run build
 cd ..
 
-# Start — data pulls automatically on first run
+# 5. Start the server
 uv run python main.py
 ```
 
-Access at `http://localhost:8000`. On first launch the server fetches all S&P 500 data in the background (~10 min). The UI is usable immediately; charts populate as data arrives.
+Access at `http://localhost:8000`.
 
-## Refreshing Data
+### Frontend dev server
 
-Trigger a full data refresh from the API — no CLI scripts needed:
+Run the React dev server alongside the backend for hot-reload during frontend development:
 
+```bash
+# Terminal 1 — backend
+uv run python main.py
+
+# Terminal 2 — frontend dev server (proxies API calls to :8000)
+cd frontend
+npm start
 ```
-POST /refresh_data
-GET  /refresh_status   # {"running": true/false}
+
+---
+
+## Configuration
+
+All settings are read from a `.env` file in the project root. Copy `.env.example` to get started:
+
+```bash
+cp .env.example .env
 ```
 
-Or hit the refresh button in the UI.
+| Variable | Default | Description |
+|---|---|---|
+| `DB_PATH` | `stock_data.db` | Path to the SQLite database file |
+| `REDIS_HOST` | `localhost` | Redis hostname |
+| `REDIS_PORT` | `6379` | Redis port |
+| `OLLAMA_HOST` | `http://localhost:11434` | Ollama API base URL |
+| `APP_HOST` | `0.0.0.0` | Uvicorn bind host |
+| `APP_PORT` | `8000` | Uvicorn bind port |
+| `CORS_ORIGINS` | `http://localhost:8000,...` | Comma-separated allowed CORS origins |
+
+If Redis is unavailable at startup the app automatically falls back to an in-memory fakeredis instance (cache is lost on restart).
+
+---
 
 ## API
 
-| Endpoint | Description |
-|---|---|
-| `GET /stock/{ticker}` | OHLCV + indicators (supports `start_date`, `end_date`, `page`) |
-| `GET /company/{ticker}` | Company info and financials |
-| `GET /groupings` | Live bullish stock groupings (momentum / breakout / trend strength) |
-| `GET /search?query=` | Ticker and company name autocomplete |
-| `POST /ai/chat` | AI technical analysis (Ollama / Anthropic / OpenAI) |
-| `POST /refresh_data` | Trigger full data pipeline in background |
-| `GET /refresh_status` | Check if pipeline is running |
+| Endpoint | Rate limit | Description |
+|---|---|---|
+| `GET /stock/{ticker}` | 60/min | OHLCV + all indicators. Params: `start_date`, `end_date`, `page`, `page_size` |
+| `GET /company/{ticker}` | 30/min | Company info and financials |
+| `GET /groupings` | 20/min | Live bullish groupings (momentum / breakout / trend strength) |
+| `GET /search?query=&limit=` | 30/min | Ticker and company name autocomplete. `limit` 1–50, default 10 |
+| `POST /ai/chat` | 10/min | AI technical analysis (Ollama / Anthropic / OpenAI) |
+| `POST /refresh_data` | 2/min | Trigger full data pipeline in background |
+| `GET /refresh_status` | 20/min | Check pipeline progress |
 
 Interactive docs: `http://localhost:8000/docs`
 
+### AI chat request body
+
+```json
+{
+  "provider": "ollama",
+  "model": "qwen3:8b",
+  "api_key": null,
+  "message": "Which stocks show the strongest momentum?",
+  "context": {
+    "tickers": ["AAPL", "MSFT"],
+    "dateRange": "30 days",
+    "metrics": ["Ticker_RSI", "Ticker_MACD"],
+    "dataSummary": "..."
+  }
+}
+```
+
+Supported providers: `ollama`, `anthropic`, `openai`. `api_key` is required for Anthropic and OpenAI.
+
+---
+
+## Keyboard Shortcuts
+
+| Key | Action |
+|---|---|
+| `\` | Toggle AI Terminal |
+| `/` | Focus search bar |
+| `t` | Toggle dark / light mode |
+| `g` | Cycle through stock groupings |
+| `[` | Step to shorter date range |
+| `]` | Step to longer date range |
+| `?` | Show keyboard shortcuts help |
+
+---
+
+## Presets
+
+Save any combination of tickers and metrics as a named preset using the **Presets** section in the sidebar. Presets are stored in browser localStorage and survive page reloads.
+
+---
+
+## Data Refresh
+
+Trigger a full data refresh without restarting the server:
+
+```
+POST /refresh_data
+GET  /refresh_status   → {"running": true, "phase": "full_load", "loaded": 120, "total": 503}
+```
+
+The pipeline runs in two phases:
+1. **Fast load** — 27 priority tickers (AAPL, MSFT, TSLA, NVDA, etc.) loaded first so the default view is usable immediately
+2. **Full load** — remaining ~475 S&P 500 tickers loaded in background
+
+---
+
 ## Tech Stack
 
-- **Backend**: FastAPI, SQLAlchemy, SQLite, `ta` library
-- **Frontend**: React 18, Recharts, Tailwind CSS, Radix UI
-- **Data**: yfinance, BeautifulSoup (S&P 500 list from Wikipedia)
-- **AI**: Ollama (local), Anthropic Claude, OpenAI
+| Layer | Technology |
+|---|---|
+| Backend | FastAPI, SQLAlchemy, SQLite, `databases` (async), `ta` |
+| Frontend | React 18, Recharts, Tailwind CSS, Radix UI |
+| Caching | Redis (with fakeredis fallback) |
+| Rate limiting | SlowAPI |
+| Data sources | yfinance, BeautifulSoup (Wikipedia S&P 500 list) |
+| AI | Ollama (local), Anthropic Claude, OpenAI |
+| Config | python-dotenv |
+| Packaging | uv, Docker + Docker Compose |
+
+---
+
+## Running Tests
+
+```bash
+uv run pytest
+```
+
+Tests cover:
+- `tests/test_data_manipulation.py` — indicator calculations (RSI range, SMA correctness, no infinities)
+- `tests/test_signals.py` — SQL signal views (bullish/bearish/neutral detection, Bollinger breakouts)
+- `tests/test_data_pull.py` — data pipeline (table creation, column schema) with mocked yfinance
