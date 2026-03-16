@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 
 const DEFAULT_MODELS = {
-  ollama:    'llama3.2',
+  ollama:    'qwen3.5:397b-cloud',
   anthropic: 'claude-sonnet-4-6',
   openai:    'gpt-4o-mini',
 };
@@ -230,6 +230,7 @@ const AiPanel = ({ tickers, dateRange, selectedMetrics, isOpen, onToggle }) => {
           {contextStatus === 'loaded'  && `Context: ${contextSummary} · ${dateRange}D`}
           {contextStatus === 'error'   && 'Context fetch failed — AI will use general knowledge'}
         </span>
+        <span className="ai-model-badge">{model}</span>
         {messages.length > 0 && (
           <button className="ai-clear-btn" onClick={() => setMessages([])}>
             CLEAR

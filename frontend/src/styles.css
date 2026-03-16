@@ -502,6 +502,45 @@ h1, h2, h3, h4, h5, h6 { font-weight: 600; }
   overflow: hidden;
 }
 
+/* ── Pipeline banner ─────────────────────────────────────────── */
+--pipeline-banner-h: 20px;
+
+.pipeline-banner {
+  position: fixed;
+  top: var(--header-h);
+  left: 0; right: 0;
+  height: var(--pipeline-banner-h, 20px);
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+}
+.pipeline-bar {
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  background: var(--accent);
+  opacity: 0.18;
+  transition: width 0.6s var(--ease);
+  min-width: 4%;
+}
+.pipeline-label {
+  position: relative;
+  font-size: 9px;
+  font-family: var(--mono);
+  color: var(--accent);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0 10px;
+  white-space: nowrap;
+}
+/* Push ticker strip + content down when banner is visible */
+.pipeline-loading .ticker-strip { top: calc(var(--header-h) + 20px); }
+.pipeline-loading .main-content  { margin-top: calc(var(--total-header) + 20px); }
+.pipeline-loading .sidebar-container { top: calc(var(--total-header) + 20px); }
+.pipeline-loading .backdrop       { top: calc(var(--total-header) + 20px); }
+
 /* ── Loading ─────────────────────────────────────────────────── */
 .loading {
   display: flex;
@@ -834,6 +873,18 @@ h1, h2, h3, h4, h5, h6 { font-weight: 600; }
 .ai-context-dot.loading { background: var(--accent); animation: pulse 1s ease-in-out infinite; }
 
 .ai-context-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.ai-model-badge {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--accent);
+  background: var(--surface-2);
+  white-space: nowrap;
+}
 
 .ai-clear-btn {
   padding: 1px 7px;

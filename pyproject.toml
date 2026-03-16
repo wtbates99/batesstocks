@@ -13,7 +13,7 @@ dependencies = [
     "fakeredis==2.25.1",
     "redis==5.1.1",
     "httpx>=0.27.0",
-    "yfinance==0.2.44",
+    "yfinance>=0.2.50",
     "ta==0.11.0",
     "pandas==2.2.3",
     "numpy==2.1.2",
