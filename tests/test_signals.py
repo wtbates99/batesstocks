@@ -110,3 +110,64 @@ def test_bollinger_breakout_below(conn):
     ).fetchall()
     signals = [r[0] for r in rows]
     assert any("Breakout Below" in s for s in signals), "Expected breakout below signal"
+
+
+def test_golden_cross_detected(conn):
+    """SMA_10 crosses above EMA_10: should appear in golden_death_cross_view as Golden Cross."""
+    # Row 1: SMA_10 < EMA_10 (before the cross)
+    conn.execute("""
+        INSERT INTO combined_stock_data
+        (Date, Ticker, Ticker_Close, Ticker_MACD, Ticker_MACD_Signal, Ticker_MACD_Diff,
+         Ticker_RSI, Ticker_Stochastic_K, Ticker_Stochastic_D,
+         Ticker_Bollinger_High, Ticker_Bollinger_Low,
+         Ticker_SMA_10, Ticker_EMA_10, Ticker_SMA_30, Ticker_Volume,
+         Ticker_TSI, Ticker_UO, Ticker_MFI, Ticker_Chaikin_MF, Ticker_Williams_R, FullName)
+        VALUES ('2024-02-01','GOLD',100,0,0,0,50,50,50,110,90, 98,100,95,1000000,0.5,55,55,0.1,-30,'Gold Corp')
+    """)
+    # Row 2: SMA_10 > EMA_10 (the cross day — LAG picks up previous row)
+    conn.execute("""
+        INSERT INTO combined_stock_data
+        (Date, Ticker, Ticker_Close, Ticker_MACD, Ticker_MACD_Signal, Ticker_MACD_Diff,
+         Ticker_RSI, Ticker_Stochastic_K, Ticker_Stochastic_D,
+         Ticker_Bollinger_High, Ticker_Bollinger_Low,
+         Ticker_SMA_10, Ticker_EMA_10, Ticker_SMA_30, Ticker_Volume,
+         Ticker_TSI, Ticker_UO, Ticker_MFI, Ticker_Chaikin_MF, Ticker_Williams_R, FullName)
+        VALUES ('2024-02-02','GOLD',102,0,0,0,50,50,50,110,90, 102,100,96,1000000,0.5,55,55,0.1,-30,'Gold Corp')
+    """)
+    conn.commit()
+    rows = conn.execute(
+        "SELECT CrossSignal FROM golden_death_cross_view WHERE Ticker='GOLD'"
+    ).fetchall()
+    cross_signals = [r[0] for r in rows]
+    assert any("Golden" in cs for cs in cross_signals), "Expected Golden Cross signal"
+
+
+def test_volume_breakout_detected(conn):
+    """Volume 3× the ticker average should appear in volume_breakout_view."""
+    # Insert 30 low-volume rows to establish a baseline
+    for i in range(30):
+        conn.execute("""
+            INSERT INTO combined_stock_data
+            (Date, Ticker, Ticker_Close, Ticker_MACD, Ticker_MACD_Signal, Ticker_MACD_Diff,
+             Ticker_RSI, Ticker_Stochastic_K, Ticker_Stochastic_D,
+             Ticker_Bollinger_High, Ticker_Bollinger_Low,
+             Ticker_SMA_10, Ticker_EMA_10, Ticker_SMA_30, Ticker_Volume,
+             Ticker_TSI, Ticker_UO, Ticker_MFI, Ticker_Chaikin_MF, Ticker_Williams_R, FullName)
+            VALUES (date('2024-03-01', '+' || ? || ' days'),'VOLBK',100,0,0,0,50,50,50,
+                    110,90,98,99,95,500000,0.5,55,55,0.1,-30,'VolBk Corp')
+        """, (i,))
+    # Insert high-volume spike row
+    conn.execute("""
+        INSERT INTO combined_stock_data
+        (Date, Ticker, Ticker_Close, Ticker_MACD, Ticker_MACD_Signal, Ticker_MACD_Diff,
+         Ticker_RSI, Ticker_Stochastic_K, Ticker_Stochastic_D,
+         Ticker_Bollinger_High, Ticker_Bollinger_Low,
+         Ticker_SMA_10, Ticker_EMA_10, Ticker_SMA_30, Ticker_Volume,
+         Ticker_TSI, Ticker_UO, Ticker_MFI, Ticker_Chaikin_MF, Ticker_Williams_R, FullName)
+        VALUES ('2024-05-01','VOLBK',105,0,0,0,50,50,50,110,90,103,102,98,5000000,0.5,55,55,0.1,-30,'VolBk Corp')
+    """)
+    conn.commit()
+    rows = conn.execute(
+        "SELECT Ticker FROM volume_breakout_view WHERE Ticker='VOLBK'"
+    ).fetchall()
+    assert len(rows) > 0, "Expected a volume breakout row for VOLBK"
