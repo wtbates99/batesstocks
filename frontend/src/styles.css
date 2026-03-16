@@ -496,6 +496,12 @@ h1, h2, h3, h4, h5, h6 { font-weight: 600; }
 .metric-name  { font-weight: 600; font-size: 11px; font-family: var(--mono); }
 .metric-value { font-size: 11px; color: var(--text); font-family: var(--mono); }
 
+/* ── Chart Container ─────────────────────────────────────────── */
+.chart-container {
+  width: 100%;
+  overflow: hidden;
+}
+
 /* ── Loading ─────────────────────────────────────────────────── */
 .loading {
   display: flex;
@@ -685,17 +691,34 @@ h1, h2, h3, h4, h5, h6 { font-weight: 600; }
 .search-results::-webkit-scrollbar { display: none; }
 
 .search-result-item {
-  padding: 7px 11px;
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 6px 11px;
   font-size: 11px;
   cursor: pointer;
-  color: var(--muted);
   border-bottom: 1px solid var(--border);
-  transition: background var(--t), color var(--t);
+  transition: background var(--t);
   font-family: var(--mono);
 }
 
 .search-result-item:last-child { border-bottom: none; }
-.search-result-item:hover { background: var(--surface-2); color: var(--text); }
+.search-result-item:hover,
+.search-result-item.active { background: var(--surface-2); }
+
+.search-result-ticker {
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: 0.06em;
+  flex-shrink: 0;
+}
+
+.search-result-name {
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /* ── AI Panel ────────────────────────────────────────────────── */
 .ai-panel {

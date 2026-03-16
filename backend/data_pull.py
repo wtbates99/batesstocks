@@ -3,7 +3,10 @@ import yfinance as yf
 
 
 def fetch_write_financial_data(conn):
-    table = pd.read_html("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies")[0]
+    table = pd.read_html(
+        "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies",
+        storage_options={"User-Agent": "Mozilla/5.0"},
+    )[0]
     tickers = table[~table["Symbol"].str.contains(r"\.")]["Symbol"].tolist()
     batch_size = 503
 
