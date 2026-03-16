@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback, memo } from 'react';
+import React, { useEffect, useMemo, useCallback, memo } from 'react';
 import {
   ResponsiveContainer,
   XAxis,
@@ -10,6 +10,24 @@ import {
 } from 'recharts';
 import '../styles.css';
 import useWindowSize from '../hooks/useWindowSize';
+
+function downloadCSV(data, ticker, metrics) {
+  if (!data.length) return;
+  const headers = ['Date', 'Ticker', ...metrics.map((m) => m.replace('Ticker_', ''))];
+  const rows = data.map((row) => [
+    row.Date,
+    ticker,
+    ...metrics.map((m) => (row[m] != null ? row[m] : '')),
+  ]);
+  const csv = [headers, ...rows].map((r) => r.join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${ticker}_${new Date().toISOString().split('T')[0]}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 const dataCache = {};
 
@@ -25,7 +43,7 @@ function parseDateLocal(dateInput) {
 }
 
 const StockChart = memo(({ initialTicker, startDate, endDate, metrics, metricsList, onDataLoaded }) => {
-  const [allData, setAllData] = useState([]);
+  const [allData, setAllData] = React.useState([]);
   const { width } = useWindowSize();
 
   const chartHeight = useMemo(() => {
@@ -137,6 +155,14 @@ const StockChart = memo(({ initialTicker, startDate, endDate, metrics, metricsLi
 
   return (
     <div className="chart-container">
+      <button
+        className="chart-download-btn"
+        onClick={() => downloadCSV(filteredData, initialTicker, metrics)}
+        title="Download CSV"
+        aria-label="Download chart data as CSV"
+      >
+        ↓ CSV
+      </button>
       <ResponsiveContainer width="100%" height={chartHeight}>
         <AreaChart data={filteredData} margin={{ top: 6, right: 48, bottom: 2, left: 0 }}>
           <XAxis

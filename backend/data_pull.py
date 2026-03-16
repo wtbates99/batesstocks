@@ -1,6 +1,9 @@
 import concurrent.futures
+import logging
 import pandas as pd
 import yfinance as yf
+
+logger = logging.getLogger("batesstocks.data_pull")
 
 
 def get_sp500_table():
@@ -53,8 +56,8 @@ def fetch_write_financial_data(conn, table, tickers, append=False):
                     "Currency":   getattr(fi, "currency", None),
                     "QuoteType":  getattr(fi, "quote_type", None),
                 })
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Failed to fetch fast_info for %s: %s", ticker, e)
             try:
                 info = t.info
                 row.update({
@@ -76,8 +79,8 @@ def fetch_write_financial_data(conn, table, tickers, append=False):
                     "GrossProfit":  info.get("grossProfits"),
                     "FreeCashFlow": info.get("freeCashflow"),
                 })
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Failed to fetch info for %s: %s", ticker, e)
             return row
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:

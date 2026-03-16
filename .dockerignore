@@ -1,0 +1,10 @@
+stock_data.db
+*.db
+frontend/node_modules/
+frontend/build/
+.env
+.git/
+__pycache__/
+*.pyc
+*.pyo
+.venv/

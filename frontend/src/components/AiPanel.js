@@ -71,7 +71,7 @@ const AiPanel = ({ tickers, dateRange, selectedMetrics, isOpen, onToggle }) => {
   }, [provider]);
 
   const buildContextSummary = useCallback(async () => {
-    const cacheKey = tickers.slice(0, 9).join(',');
+    const cacheKey = tickers.join(',');
     if (cachedContextRef.current?.key === cacheKey) {
       return cachedContextRef.current.summary;
     }
@@ -85,8 +85,10 @@ const AiPanel = ({ tickers, dateRange, selectedMetrics, isOpen, onToggle }) => {
       'Ticker_Williams_R', 'Ticker_On_Balance_Volume',
     ].join(',');
 
+    // Cap at 25 tickers for performance; note the cap in the summary if exceeded
+    const fetchTickers = tickers.length > 25 ? tickers.slice(0, 25) : tickers;
     const lines = await Promise.all(
-      tickers.slice(0, 9).map(async (ticker) => {
+      fetchTickers.map(async (ticker) => {
         try {
           const resp = await fetch(
             `/stock/${ticker}?start_date=${startDate}&end_date=${endDate}&metrics=${metricsParam}`
@@ -119,10 +121,11 @@ const AiPanel = ({ tickers, dateRange, selectedMetrics, isOpen, onToggle }) => {
       })
     );
 
-    const summary = lines.join('\n');
+    const capNote = tickers.length > 25 ? ` (showing top 25 of ${tickers.length})` : '';
+    const summary = lines.join('\n') + (capNote ? `\n${capNote}` : '');
     cachedContextRef.current = { key: cacheKey, summary };
     setContextStatus('loaded');
-    setContextSummary(`${tickers.length} tickers loaded`);
+    setContextSummary(`${fetchTickers.length} tickers loaded${capNote}`);
     return summary;
   }, [tickers]);
 

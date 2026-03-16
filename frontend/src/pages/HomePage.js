@@ -1,8 +1,10 @@
-import React, { useState, useCallback, useEffect, useMemo } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import StockChart from '../components/StockChart';
 import SearchBar from '../components/SearchBar';
 import AiPanel from '../components/AiPanel';
+import PresetManager from '../components/PresetManager';
+import KeyboardShortcutsHelp from '../components/KeyboardShortcutsHelp';
 import '../styles.css';
 import { metricsList, groupedMetrics } from '../metricsList';
 
@@ -17,6 +19,8 @@ const defaultMetrics = {
   breakout:       ['Ticker_Close', 'Ticker_Bollinger_High', 'Ticker_Bollinger_Low'],
   trend_strength: ['Ticker_MACD', 'Ticker_MACD_Signal', 'Ticker_MACD_Diff'],
 };
+
+const DATE_RANGES = [7, 30, 90, 180, 365, 730, 1095, 1460, 1825];
 
 function isMarketOpen() {
   const now = new Date();
@@ -47,6 +51,16 @@ const HomePage = () => {
   const [priceData, setPriceData]             = useState({});
   const [marketOpen, setMarketOpen]           = useState(isMarketOpen());
   const [pipelineStatus, setPipelineStatus]   = useState(null);
+  const [shortcutsOpen, setShortcutsOpen]     = useState(false);
+
+  // Dark/light mode — persisted to localStorage
+  const [theme, setTheme] = useState(() => localStorage.getItem('batesstocks_theme') || 'dark');
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('batesstocks_theme', theme);
+  }, [theme]);
+
+  const groupIndexRef = useRef(0);
 
   // Re-check market status every 60 s
   useEffect(() => {
@@ -98,11 +112,56 @@ const HomePage = () => {
   useEffect(() => {
     const onKey = (e) => {
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-      if (e.key === '\\') setAiPanelOpen((p) => !p);
+
+      // \ → toggle AI panel
+      if (e.key === '\\') { setAiPanelOpen((p) => !p); return; }
+
+      // ? → toggle keyboard shortcuts help
+      if (e.key === '?') { setShortcutsOpen((p) => !p); return; }
+
+      // t → toggle theme
+      if (e.key === 't') { setTheme((th) => th === 'dark' ? 'light' : 'dark'); return; }
+
+      // / → focus search
+      if (e.key === '/') {
+        e.preventDefault();
+        document.querySelector('.search-input')?.focus();
+        return;
+      }
+
+      // [ / ] → step through date ranges
+      if (e.key === '[') {
+        setSelectedRange((cur) => {
+          const idx = DATE_RANGES.indexOf(cur);
+          const next = DATE_RANGES[Math.max(0, idx - 1)];
+          setStartDate(new Date(Date.now() - next * 86400000));
+          setEndDate(new Date());
+          return next;
+        });
+        return;
+      }
+      if (e.key === ']') {
+        setSelectedRange((cur) => {
+          const idx = DATE_RANGES.indexOf(cur);
+          const next = DATE_RANGES[Math.min(DATE_RANGES.length - 1, idx + 1)];
+          setStartDate(new Date(Date.now() - next * 86400000));
+          setEndDate(new Date());
+          return next;
+        });
+        return;
+      }
+
+      // g → cycle through groupings
+      if (e.key === 'g') {
+        const groups = ['default', ...(tickerGroups ? Object.keys(tickerGroups) : [])];
+        groupIndexRef.current = (groupIndexRef.current + 1) % groups.length;
+        handleGroupChange(groups[groupIndexRef.current]);
+        return;
+      }
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, []);
+  }, [tickerGroups]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const setDateRange = useCallback((days) => {
     setStartDate(new Date(Date.now() - days * 86400000));
@@ -136,6 +195,13 @@ const HomePage = () => {
     setPriceData((prev) => ({ ...prev, [ticker]: data }));
   }, []);
 
+  const handleLoadPreset = useCallback((tickers, metrics) => {
+    setSelectedTickers(tickers);
+    setSelectedMetrics(metrics);
+    setSelectedGroup('default');
+    setPriceData({});
+  }, []);
+
   const sidebarVisible = !sidebarHidden || isHovering;
 
   const rootClass = [
@@ -162,6 +228,14 @@ const HomePage = () => {
             ))}
           </select>
           <SearchBar />
+          <button
+            className="sidebar-toggle-button"
+            onClick={() => setTheme((t) => t === 'dark' ? 'light' : 'dark')}
+            title="Toggle theme  (t)"
+            aria-label="Toggle dark/light mode"
+          >
+            {theme === 'dark' ? '☀' : '☽'}
+          </button>
           <button
             className={`ai-toggle-button ${aiPanelOpen ? 'active' : ''}`}
             onClick={() => setAiPanelOpen((p) => !p)}
@@ -233,7 +307,7 @@ const HomePage = () => {
         <div className={`sidebar-container ${sidebarVisible ? 'visible' : ''}`}>
           <div className="sidebar-content">
             <div className="date-buttons-grid">
-              {[7, 30, 90, 180, 365, 730, 1095, 1460, 1825].map((days) => (
+              {DATE_RANGES.map((days) => (
                 <button
                   key={days}
                   className={selectedRange === days ? 'active' : ''}
@@ -243,6 +317,12 @@ const HomePage = () => {
                 </button>
               ))}
             </div>
+
+            <PresetManager
+              selectedTickers={selectedTickers}
+              selectedMetrics={selectedMetrics}
+              onLoad={handleLoadPreset}
+            />
 
             <div className="metrics-section">
               {Object.entries(groupedMetrics).map(([groupName, gMetrics]) => (
@@ -329,6 +409,8 @@ const HomePage = () => {
         isOpen={aiPanelOpen}
         onToggle={() => setAiPanelOpen((p) => !p)}
       />
+
+      <KeyboardShortcutsHelp isOpen={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
     </div>
   );
 };
