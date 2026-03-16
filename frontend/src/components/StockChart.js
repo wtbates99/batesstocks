@@ -91,8 +91,14 @@ const StockChart = memo(({ initialTicker, startDate, endDate, metrics, metricsLi
 
   const yAxisDomain = useMemo(() => {
     if (!filteredData.length) return ['auto', 'auto'];
-    const vals = filteredData.flatMap((d) => metrics.map((m) => parseFloat(d[m] || 0)));
-    return [Math.floor(Math.min(...vals)), Math.ceil(Math.max(...vals))];
+    const vals = filteredData
+      .flatMap((d) => metrics.map((m) => (d[m] != null ? parseFloat(d[m]) : NaN)))
+      .filter((v) => !isNaN(v));
+    if (!vals.length) return ['auto', 'auto'];
+    const min = Math.min(...vals);
+    const max = Math.max(...vals);
+    const pad = (max - min) * 0.05 || 1;
+    return [min - pad, max + pad];
   }, [filteredData, metrics]);
 
   const formatYAxis = useCallback((v) => {

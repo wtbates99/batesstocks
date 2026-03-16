@@ -1,72 +1,98 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import debounce from 'lodash/debounce';
 
 const SearchBar = () => {
-  const [searchTerm, setSearchTerm] = useState('');
+  const [searchTerm, setSearchTerm]       = useState('');
   const [searchResults, setSearchResults] = useState([]);
-  const [searchCache, setSearchCache] = useState({});
-  const navigate = useNavigate();
+  const [activeIndex, setActiveIndex]     = useState(-1);
 
-  const debouncedSearch = useMemo(
-    () =>
-      debounce(async (term) => {
-        if (term.length > 0) {
-          if (searchCache[term]) {
-            setSearchResults(searchCache[term]);
-          } else {
-            try {
-              const response = await fetch(`/search?query=${encodeURIComponent(term)}`);
-              if (response.ok) {
-                const data = await response.json();
-                setSearchResults(data);
-                setSearchCache(prev => ({ ...prev, [term]: data }));
-              } else {
-                console.error('Search request failed');
-                setSearchResults([]);
-              }
-            } catch (error) {
-              console.error('Error during search:', error);
-              setSearchResults([]);
-            }
-          }
-        } else {
-          setSearchResults([]);
-        }
-      }, 150),
-    [searchCache]
-  );
+  const navigate   = useNavigate();
+  const cacheRef   = useRef({});
+  const containerRef = useRef(null);
 
-  const handleSearch = useCallback((event) => {
-    const term = event.target.value;
-    setSearchTerm(term);
-    debouncedSearch(term);
+  // Stable debounced fetch — uses a ref for the cache so it never changes identity
+  const debouncedSearch = useRef(
+    debounce(async (term) => {
+      if (!term) { setSearchResults([]); return; }
+      if (cacheRef.current[term]) { setSearchResults(cacheRef.current[term]); return; }
+      try {
+        const res = await fetch(`/search?query=${encodeURIComponent(term)}`);
+        if (!res.ok) { setSearchResults([]); return; }
+        const data = await res.json();
+        cacheRef.current[term] = data;
+        setSearchResults(data);
+        setActiveIndex(-1);
+      } catch {
+        setSearchResults([]);
+      }
+    }, 150)
+  ).current;
+
+  const handleChange = useCallback((e) => {
+    setSearchTerm(e.target.value);
+    debouncedSearch(e.target.value);
   }, [debouncedSearch]);
 
-  const handleSearchResultClick = useCallback((ticker) => {
+  const select = useCallback((ticker) => {
     setSearchTerm('');
     setSearchResults([]);
+    setActiveIndex(-1);
     navigate(`/spotlight/${ticker}`);
   }, [navigate]);
 
+  const handleKeyDown = useCallback((e) => {
+    if (!searchResults.length) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setActiveIndex((i) => Math.min(i + 1, searchResults.length - 1));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setActiveIndex((i) => Math.max(i - 1, 0));
+    } else if (e.key === 'Enter' && activeIndex >= 0) {
+      e.preventDefault();
+      select(searchResults[activeIndex].ticker);
+    } else if (e.key === 'Escape') {
+      setSearchResults([]);
+      setActiveIndex(-1);
+    }
+  }, [searchResults, activeIndex, select]);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handler = (e) => {
+      if (containerRef.current && !containerRef.current.contains(e.target)) {
+        setSearchResults([]);
+        setActiveIndex(-1);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
   return (
-    <div className="search-container">
+    <div className="search-container" ref={containerRef}>
       <input
         type="text"
         placeholder="Search companies..."
         value={searchTerm}
-        onChange={handleSearch}
+        onChange={handleChange}
+        onKeyDown={handleKeyDown}
         className="search-input"
+        autoComplete="off"
+        spellCheck={false}
       />
       {searchResults.length > 0 && (
         <ul className="search-results">
-          {searchResults.map((result) => (
+          {searchResults.map((result, i) => (
             <li
               key={result.ticker}
-              onClick={() => handleSearchResultClick(result.ticker)}
-              className="search-result-item"
+              className={`search-result-item${i === activeIndex ? ' active' : ''}`}
+              onMouseDown={() => select(result.ticker)}
+              onMouseEnter={() => setActiveIndex(i)}
             >
-              {result.name} ({result.ticker})
+              <span className="search-result-ticker">{result.ticker}</span>
+              <span className="search-result-name">{result.name}</span>
             </li>
           ))}
         </ul>

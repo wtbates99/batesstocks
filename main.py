@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Query, BackgroundTasks
 from sqlalchemy import select
 from typing import List, Optional, Union
@@ -28,7 +29,23 @@ def safe_convert(value: Union[str, int, float], target_type: type):
         return None
 
 
-app = FastAPI()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global redis
+    await database.connect()
+    redis = fakeredis.FakeRedis()
+    if not _db_has_data():
+        import threading
+        t = threading.Thread(target=run_full_pipeline, daemon=True)
+        t.start()
+    else:
+        await build_search_index()
+    yield
+    await database.disconnect()
+    redis.close()
+
+
+app = FastAPI(lifespan=lifespan)
 
 app.mount("/static", StaticFiles(directory="frontend/build/static"), name="static")
 
@@ -153,6 +170,27 @@ FROM macd_data WHERE MACDReversal IS NOT NULL;
     conn.commit()
 
 
+def _build_search_index_sync():
+    """Populate prefix_index from the database synchronously (safe to call from any thread)."""
+    try:
+        conn = sqlite3.connect("stock_data.db")
+        cursor = conn.cursor()
+        cursor.execute("SELECT DISTINCT Ticker, FullName FROM combined_stock_data")
+        rows = cursor.fetchall()
+        conn.close()
+        prefix_index.clear()
+        for ticker, full_name in rows:
+            if not ticker or not full_name:
+                continue
+            for i in range(1, len(ticker) + 1):
+                prefix_index[ticker[:i].lower()].add((ticker, full_name))
+            for word in re.findall(r"\w+", full_name.lower()):
+                for i in range(1, len(word) + 1):
+                    prefix_index[word[:i]].add((ticker, full_name))
+    except Exception as e:
+        print(f"Search index build failed: {e}")
+
+
 def run_full_pipeline():
     global pipeline_running
     pipeline_running = True
@@ -162,6 +200,7 @@ def run_full_pipeline():
         process_stock_data(conn)
         create_signal_views(conn)
         conn.close()
+        _build_search_index_sync()
     finally:
         pipeline_running = False
 
@@ -358,41 +397,8 @@ app.add_middleware(
 )
 
 
-@app.on_event("startup")
-async def startup():
-    global redis
-    await database.connect()
-    redis = fakeredis.FakeRedis()
-
-    # Auto-initialize if DB is empty
-    if not _db_has_data():
-        import threading
-        t = threading.Thread(target=run_full_pipeline, daemon=True)
-        t.start()
-    else:
-        await build_search_index()
-
-
 async def build_search_index():
-    query = select(CombinedStockData.Ticker, CombinedStockData.FullName)
-    results = await database.fetch_all(query)
-
-    for result in results:
-        ticker = result["Ticker"]
-        full_name = result["FullName"]
-
-        for i in range(1, len(ticker) + 1):
-            prefix_index[ticker[:i].lower()].add((ticker, full_name))
-
-        for word in re.findall(r"\w+", full_name.lower()):
-            for i in range(1, len(word) + 1):
-                prefix_index[word[:i]].add((ticker, full_name))
-
-
-@app.on_event("shutdown")
-async def shutdown():
-    await database.disconnect()
-    redis.close()
+    _build_search_index_sync()
 
 
 # ── API routes ─────────────────────────────────────────────────────────────────
@@ -478,7 +484,7 @@ async def get_stock_data(
         for record in result
     ]
 
-    redis.set(cache_key, json.dumps([sd.dict() for sd in stock_data]), ex=3600)
+    redis.set(cache_key, json.dumps([sd.model_dump() for sd in stock_data]), ex=3600)
 
     return stock_data
 
@@ -552,27 +558,17 @@ async def search_companies(query: str):
     if cached_data:
         return json.loads(cached_data)
 
-    q = query.lower()
-    results = set()
-
-    for prefix, items in prefix_index.items():
-        if prefix.startswith(q):
-            results.update(items)
-
-    filtered_results = [
-        (ticker, full_name)
-        for ticker, full_name in results
-        if q in ticker.lower() or q in full_name.lower()
-    ]
+    term = query.lower().strip()
+    # O(1) prefix index lookup — index already maps every prefix to matching items
+    results = set(prefix_index.get(term, set()))
 
     sorted_results = sorted(
-        filtered_results,
+        results,
         key=lambda x: (
-            x[0].lower().startswith(q),
-            x[1].lower().startswith(q),
-            len(x[0]),
+            not x[0].lower().startswith(term),   # exact ticker prefix first
+            not x[1].lower().startswith(term),   # then company name prefix
+            len(x[0]),                            # shorter tickers first
             x[0].lower(),
-            x[1].lower(),
         ),
     )[:5]
 
@@ -581,7 +577,7 @@ async def search_companies(query: str):
         for ticker, full_name in sorted_results
     ]
 
-    redis.set(cache_key, json.dumps([sr.dict() for sr in search_results]), ex=3600)
+    redis.set(cache_key, json.dumps([sr.model_dump() for sr in search_results]), ex=3600)
 
     return search_results
 

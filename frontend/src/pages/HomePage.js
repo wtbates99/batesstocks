@@ -45,7 +45,13 @@ const HomePage = () => {
   const [selectedTickers, setSelectedTickers] = useState(defaultTickers);
   const [selectedGroup, setSelectedGroup]     = useState('default');
   const [priceData, setPriceData]             = useState({});
-  const [marketOpen]                          = useState(isMarketOpen());
+  const [marketOpen, setMarketOpen]           = useState(isMarketOpen());
+
+  // Re-check market status every 60 s
+  useEffect(() => {
+    const id = setInterval(() => setMarketOpen(isMarketOpen()), 60_000);
+    return () => clearInterval(id);
+  }, []);
 
   useEffect(() => {
     fetch('/groupings')
@@ -122,7 +128,7 @@ const HomePage = () => {
     <div className={rootClass}>
       {/* ── Header ── */}
       <header className="header">
-        <h1 className="header-title"><span>STOCK</span> INDICATORS</h1>
+        <h1 className="header-title"><span>BATES</span>STOCKS</h1>
         <div className="header-controls">
           <select
             className="group-selector"
