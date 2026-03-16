@@ -47,9 +47,9 @@ const StockChart = memo(({ initialTicker, startDate, endDate, metrics, metricsLi
   const { width } = useWindowSize();
 
   const chartHeight = useMemo(() => {
-    if (width <= 480) return 220;
-    if (width <= 768) return 280;
-    return 310;
+    if (width <= 480) return 180;
+    if (width <= 768) return 220;
+    return 260;
   }, [width]);
 
   useEffect(() => {
@@ -63,8 +63,11 @@ const StockChart = memo(({ initialTicker, startDate, endDate, metrics, metricsLi
         const last = data[data.length - 1];
         const prev = data[data.length - 2];
         onDataLoaded({
-          latestClose: parseFloat(last.Ticker_Close || 0),
-          prevClose:   parseFloat(prev.Ticker_Close || 0),
+          latestClose:  parseFloat(last.Ticker_Close  || 0),
+          prevClose:    parseFloat(prev.Ticker_Close  || 0),
+          latestOpen:   parseFloat(last.Ticker_Open   || 0),
+          latestHigh:   parseFloat(last.Ticker_High   || 0),
+          latestLow:    parseFloat(last.Ticker_Low    || 0),
         });
       }
     };
@@ -164,7 +167,7 @@ const StockChart = memo(({ initialTicker, startDate, endDate, metrics, metricsLi
         ↓ CSV
       </button>
       <ResponsiveContainer width="100%" height={chartHeight}>
-        <AreaChart data={filteredData} margin={{ top: 6, right: 48, bottom: 2, left: 0 }}>
+        <AreaChart data={filteredData} margin={{ top: 2, right: 52, bottom: 18, left: 2 }} style={{ cursor: 'crosshair' }}>
           <XAxis
             dataKey="Date"
             tick={{ fill: '#3e3e58', fontSize: 9, fontFamily: 'JetBrains Mono, Fira Code, monospace' }}
@@ -173,18 +176,22 @@ const StockChart = memo(({ initialTicker, startDate, endDate, metrics, metricsLi
             minTickGap={28}
             axisLine={{ stroke: '#1c1c2e' }}
             tickLine={false}
+            height={16}
           />
           <YAxis
             orientation="right"
-            tick={{ fill: '#3e3e58', fontSize: 9, fontFamily: 'JetBrains Mono, Fira Code, monospace' }}
+            tick={{ fill: '#3e3e58', fontSize: 9, fontFamily: 'JetBrains Mono, Fira Code, monospace', dx: 2 }}
             domain={yAxisDomain}
             tickFormatter={formatYAxis}
-            axisLine={{ stroke: '#1c1c2e' }}
+            axisLine={false}
             tickLine={false}
-            width={46}
+            width={50}
           />
           <CartesianGrid strokeDasharray="1 5" stroke="#1c1c2e" vertical={false} />
-          <Tooltip content={renderTooltip} />
+          <Tooltip
+            content={renderTooltip}
+            cursor={{ stroke: 'rgba(249,115,22,0.35)', strokeWidth: 1, strokeDasharray: '4 3' }}
+          />
           {metrics.map((metric) => {
             const key   = metric.replace('Ticker_', '');
             const color = metricsList.find((m) => m.name === metric)?.color || '#f97316';

@@ -52,6 +52,8 @@ const HomePage = () => {
   const [marketOpen, setMarketOpen]           = useState(isMarketOpen());
   const [pipelineStatus, setPipelineStatus]   = useState(null);
   const [shortcutsOpen, setShortcutsOpen]     = useState(false);
+  const [sortOrder, setSortOrder]   = useState('default'); // 'default'|'gainers'|'losers'|'alpha'
+  const [numCols, setNumCols]       = useState(3);
 
   // Dark/light mode — persisted to localStorage
   const [theme, setTheme] = useState(() => localStorage.getItem('batesstocks_theme') || 'dark');
@@ -201,6 +203,22 @@ const HomePage = () => {
     setSelectedGroup('default');
     setPriceData({});
   }, []);
+
+  const displayTickers = useMemo(() => {
+    const tickers = [...selectedTickers];
+    if (sortOrder === 'alpha')   return tickers.sort((a, b) => a.localeCompare(b));
+    if (sortOrder === 'gainers') return tickers.sort((a, b) => {
+      const pctA = priceData[a] ? (priceData[a].latestClose - priceData[a].prevClose) / (priceData[a].prevClose || 1) : -Infinity;
+      const pctB = priceData[b] ? (priceData[b].latestClose - priceData[b].prevClose) / (priceData[b].prevClose || 1) : -Infinity;
+      return pctB - pctA;
+    });
+    if (sortOrder === 'losers')  return tickers.sort((a, b) => {
+      const pctA = priceData[a] ? (priceData[a].latestClose - priceData[a].prevClose) / (priceData[a].prevClose || 1) : Infinity;
+      const pctB = priceData[b] ? (priceData[b].latestClose - priceData[b].prevClose) / (priceData[b].prevClose || 1) : Infinity;
+      return pctA - pctB;
+    });
+    return tickers;
+  }, [selectedTickers, sortOrder, priceData]);
 
   const sidebarVisible = !sidebarHidden || isHovering;
 
@@ -361,8 +379,36 @@ const HomePage = () => {
         </div>
 
         {/* Chart Grid */}
-        <div className="grid-container">
-          {selectedTickers.map((ticker) => {
+        <div className="grid-area">
+          <div className="grid-toolbar">
+            <div className="grid-toolbar-left">
+              <span className="toolbar-label">SORT</span>
+              {[
+                { key: 'default', label: 'DEFAULT' },
+                { key: 'gainers', label: '▲ GAIN' },
+                { key: 'losers',  label: '▼ LOSS' },
+                { key: 'alpha',   label: 'A–Z' },
+              ].map(({ key, label }) => (
+                <button
+                  key={key}
+                  className={`toolbar-btn ${sortOrder === key ? 'active' : ''}`}
+                  onClick={() => setSortOrder(key)}
+                >{label}</button>
+              ))}
+            </div>
+            <div className="grid-toolbar-right">
+              <span className="toolbar-label">COLS</span>
+              {[2, 3, 4].map((n) => (
+                <button
+                  key={n}
+                  className={`toolbar-btn ${numCols === n ? 'active' : ''}`}
+                  onClick={() => setNumCols(n)}
+                >{n}</button>
+              ))}
+            </div>
+          </div>
+          <div className="grid-container" style={{ gridTemplateColumns: `repeat(${numCols}, 1fr)` }}>
+          {displayTickers.map((ticker) => {
             const pd      = priceData[ticker];
             const change  = pd ? pd.latestClose - pd.prevClose : 0;
             const pct     = pd?.prevClose ? (change / pd.prevClose) * 100 : 0;
@@ -372,15 +418,31 @@ const HomePage = () => {
             return (
               <div className="chart-wrapper" key={ticker} data-trend={trend}>
                 <div className="chart-card-header">
-                  <Link to={`/spotlight/${ticker}`} className="company-link">
-                    {ticker}
-                  </Link>
+                  <div className="card-header-left">
+                    <Link to={`/spotlight/${ticker}`} className="company-link">{ticker}</Link>
+                    {tickerGroups && Object.entries(tickerGroups).map(([group, gtickers]) =>
+                      gtickers.includes(ticker) ? (
+                        <span key={group} className={`signal-badge signal-${group}`}>
+                          {group === 'momentum' ? 'MOM' : group === 'breakout' ? 'BRK' : 'TRD'}
+                        </span>
+                      ) : null
+                    )}
+                  </div>
                   {pd && (
-                    <div className="chart-card-price-block">
-                      <span className="card-price">${pd.latestClose.toFixed(2)}</span>
-                      <span className={`card-change ${isPos ? 'positive' : 'negative'}`}>
-                        {isPos ? '+' : ''}{change.toFixed(2)} ({isPos ? '+' : ''}{pct.toFixed(2)}%)
-                      </span>
+                    <div className="card-header-right">
+                      <div className="chart-card-price-block">
+                        <span className="card-price">${pd.latestClose.toFixed(2)}</span>
+                        <span className={`card-change ${isPos ? 'positive' : 'negative'}`}>
+                          {isPos ? '+' : ''}{pct.toFixed(2)}%
+                        </span>
+                      </div>
+                      {pd.latestOpen > 0 && (
+                        <div className="card-ohlc">
+                          <span className="ohlc-item">O<strong>{pd.latestOpen.toFixed(2)}</strong></span>
+                          <span className="ohlc-item">H<strong>{pd.latestHigh.toFixed(2)}</strong></span>
+                          <span className="ohlc-item">L<strong>{pd.latestLow.toFixed(2)}</strong></span>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -395,6 +457,7 @@ const HomePage = () => {
               </div>
             );
           })}
+        </div>
         </div>
       </div>
 

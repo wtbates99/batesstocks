@@ -116,6 +116,13 @@ const CompanyPage = () => {
               <span className={`company-price-change ${isPos ? 'positive' : 'negative'}`}>
                 {isPos ? '▲' : '▼'} {Math.abs(change).toFixed(2)} ({Math.abs(pct).toFixed(2)}%)
               </span>
+              {priceData.latestOpen > 0 && (
+                <div className="company-ohlc">
+                  <span className="ohlc-item">O<strong>{priceData.latestOpen.toFixed(2)}</strong></span>
+                  <span className="ohlc-item">H<strong>{priceData.latestHigh.toFixed(2)}</strong></span>
+                  <span className="ohlc-item">L<strong>{priceData.latestLow.toFixed(2)}</strong></span>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -137,6 +144,24 @@ const CompanyPage = () => {
           />
         </div>
 
+      {companyInfo && (
+        <div className="key-stats-strip">
+          {[
+            { label: 'MKT CAP',  value: companyInfo.MarketCap    ? new Intl.NumberFormat('en-US',{ style:'currency',currency:'USD',notation:'compact',maximumFractionDigits:1}).format(companyInfo.MarketCap) : null },
+            { label: 'P/E',      value: companyInfo.PE           ? parseFloat(companyInfo.PE).toFixed(2) : null },
+            { label: 'EPS',      value: companyInfo.EPS          ? `$${parseFloat(companyInfo.EPS).toFixed(2)}` : null },
+            { label: 'DIV YIELD',value: companyInfo.DividendYield? `${(parseFloat(companyInfo.DividendYield)*100).toFixed(2)}%` : null },
+            { label: 'BETA',     value: companyInfo.Beta         ? parseFloat(companyInfo.Beta).toFixed(2) : null },
+            { label: 'SECTOR',   value: companyInfo.Sector },
+            { label: 'EXCHANGE', value: companyInfo.Exchange },
+          ].filter(s => s.value).map(s => (
+            <div key={s.label} className="key-stat-item">
+              <span className="key-stat-label">{s.label}</span>
+              <span className="key-stat-value">{s.value}</span>
+            </div>
+          ))}
+        </div>
+      )}
         <div className="company-details">
           <div className="company-sidebar">
             <div className="date-buttons-grid">

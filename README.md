@@ -6,11 +6,13 @@ A self-hosted stock analysis dashboard with technical indicators, interactive ch
 
 - S&P 500 data via Yahoo Finance (5+ years of daily OHLCV)
 - 24 technical indicators: trend, momentum, volatility, volume
-- Interactive multi-ticker charts with customizable metrics and date ranges
-- AI analysis chat (Ollama, Anthropic Claude, OpenAI) with full ticker context
-- Bullish stock groupings: momentum, breakout, trend strength
+- Interactive multi-ticker charts with customizable metrics, date ranges, and CSV export
+- AI analysis chat (Ollama, Anthropic Claude, OpenAI) with live indicator context
+- Bullish stock groupings: momentum, breakout, trend strength — shown as signal badges on each card
+- Real-time OHLC display (Open / High / Low) per card and on the company spotlight page
+- Sort chart grid by: default order, top gainers, top losers, or alphabetical
+- Toggle grid density: 2, 3, or 4 columns
 - Save/load view presets (ticker + metric combinations)
-- CSV export of any chart's current data
 - Dark/light mode with keyboard shortcuts
 - Auto-initializes on first run — no manual data scripts needed
 - Redis caching with automatic fakeredis fallback
@@ -202,6 +204,6 @@ uv run pytest
 ```
 
 Tests cover:
-- `tests/test_data_manipulation.py` — indicator calculations (RSI range, SMA correctness, no infinities)
-- `tests/test_signals.py` — SQL signal views (bullish/bearish/neutral detection, Bollinger breakouts)
+- `tests/test_data_manipulation.py` — indicator calculations (RSI range, SMA correctness, Bollinger band ordering, no infinities, row count)
+- `tests/test_signals.py` — SQL signal views: bullish/bearish/neutral detection, Bollinger breakouts, golden cross, volume breakout
 - `tests/test_data_pull.py` — data pipeline (table creation, column schema) with mocked yfinance
