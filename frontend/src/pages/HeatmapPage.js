@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ResponsiveContainer, Treemap } from 'recharts';
+import { Treemap } from 'recharts';
 import NavBar from '../components/NavBar';
 import '../styles.css';
 
@@ -26,7 +26,7 @@ function TreeNode(props) {
   const label = ticker || (name || '').substring(0, 12);
   const fontSize = Math.min(13, Math.max(8, width / 7));
   const showLabel = width > 32 && height > 22;
-  const showPct = height > 44 && width > 40;
+  const showPct   = height > 44 && width > 40;
 
   return (
     <g style={{ cursor: 'pointer' }} onClick={() => onClick && onClick({ name, pct_change, ticker })}>
@@ -59,7 +59,7 @@ function TreeNode(props) {
           textAnchor="middle"
           dominantBaseline="middle"
           fill={pct_change >= 0 ? '#22c55e' : '#ef4444'}
-          fontSize={Math.min(11, fontSize - 1)}
+          fontSize={Math.max(8, fontSize - 2)}
           fontFamily="JetBrains Mono, monospace"
         >
           {pctStr}
@@ -71,30 +71,54 @@ function TreeNode(props) {
 
 const HeatmapPage = () => {
   const navigate = useNavigate();
-  const [level, setLevel] = useState('sector');
+  const containerRef = useRef(null);
+  const [dims, setDims] = useState({ width: 0, height: 0 });
+  const [level, setLevel]               = useState('sector');
   const [activeSector, setActiveSector] = useState(null);
   const [activeSubsector, setActiveSubsector] = useState(null);
-  const [data, setData] = useState([]);
+  const [data, setData]     = useState([]);
   const [loading, setLoading] = useState(false);
+  const [error, setError]   = useState(null);
+
+  // Measure container so Treemap gets explicit pixel dimensions
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const ro = new ResizeObserver((entries) => {
+      const { width, height } = entries[0].contentRect;
+      setDims({ width: Math.floor(width), height: Math.floor(height) });
+    });
+    ro.observe(containerRef.current);
+    return () => ro.disconnect();
+  }, []);
 
   const fetchData = useCallback((lvl, sector, subsector) => {
     setLoading(true);
+    setError(null);
     const params = new URLSearchParams({ level: lvl });
     if (sector)    params.set('sector', sector);
     if (subsector) params.set('subsector', subsector);
     fetch(`/heatmap?${params}`)
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) return r.json().then((e) => Promise.reject(e.detail || `HTTP ${r.status}`));
+        return r.json();
+      })
       .then((rows) => {
-        // Recharts Treemap needs value > 0
-        setData(rows.map((r) => ({ ...r, value: Math.max(1, r.market_cap || 1) })));
+        if (!rows.length) {
+          setError('No data available — the data pipeline may still be loading.');
+          setData([]);
+        } else {
+          setData(rows.map((r) => ({ ...r, value: Math.max(1, r.market_cap || 1) })));
+        }
         setLoading(false);
       })
-      .catch((e) => { console.error(e); setLoading(false); });
+      .catch((e) => {
+        setError(String(e));
+        setData([]);
+        setLoading(false);
+      });
   }, []);
 
-  useEffect(() => {
-    fetchData('sector', null, null);
-  }, [fetchData]);
+  useEffect(() => { fetchData('sector', null, null); }, [fetchData]);
 
   const handleNodeClick = useCallback(({ name, ticker }) => {
     if (level === 'sector') {
@@ -146,10 +170,7 @@ const HeatmapPage = () => {
           {activeSector && (
             <>
               <span className="breadcrumb-sep">›</span>
-              <button
-                className="breadcrumb-item"
-                onClick={() => goToLevel('subsector')}
-              >{activeSector}</button>
+              <button className="breadcrumb-item" onClick={() => goToLevel('subsector')}>{activeSector}</button>
             </>
           )}
           {activeSubsector && (
@@ -159,26 +180,31 @@ const HeatmapPage = () => {
             </>
           )}
           <span className="breadcrumb-hint">
-            {level === 'sector'    && '← click sector to drill down'}
-            {level === 'subsector' && '← click subsector to drill down'}
-            {level === 'stock'     && '← click ticker to view spotlight'}
+            {level === 'sector'    && '· click sector to drill down'}
+            {level === 'subsector' && '· click subsector to drill down'}
+            {level === 'stock'     && '· click ticker to view spotlight'}
           </span>
         </div>
 
-        {loading ? (
-          <div className="heatmap-loading">Loading…</div>
-        ) : (
-          <div className="heatmap-treemap">
-            <ResponsiveContainer width="100%" height="100%">
-              <Treemap
-                data={data}
-                dataKey="value"
-                isAnimationActive={false}
-                content={(props) => <TreeNode {...props} onClick={handleNodeClick} />}
-              />
-            </ResponsiveContainer>
-          </div>
-        )}
+        {/* Treemap container — measured by ResizeObserver */}
+        <div className="heatmap-treemap" ref={containerRef}>
+          {loading && (
+            <div className="heatmap-overlay">Loading…</div>
+          )}
+          {!loading && error && (
+            <div className="heatmap-overlay heatmap-error">{error}</div>
+          )}
+          {!loading && !error && data.length > 0 && dims.width > 0 && dims.height > 0 && (
+            <Treemap
+              width={dims.width}
+              height={dims.height}
+              data={data}
+              dataKey="value"
+              isAnimationActive={false}
+              content={(props) => <TreeNode {...props} onClick={handleNodeClick} />}
+            />
+          )}
+        </div>
       </div>
     </div>
   );
