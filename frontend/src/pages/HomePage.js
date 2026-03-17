@@ -5,6 +5,7 @@ import SearchBar from '../components/SearchBar';
 import AiPanel from '../components/AiPanel';
 import PresetManager from '../components/PresetManager';
 import KeyboardShortcutsHelp from '../components/KeyboardShortcutsHelp';
+import NavBar from '../components/NavBar';
 import '../styles.css';
 import { metricsList, groupedMetrics } from '../metricsList';
 
@@ -46,7 +47,10 @@ const HomePage = () => {
   const [isHovering, setIsHovering]           = useState(false);
   const [aiPanelOpen, setAiPanelOpen]         = useState(false);
   const [tickerGroups, setTickerGroups]       = useState(null);
-  const [selectedTickers, setSelectedTickers] = useState(defaultTickers);
+  const [selectedTickers, setSelectedTickers] = useState(() => {
+    const param = new URLSearchParams(window.location.search).get('tickers');
+    return param ? param.split(',').map(t => t.trim().toUpperCase()).filter(Boolean) : defaultTickers;
+  });
   const [selectedGroup, setSelectedGroup]     = useState('default');
   const [priceData, setPriceData]             = useState({});
   const [marketOpen, setMarketOpen]           = useState(isMarketOpen());
@@ -54,6 +58,7 @@ const HomePage = () => {
   const [shortcutsOpen, setShortcutsOpen]     = useState(false);
   const [sortOrder, setSortOrder]   = useState('default'); // 'default'|'gainers'|'losers'|'alpha'
   const [numCols, setNumCols]       = useState(3);
+  const [chartType, setChartType]   = useState('area'); // 'area'|'candle'
 
   // Dark/light mode — persisted to localStorage
   const [theme, setTheme] = useState(() => localStorage.getItem('batesstocks_theme') || 'dark');
@@ -233,7 +238,10 @@ const HomePage = () => {
     <div className={rootClass}>
       {/* ── Header ── */}
       <header className="header">
-        <h1 className="header-title"><span>BATES</span>STOCKS</h1>
+        <div className="header-left">
+          <h1 className="header-title"><span>BATES</span>STOCKS</h1>
+          <NavBar />
+        </div>
         <div className="header-controls">
           <select
             className="group-selector"
@@ -396,6 +404,16 @@ const HomePage = () => {
                 >{label}</button>
               ))}
             </div>
+            <div className="grid-toolbar-center">
+              <span className="toolbar-label">CHART</span>
+              {[{ key: 'area', label: 'AREA' }, { key: 'candle', label: 'CANDLE' }].map(({ key, label }) => (
+                <button
+                  key={key}
+                  className={`toolbar-btn ${chartType === key ? 'active' : ''}`}
+                  onClick={() => setChartType(key)}
+                >{label}</button>
+              ))}
+            </div>
             <div className="grid-toolbar-right">
               <span className="toolbar-label">COLS</span>
               {[2, 3, 4].map((n) => (
@@ -453,6 +471,7 @@ const HomePage = () => {
                   metrics={selectedMetrics}
                   metricsList={metricsList}
                   onDataLoaded={(data) => handleDataLoaded(ticker, data)}
+                  chartType={chartType}
                 />
               </div>
             );

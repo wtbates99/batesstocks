@@ -34,7 +34,20 @@ from sqlalchemy import select
 from backend.data_manipulation import process_stock_data
 from backend.data_pull import fetch_write_financial_data, get_sp500_table
 from backend.database import CombinedStockData, database
-from backend.models import CompanyInfo, SearchResult, StockData, StockGroupings
+from backend.models import (
+    CompanyInfo,
+    HeatmapNode,
+    PortfolioCreate,
+    PortfolioOut,
+    PositionCreate,
+    PositionOut,
+    ScreenerRow,
+    SearchResult,
+    StockData,
+    StockGroupings,
+    WatchlistCreate,
+    WatchlistOut,
+)
 
 DB_PATH = os.getenv("DB_PATH", "stock_data.db")
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
@@ -53,10 +66,41 @@ def safe_convert(value: str | int | float, target_type: type):
         return None
 
 
+def _create_user_tables():
+    """Create watchlist/portfolio tables idempotently on startup."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS watchlists (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            name       TEXT    NOT NULL UNIQUE,
+            tickers    TEXT    NOT NULL DEFAULT '[]',
+            created_at TEXT    DEFAULT (datetime('now')),
+            updated_at TEXT    DEFAULT (datetime('now'))
+        );
+        CREATE TABLE IF NOT EXISTS portfolios (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            name       TEXT    NOT NULL,
+            created_at TEXT    DEFAULT (datetime('now'))
+        );
+        CREATE TABLE IF NOT EXISTS positions (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            portfolio_id INTEGER NOT NULL,
+            ticker       TEXT    NOT NULL,
+            shares       REAL    NOT NULL,
+            cost_basis   REAL    NOT NULL,
+            purchased_at TEXT,
+            notes        TEXT
+        );
+    """)
+    conn.commit()
+    conn.close()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global redis
     await database.connect()
+    _create_user_tables()
 
     # Try real Redis first, fall back to fakeredis
     try:
@@ -705,6 +749,434 @@ async def search_companies(request: Request, query: str, limit: int = Query(10, 
     redis.set(cache_key, json.dumps([sr.model_dump() for sr in search_results]), ex=3600)
 
     return search_results
+
+
+# ── Heatmap ────────────────────────────────────────────────────────────────────
+
+
+@app.get("/heatmap", response_model=list[HeatmapNode])
+@limiter.limit("20/minute")
+async def get_heatmap(
+    request: Request,
+    level: str = "sector",
+    sector: str | None = None,
+    subsector: str | None = None,
+):
+    cache_key = f"heatmap:{level}:{sector}:{subsector}"
+    cached = redis.get(cache_key)
+    if cached:
+        return json.loads(cached)
+
+    prev_date_sql = (
+        "(SELECT MAX(Date) FROM combined_stock_data "
+        " WHERE Date < (SELECT MAX(Date) FROM combined_stock_data))"
+    )
+    latest_date_sql = "(SELECT MAX(Date) FROM combined_stock_data)"
+
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+
+        if level == "sector":
+            rows = cursor.execute(f"""
+                SELECT
+                    t.Sector,
+                    SUM(CAST(NULLIF(t.MarketCap, 'N/A') AS REAL)) AS market_cap,
+                    AVG((t.Ticker_Close - p.Ticker_Close) / NULLIF(p.Ticker_Close, 0) * 100) AS pct_change
+                FROM combined_stock_data t
+                LEFT JOIN combined_stock_data p
+                    ON p.Ticker = t.Ticker AND p.Date = {prev_date_sql}
+                WHERE t.Date = {latest_date_sql}
+                  AND t.Sector IS NOT NULL AND t.Sector != ''
+                GROUP BY t.Sector
+                ORDER BY market_cap DESC
+            """).fetchall()
+            result = [
+                {"name": r[0], "market_cap": r[1], "pct_change": r[2], "ticker": None}
+                for r in rows if r[0]
+            ]
+
+        elif level == "subsector":
+            if not sector:
+                raise HTTPException(status_code=400, detail="sector required for subsector level")
+            rows = cursor.execute(f"""
+                SELECT
+                    t.Subsector,
+                    SUM(CAST(NULLIF(t.MarketCap, 'N/A') AS REAL)) AS market_cap,
+                    AVG((t.Ticker_Close - p.Ticker_Close) / NULLIF(p.Ticker_Close, 0) * 100) AS pct_change
+                FROM combined_stock_data t
+                LEFT JOIN combined_stock_data p
+                    ON p.Ticker = t.Ticker AND p.Date = {prev_date_sql}
+                WHERE t.Date = {latest_date_sql}
+                  AND t.Sector = ?
+                  AND t.Subsector IS NOT NULL AND t.Subsector != ''
+                GROUP BY t.Subsector
+                ORDER BY market_cap DESC
+            """, (sector,)).fetchall()
+            result = [
+                {"name": r[0], "market_cap": r[1], "pct_change": r[2], "ticker": None}
+                for r in rows if r[0]
+            ]
+
+        elif level == "stock":
+            if not subsector:
+                raise HTTPException(status_code=400, detail="subsector required for stock level")
+            rows = cursor.execute(f"""
+                SELECT
+                    t.Ticker,
+                    t.FullName,
+                    CAST(NULLIF(t.MarketCap, 'N/A') AS REAL) AS market_cap,
+                    (t.Ticker_Close - p.Ticker_Close) / NULLIF(p.Ticker_Close, 0) * 100 AS pct_change
+                FROM combined_stock_data t
+                LEFT JOIN combined_stock_data p
+                    ON p.Ticker = t.Ticker AND p.Date = {prev_date_sql}
+                WHERE t.Date = {latest_date_sql}
+                  AND t.Subsector = ?
+                ORDER BY market_cap DESC
+            """, (subsector,)).fetchall()
+            result = [
+                {"name": r[1] or r[0], "market_cap": r[2], "pct_change": r[3], "ticker": r[0]}
+                for r in rows
+            ]
+
+        else:
+            raise HTTPException(status_code=400, detail="level must be sector, subsector, or stock")
+
+        conn.close()
+        redis.set(cache_key, json.dumps(result), ex=300)
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Heatmap error: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Screener ───────────────────────────────────────────────────────────────────
+
+
+@app.get("/screener", response_model=list[ScreenerRow])
+@limiter.limit("20/minute")
+async def get_screener(request: Request):
+    cache_key = "screener:all"
+    cached = redis.get(cache_key)
+    if cached:
+        return json.loads(cached)
+
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        rows = cursor.execute("""
+            WITH latest AS (
+                SELECT * FROM combined_stock_data
+                WHERE Date = (SELECT MAX(Date) FROM combined_stock_data)
+            ),
+            year_ago AS (
+                SELECT Ticker, Ticker_Close AS year_ago_close
+                FROM combined_stock_data
+                WHERE Date = (
+                    SELECT MAX(Date) FROM combined_stock_data
+                    WHERE Date <= date(
+                        (SELECT MAX(Date) FROM combined_stock_data), '-1 year'
+                    )
+                )
+            )
+            SELECT
+                l.Ticker,
+                l.FullName,
+                l.Sector,
+                l.Subsector,
+                CAST(NULLIF(l.MarketCap, 'N/A') AS REAL)  AS market_cap,
+                CAST(NULLIF(l.PE,        'N/A') AS REAL)  AS pe,
+                CAST(NULLIF(l.EPS,       'N/A') AS REAL)  AS eps,
+                CAST(NULLIF(l.Beta,      'N/A') AS REAL)  AS beta,
+                l.Ticker_RSI                              AS rsi,
+                l.Ticker_Close                            AS latest_close,
+                CASE
+                    WHEN y.year_ago_close IS NOT NULL AND y.year_ago_close > 0
+                    THEN ROUND((l.Ticker_Close - y.year_ago_close) / y.year_ago_close * 100, 2)
+                    ELSE NULL
+                END AS return_52w
+            FROM latest l
+            LEFT JOIN year_ago y ON y.Ticker = l.Ticker
+            WHERE l.Ticker IS NOT NULL
+            ORDER BY market_cap DESC
+        """).fetchall()
+        conn.close()
+
+        cols = ["ticker", "name", "sector", "subsector", "market_cap", "pe", "eps",
+                "beta", "rsi", "latest_close", "return_52w"]
+        result = [dict(zip(cols, r)) for r in rows]
+        redis.set(cache_key, json.dumps(result), ex=1800)
+        return result
+
+    except Exception as e:
+        logger.error("Screener error: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Watchlists ─────────────────────────────────────────────────────────────────
+
+
+def _row_to_watchlist(row) -> dict:
+    return {
+        "id": row[0],
+        "name": row[1],
+        "tickers": json.loads(row[2] or "[]"),
+        "created_at": row[3] or "",
+        "updated_at": row[4] or "",
+    }
+
+
+@app.get("/watchlists", response_model=list[WatchlistOut])
+@limiter.limit("60/minute")
+async def list_watchlists(request: Request):
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute(
+        "SELECT id, name, tickers, created_at, updated_at FROM watchlists ORDER BY updated_at DESC"
+    ).fetchall()
+    conn.close()
+    return [_row_to_watchlist(r) for r in rows]
+
+
+@app.post("/watchlists", response_model=WatchlistOut)
+@limiter.limit("30/minute")
+async def create_watchlist(request: Request, body: WatchlistCreate):
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        cursor = conn.execute(
+            "INSERT INTO watchlists (name, tickers) VALUES (?, ?)",
+            (body.name, json.dumps(body.tickers)),
+        )
+        row_id = cursor.lastrowid
+        conn.commit()
+        row = conn.execute(
+            "SELECT id, name, tickers, created_at, updated_at FROM watchlists WHERE id = ?",
+            (row_id,),
+        ).fetchone()
+        conn.close()
+        return _row_to_watchlist(row)
+    except sqlite3.IntegrityError:
+        conn.close()
+        raise HTTPException(status_code=409, detail="Watchlist name already exists")
+
+
+@app.get("/watchlists/{wl_id}", response_model=WatchlistOut)
+@limiter.limit("60/minute")
+async def get_watchlist(request: Request, wl_id: int):
+    conn = sqlite3.connect(DB_PATH)
+    row = conn.execute(
+        "SELECT id, name, tickers, created_at, updated_at FROM watchlists WHERE id = ?",
+        (wl_id,),
+    ).fetchone()
+    conn.close()
+    if not row:
+        raise HTTPException(status_code=404, detail="Watchlist not found")
+    return _row_to_watchlist(row)
+
+
+@app.put("/watchlists/{wl_id}", response_model=WatchlistOut)
+@limiter.limit("30/minute")
+async def update_watchlist(request: Request, wl_id: int, body: WatchlistCreate):
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute(
+        "UPDATE watchlists SET name=?, tickers=?, updated_at=datetime('now') WHERE id=?",
+        (body.name, json.dumps(body.tickers), wl_id),
+    )
+    conn.commit()
+    row = conn.execute(
+        "SELECT id, name, tickers, created_at, updated_at FROM watchlists WHERE id = ?",
+        (wl_id,),
+    ).fetchone()
+    conn.close()
+    if not row:
+        raise HTTPException(status_code=404, detail="Watchlist not found")
+    return _row_to_watchlist(row)
+
+
+@app.delete("/watchlists/{wl_id}")
+@limiter.limit("30/minute")
+async def delete_watchlist(request: Request, wl_id: int):
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("DELETE FROM watchlists WHERE id = ?", (wl_id,))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+# ── Portfolio ──────────────────────────────────────────────────────────────────
+
+
+def _get_portfolio_with_positions(portfolio_id: int) -> dict | None:
+    conn = sqlite3.connect(DB_PATH)
+    port_row = conn.execute(
+        "SELECT id, name, created_at FROM portfolios WHERE id = ?", (portfolio_id,)
+    ).fetchone()
+    if not port_row:
+        conn.close()
+        return None
+
+    # Join positions with latest close prices
+    pos_rows = conn.execute("""
+        SELECT p.id, p.portfolio_id, p.ticker, p.shares, p.cost_basis,
+               p.purchased_at, p.notes, csd.Ticker_Close
+        FROM positions p
+        LEFT JOIN combined_stock_data csd
+            ON csd.Ticker = p.ticker
+           AND csd.Date = (SELECT MAX(Date) FROM combined_stock_data)
+        WHERE p.portfolio_id = ?
+        ORDER BY p.id
+    """, (portfolio_id,)).fetchall()
+    conn.close()
+
+    positions = []
+    total_cost = total_value = 0.0
+    for r in pos_rows:
+        current_price = float(r[7]) if r[7] is not None else None
+        cost_total = float(r[4]) * float(r[3])
+        value_total = current_price * float(r[3]) if current_price is not None else cost_total
+        pnl = value_total - cost_total
+        pnl_pct = (pnl / cost_total * 100) if cost_total else None
+        total_cost += cost_total
+        total_value += value_total
+        positions.append({
+            "id": r[0], "portfolio_id": r[1], "ticker": r[2],
+            "shares": r[3], "cost_basis": r[4],
+            "purchased_at": r[5], "notes": r[6],
+            "current_price": current_price,
+            "unrealized_pnl": round(pnl, 2),
+            "unrealized_pnl_pct": round(pnl_pct, 2) if pnl_pct is not None else None,
+        })
+
+    return {
+        "id": port_row[0],
+        "name": port_row[1],
+        "positions": positions,
+        "total_cost": round(total_cost, 2),
+        "total_value": round(total_value, 2),
+        "total_pnl": round(total_value - total_cost, 2),
+    }
+
+
+@app.get("/portfolios")
+@limiter.limit("60/minute")
+async def list_portfolios(request: Request):
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute("SELECT id, name, created_at FROM portfolios ORDER BY id").fetchall()
+    conn.close()
+    return [{"id": r[0], "name": r[1], "created_at": r[2]} for r in rows]
+
+
+@app.post("/portfolios")
+@limiter.limit("30/minute")
+async def create_portfolio(request: Request, body: PortfolioCreate):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.execute("INSERT INTO portfolios (name) VALUES (?)", (body.name,))
+    row_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return _get_portfolio_with_positions(row_id)
+
+
+@app.get("/portfolios/{portfolio_id}", response_model=PortfolioOut)
+@limiter.limit("60/minute")
+async def get_portfolio(request: Request, portfolio_id: int):
+    result = _get_portfolio_with_positions(portfolio_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="Portfolio not found")
+    return result
+
+
+@app.post("/portfolios/{portfolio_id}/positions", response_model=PositionOut)
+@limiter.limit("30/minute")
+async def add_position(request: Request, portfolio_id: int, body: PositionCreate):
+    conn = sqlite3.connect(DB_PATH)
+    port = conn.execute("SELECT id FROM portfolios WHERE id = ?", (portfolio_id,)).fetchone()
+    if not port:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Portfolio not found")
+    cursor = conn.execute(
+        "INSERT INTO positions (portfolio_id, ticker, shares, cost_basis, purchased_at, notes) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (portfolio_id, body.ticker.upper(), body.shares, body.cost_basis,
+         body.purchased_at, body.notes),
+    )
+    pos_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    portfolio = _get_portfolio_with_positions(portfolio_id)
+    pos = next((p for p in portfolio["positions"] if p["id"] == pos_id), None)
+    if not pos:
+        raise HTTPException(status_code=500, detail="Position creation failed")
+    return pos
+
+
+@app.put("/portfolios/{portfolio_id}/positions/{pos_id}", response_model=PositionOut)
+@limiter.limit("30/minute")
+async def update_position(request: Request, portfolio_id: int, pos_id: int, body: PositionCreate):
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute(
+        "UPDATE positions SET ticker=?, shares=?, cost_basis=?, purchased_at=?, notes=? "
+        "WHERE id=? AND portfolio_id=?",
+        (body.ticker.upper(), body.shares, body.cost_basis,
+         body.purchased_at, body.notes, pos_id, portfolio_id),
+    )
+    conn.commit()
+    conn.close()
+    portfolio = _get_portfolio_with_positions(portfolio_id)
+    pos = next((p for p in portfolio["positions"] if p["id"] == pos_id), None)
+    if not pos:
+        raise HTTPException(status_code=404, detail="Position not found")
+    return pos
+
+
+@app.delete("/portfolios/{portfolio_id}/positions/{pos_id}")
+@limiter.limit("30/minute")
+async def delete_position(request: Request, portfolio_id: int, pos_id: int):
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("DELETE FROM positions WHERE id = ? AND portfolio_id = ?", (pos_id, portfolio_id))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@app.get("/portfolios/{portfolio_id}/chart")
+@limiter.limit("20/minute")
+async def get_portfolio_chart(request: Request, portfolio_id: int, days: int = Query(90, ge=7, le=1825)):
+    cache_key = f"portfolio_chart:{portfolio_id}:{days}"
+    cached = redis.get(cache_key)
+    if cached:
+        return json.loads(cached)
+
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        has_positions = conn.execute(
+            "SELECT COUNT(*) FROM positions WHERE portfolio_id = ?", (portfolio_id,)
+        ).fetchone()[0]
+        if not has_positions:
+            conn.close()
+            return []
+
+        rows = conn.execute("""
+            SELECT csd.Date, SUM(p.shares * csd.Ticker_Close) AS portfolio_value
+            FROM positions p
+            JOIN combined_stock_data csd ON csd.Ticker = p.ticker
+            WHERE p.portfolio_id = ?
+              AND csd.Date >= date(
+                  (SELECT MAX(Date) FROM combined_stock_data), ? || ' days'
+              )
+            GROUP BY csd.Date
+            ORDER BY csd.Date
+        """, (portfolio_id, f"-{days}")).fetchall()
+        conn.close()
+
+        result = [{"date": str(r[0])[:10], "value": round(float(r[1]), 2)} for r in rows]
+        redis.set(cache_key, json.dumps(result), ex=600)
+        return result
+    except Exception as e:
+        logger.error("Portfolio chart error: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/{full_path:path}", response_class=HTMLResponse)
