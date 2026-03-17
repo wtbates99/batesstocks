@@ -96,7 +96,8 @@ app = FastAPI(lifespan=lifespan)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-app.mount("/static", StaticFiles(directory="frontend/build/static"), name="static")
+if os.path.isdir("frontend/build/static"):
+    app.mount("/static", StaticFiles(directory="frontend/build/static"), name="static")
 
 redis = None
 prefix_index = defaultdict(set)
