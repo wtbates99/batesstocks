@@ -1,6 +1,7 @@
 import logging
 import os
 from contextlib import asynccontextmanager
+
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -12,27 +13,28 @@ logging.basicConfig(
 )
 logger = logging.getLogger("batesstocks.main")
 
-from fastapi import FastAPI, HTTPException, Query, BackgroundTasks, Request
-from sqlalchemy import select
-from typing import List, Optional, Union
 import datetime
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse
-import sqlite3
-from backend.data_pull import fetch_write_financial_data, get_sp500_table
-from backend.data_manipulation import process_stock_data
-from backend.models import StockData, CompanyInfo, StockGroupings, SearchResult
-from backend.database import database, CombinedStockData
-import re
-from collections import defaultdict
 import json
+import re
+import sqlite3
+from collections import defaultdict
+
 import fakeredis
 import httpx
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
+from sqlalchemy import select
+
+from backend.data_manipulation import process_stock_data
+from backend.data_pull import fetch_write_financial_data, get_sp500_table
+from backend.database import CombinedStockData, database
+from backend.models import CompanyInfo, SearchResult, StockData, StockGroupings
 
 DB_PATH = os.getenv("DB_PATH", "stock_data.db")
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
@@ -42,7 +44,7 @@ CORS_ORIGINS = os.getenv(
 ).split(",")
 
 
-def safe_convert(value: Union[str, int, float], target_type: type):
+def safe_convert(value: str | int | float, target_type: type):
     if value == "N/A" or value is None:
         return None
     try:
@@ -59,6 +61,7 @@ async def lifespan(app: FastAPI):
     # Try real Redis first, fall back to fakeredis
     try:
         import redis as redis_lib
+
         real_redis = redis_lib.Redis(
             host=os.getenv("REDIS_HOST", "localhost"),
             port=int(os.getenv("REDIS_PORT", 6379)),
@@ -67,13 +70,18 @@ async def lifespan(app: FastAPI):
         )
         real_redis.ping()
         redis = real_redis
-        logger.info("Connected to Redis at %s:%s", os.getenv("REDIS_HOST", "localhost"), os.getenv("REDIS_PORT", 6379))
+        logger.info(
+            "Connected to Redis at %s:%s",
+            os.getenv("REDIS_HOST", "localhost"),
+            os.getenv("REDIS_PORT", 6379),
+        )
     except Exception as e:
         logger.warning("Redis unavailable (%s), falling back to fakeredis", e)
         redis = fakeredis.FakeRedis()
 
     if not _db_has_data():
         import threading
+
         threading.Thread(target=run_full_pipeline, daemon=True).start()
     else:
         pipeline_status["phase"] = "complete"
@@ -96,20 +104,45 @@ prefix_index = defaultdict(set)
 # Tickers loaded in phase 1 — fast startup so the default view works immediately.
 # Must include the defaultTickers from HomePage.js.
 PRIORITY_TICKERS = [
-    'AAPL', 'GOOGL', 'AMZN', 'MSFT', 'TSLA', 'NKE', 'NVDA', 'NFLX', 'JPM',
-    'META', 'AVGO', 'LLY', 'V',    'UNH',  'XOM',  'MA',   'COST', 'HD',
-    'BAC',  'WMT',  'PG',  'AMD',  'ORCL', 'QCOM', 'TXN',  'CVX',  'MRK',
+    "AAPL",
+    "GOOGL",
+    "AMZN",
+    "MSFT",
+    "TSLA",
+    "NKE",
+    "NVDA",
+    "NFLX",
+    "JPM",
+    "META",
+    "AVGO",
+    "LLY",
+    "V",
+    "UNH",
+    "XOM",
+    "MA",
+    "COST",
+    "HD",
+    "BAC",
+    "WMT",
+    "PG",
+    "AMD",
+    "ORCL",
+    "QCOM",
+    "TXN",
+    "CVX",
+    "MRK",
 ]
 
 pipeline_status = {
     "running": False,
-    "phase": "idle",   # idle | fast_load | full_load | complete
+    "phase": "idle",  # idle | fast_load | full_load | complete
     "loaded": 0,
     "total": 0,
 }
 
 
 # ── Data pipeline ──────────────────────────────────────────────────────────────
+
 
 def create_signal_views(conn: sqlite3.Connection):
     cursor = conn.cursor()
@@ -261,8 +294,9 @@ def run_full_pipeline():
         priority = [t for t in PRIORITY_TICKERS if t in set(all_tickers)]
         remaining = [t for t in all_tickers if t not in set(priority)]
 
-        pipeline_status.update({"running": True, "phase": "fast_load",
-                                 "loaded": 0, "total": len(all_tickers)})
+        pipeline_status.update(
+            {"running": True, "phase": "fast_load", "loaded": 0, "total": len(all_tickers)}
+        )
 
         conn = sqlite3.connect(DB_PATH)
         _run_phase(conn, table, priority, append=False)
@@ -302,30 +336,39 @@ def _get_bullish_groupings_from_db() -> dict:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
 
-        momentum = [r[0] for r in cursor.execute("""
+        momentum = [
+            r[0]
+            for r in cursor.execute("""
             SELECT Ticker FROM combined_stock_data
             WHERE Date = (SELECT MAX(Date) FROM combined_stock_data)
             AND Ticker_Close > Ticker_SMA_10 AND Ticker_SMA_10 > Ticker_SMA_30
             AND Ticker_RSI > 50 AND Ticker_MACD > Ticker_MACD_Signal
             ORDER BY (Ticker_Close / Ticker_SMA_10) DESC LIMIT 9
-        """).fetchall()]
+        """).fetchall()
+        ]
 
-        breakout = [r[0] for r in cursor.execute("""
+        breakout = [
+            r[0]
+            for r in cursor.execute("""
             SELECT Ticker FROM combined_stock_data
             WHERE Date = (SELECT MAX(Date) FROM combined_stock_data)
             AND Ticker_Close > Ticker_Bollinger_High
             AND Ticker_Volume > Ticker_SMA_30 * 1.5
             AND Ticker_Williams_R > -20
             ORDER BY (Ticker_Close / Ticker_Bollinger_High) DESC LIMIT 9
-        """).fetchall()]
+        """).fetchall()
+        ]
 
-        trend_strength = [r[0] for r in cursor.execute("""
+        trend_strength = [
+            r[0]
+            for r in cursor.execute("""
             SELECT Ticker FROM combined_stock_data
             WHERE Date = (SELECT MAX(Date) FROM combined_stock_data)
             AND Ticker_TSI > 0 AND Ticker_UO > 50
             AND Ticker_MFI > 50 AND Ticker_Chaikin_MF > 0
             ORDER BY (Ticker_TSI + Ticker_UO + Ticker_MFI) DESC LIMIT 9
-        """).fetchall()]
+        """).fetchall()
+        ]
 
         conn.close()
         return {"momentum": momentum, "breakout": breakout, "trend_strength": trend_strength}
@@ -336,12 +379,13 @@ def _get_bullish_groupings_from_db() -> dict:
 
 # ── AI chat ────────────────────────────────────────────────────────────────────
 
+
 class AiChatRequest(BaseModel):
     provider: str
     model: str
-    api_key: Optional[str] = None
+    api_key: str | None = None
     message: str
-    context: Optional[dict] = None
+    context: dict | None = None
 
 
 def build_system_prompt(context: dict) -> str:
@@ -350,9 +394,7 @@ def build_system_prompt(context: dict) -> str:
     metrics = context.get("metrics", [])
     data_summary = context.get("dataSummary", "")
 
-    readable_metrics = ", ".join(
-        m.replace("Ticker_", "").replace("_", " ") for m in metrics
-    )
+    readable_metrics = ", ".join(m.replace("Ticker_", "").replace("_", " ") for m in metrics)
 
     prompt = f"""You are an expert financial analyst specializing in technical analysis of equity markets.
 Currently displayed: {", ".join(tickers)} over {date_range}
@@ -457,6 +499,7 @@ async def ai_chat(request: Request, body: AiChatRequest):
 
 # ── App lifecycle ──────────────────────────────────────────────────────────────
 
+
 @app.get("/", response_class=HTMLResponse)
 async def serve_react_app():
     with open(os.path.join("frontend/build", "index.html")) as f:
@@ -478,6 +521,7 @@ async def build_search_index():
 
 # ── API routes ─────────────────────────────────────────────────────────────────
 
+
 @app.post("/refresh_data")
 @limiter.limit("2/minute")
 async def refresh_data(request: Request, background_tasks: BackgroundTasks):
@@ -493,14 +537,14 @@ async def refresh_status(request: Request):
     return pipeline_status
 
 
-@app.get("/stock/{ticker}", response_model=List[StockData])
+@app.get("/stock/{ticker}", response_model=list[StockData])
 @limiter.limit("60/minute")
 async def get_stock_data(
     request: Request,
     ticker: str,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    metrics: Optional[List[str]] = Query(None),
+    start_date: str | None = None,
+    end_date: str | None = None,
+    metrics: list[str] | None = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(100, ge=1, le=1000),
 ):
@@ -631,7 +675,7 @@ async def get_stock_groupings(request: Request):
     return _get_bullish_groupings_from_db()
 
 
-@app.get("/search", response_model=List[SearchResult])
+@app.get("/search", response_model=list[SearchResult])
 @limiter.limit("30/minute")
 async def search_companies(request: Request, query: str, limit: int = Query(10, ge=1, le=50)):
     cache_key = f"search:{query}:{limit}"
@@ -646,16 +690,15 @@ async def search_companies(request: Request, query: str, limit: int = Query(10, 
     sorted_results = sorted(
         results,
         key=lambda x: (
-            not x[0].lower().startswith(term),   # exact ticker prefix first
-            not x[1].lower().startswith(term),   # then company name prefix
-            len(x[0]),                            # shorter tickers first
+            not x[0].lower().startswith(term),  # exact ticker prefix first
+            not x[1].lower().startswith(term),  # then company name prefix
+            len(x[0]),  # shorter tickers first
             x[0].lower(),
         ),
     )[:limit]
 
     search_results = [
-        SearchResult(ticker=ticker, name=full_name)
-        for ticker, full_name in sorted_results
+        SearchResult(ticker=ticker, name=full_name) for ticker, full_name in sorted_results
     ]
 
     redis.set(cache_key, json.dumps([sr.model_dump() for sr in search_results]), ex=3600)

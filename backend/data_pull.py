@@ -1,5 +1,6 @@
 import concurrent.futures
 import logging
+
 import pandas as pd
 import yfinance as yf
 
@@ -26,15 +27,16 @@ def fetch_write_financial_data(conn, table, tickers, append=False):
         result.to_sql("stock_data", conn, if_exists=if_exists, index=False)
 
     def qual_data():
-        wiki = (
-            filtered[["Symbol", "Security", "GICS Sector", "GICS Sub-Industry", "Headquarters Location"]]
-            .rename(columns={
+        wiki = filtered[
+            ["Symbol", "Security", "GICS Sector", "GICS Sub-Industry", "Headquarters Location"]
+        ].rename(
+            columns={
                 "Symbol": "Ticker",
                 "Security": "FullName",
                 "GICS Sector": "Sector",
                 "GICS Sub-Industry": "Subsector",
                 "Headquarters Location": "_HQ",
-            })
+            }
         )
         wiki = wiki.copy()
         wiki["City"] = wiki["_HQ"].str.split(",").str[0].str.strip()
@@ -47,38 +49,42 @@ def fetch_write_financial_data(conn, table, tickers, append=False):
             t = yf.Ticker(ticker)
             try:
                 fi = t.fast_info
-                row.update({
-                    "MarketCap":  getattr(fi, "market_cap", None),
-                    "Price":      getattr(fi, "last_price", None),
-                    "52WeekHigh": getattr(fi, "year_high", None),
-                    "52WeekLow":  getattr(fi, "year_low", None),
-                    "Exchange":   getattr(fi, "exchange", None),
-                    "Currency":   getattr(fi, "currency", None),
-                    "QuoteType":  getattr(fi, "quote_type", None),
-                })
+                row.update(
+                    {
+                        "MarketCap": getattr(fi, "market_cap", None),
+                        "Price": getattr(fi, "last_price", None),
+                        "52WeekHigh": getattr(fi, "year_high", None),
+                        "52WeekLow": getattr(fi, "year_low", None),
+                        "Exchange": getattr(fi, "exchange", None),
+                        "Currency": getattr(fi, "currency", None),
+                        "QuoteType": getattr(fi, "quote_type", None),
+                    }
+                )
             except Exception as e:
                 logger.warning("Failed to fetch fast_info for %s: %s", ticker, e)
             try:
                 info = t.info
-                row.update({
-                    "ShortName":    info.get("shortName"),
-                    "Website":      info.get("website"),
-                    "Description":  info.get("longBusinessSummary"),
-                    "CEO":          info.get("ceo"),
-                    "Employees":    info.get("fullTimeEmployees"),
-                    "Zip":          info.get("zip"),
-                    "Address":      info.get("address1"),
-                    "Phone":        info.get("phone"),
-                    "DividendRate": info.get("dividendRate"),
-                    "DividendYield": info.get("dividendYield"),
-                    "PayoutRatio":  info.get("payoutRatio"),
-                    "Beta":         info.get("beta"),
-                    "PE":           info.get("trailingPE"),
-                    "EPS":          info.get("trailingEps"),
-                    "Revenue":      info.get("totalRevenue"),
-                    "GrossProfit":  info.get("grossProfits"),
-                    "FreeCashFlow": info.get("freeCashflow"),
-                })
+                row.update(
+                    {
+                        "ShortName": info.get("shortName"),
+                        "Website": info.get("website"),
+                        "Description": info.get("longBusinessSummary"),
+                        "CEO": info.get("ceo"),
+                        "Employees": info.get("fullTimeEmployees"),
+                        "Zip": info.get("zip"),
+                        "Address": info.get("address1"),
+                        "Phone": info.get("phone"),
+                        "DividendRate": info.get("dividendRate"),
+                        "DividendYield": info.get("dividendYield"),
+                        "PayoutRatio": info.get("payoutRatio"),
+                        "Beta": info.get("beta"),
+                        "PE": info.get("trailingPE"),
+                        "EPS": info.get("trailingEps"),
+                        "Revenue": info.get("totalRevenue"),
+                        "GrossProfit": info.get("grossProfits"),
+                        "FreeCashFlow": info.get("freeCashflow"),
+                    }
+                )
             except Exception as e:
                 logger.warning("Failed to fetch info for %s: %s", ticker, e)
             return row

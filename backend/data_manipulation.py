@@ -1,7 +1,8 @@
-import pandas as pd
-import numpy as np
-import ta
 import sqlite3
+
+import numpy as np
+import pandas as pd
+import ta
 
 
 def process_stock_data(conn: sqlite3.Connection):
@@ -17,8 +18,12 @@ def process_stock_data(conn: sqlite3.Connection):
             f"{prefix}_SMA_30": ta.trend.sma_indicator(close, window=30),
             f"{prefix}_EMA_30": ta.trend.ema_indicator(close, window=30),
             f"{prefix}_RSI": ta.momentum.rsi(close, window=14),
-            f"{prefix}_Stochastic_K": ta.momentum.stoch(high, low, close, window=14, smooth_window=3),
-            f"{prefix}_Stochastic_D": ta.momentum.stoch_signal(high, low, close, window=14, smooth_window=3),
+            f"{prefix}_Stochastic_K": ta.momentum.stoch(
+                high, low, close, window=14, smooth_window=3
+            ),
+            f"{prefix}_Stochastic_D": ta.momentum.stoch_signal(
+                high, low, close, window=14, smooth_window=3
+            ),
             f"{prefix}_MACD": ta.trend.macd(close),
             f"{prefix}_MACD_Signal": ta.trend.macd_signal(close),
             f"{prefix}_MACD_Diff": ta.trend.macd_diff(close),
@@ -26,13 +31,23 @@ def process_stock_data(conn: sqlite3.Connection):
             f"{prefix}_UO": ta.momentum.ultimate_oscillator(high, low, close),
             f"{prefix}_ROC": ta.momentum.roc(close, window=12),
             f"{prefix}_Williams_R": ta.momentum.williams_r(high, low, close, lbp=14),
-            f"{prefix}_Bollinger_High": ta.volatility.bollinger_hband(close, window=20, window_dev=2),
-            f"{prefix}_Bollinger_Low": ta.volatility.bollinger_lband(close, window=20, window_dev=2),
+            f"{prefix}_Bollinger_High": ta.volatility.bollinger_hband(
+                close, window=20, window_dev=2
+            ),
+            f"{prefix}_Bollinger_Low": ta.volatility.bollinger_lband(
+                close, window=20, window_dev=2
+            ),
             f"{prefix}_Bollinger_Mid": ta.volatility.bollinger_mavg(close, window=20),
-            f"{prefix}_Bollinger_PBand": ta.volatility.bollinger_pband(close, window=20, window_dev=2),
-            f"{prefix}_Bollinger_WBand": ta.volatility.bollinger_wband(close, window=20, window_dev=2),
+            f"{prefix}_Bollinger_PBand": ta.volatility.bollinger_pband(
+                close, window=20, window_dev=2
+            ),
+            f"{prefix}_Bollinger_WBand": ta.volatility.bollinger_wband(
+                close, window=20, window_dev=2
+            ),
             f"{prefix}_On_Balance_Volume": ta.volume.on_balance_volume(close, volume),
-            f"{prefix}_Chaikin_MF": ta.volume.chaikin_money_flow(high, low, close, volume, window=20),
+            f"{prefix}_Chaikin_MF": ta.volume.chaikin_money_flow(
+                high, low, close, volume, window=20
+            ),
             f"{prefix}_Force_Index": ta.volume.force_index(close, volume, window=13),
             f"{prefix}_MFI": ta.volume.money_flow_index(high, low, close, volume, window=14),
         }
@@ -142,7 +157,7 @@ def process_stock_data(conn: sqlite3.Connection):
     ORDER BY si.Subsector, sd.Date
     """
 
-    process_data(ticker_query,    "ticker_data",    "Ticker")
-    process_data(sector_query,    "sector_data",    "Sector")
+    process_data(ticker_query, "ticker_data", "Ticker")
+    process_data(sector_query, "sector_data", "Sector")
     process_data(subsector_query, "subsector_data", "Subsector")
     create_combined_view()
