@@ -75,3 +75,71 @@ class StockGroupings(BaseModel):
 class SearchResult(BaseModel):
     ticker: str
     name: str
+
+
+class HeatmapNode(BaseModel):
+    name: str
+    market_cap: float | None = None
+    pct_change: float | None = None
+    ticker: str | None = None
+
+
+class ScreenerRow(BaseModel):
+    ticker: str
+    name: str | None = None
+    sector: str | None = None
+    subsector: str | None = None
+    market_cap: float | None = None
+    pe: float | None = None
+    eps: float | None = None
+    beta: float | None = None
+    rsi: float | None = None
+    latest_close: float | None = None
+    return_52w: float | None = None
+
+
+class WatchlistCreate(BaseModel):
+    name: str
+    tickers: list[str]
+
+
+class WatchlistOut(BaseModel):
+    id: int
+    name: str
+    tickers: list[str]
+    created_at: str
+    updated_at: str
+
+
+class PositionCreate(BaseModel):
+    ticker: str
+    shares: float
+    cost_basis: float
+    purchased_at: str | None = None
+    notes: str | None = None
+
+
+class PositionOut(BaseModel):
+    id: int
+    portfolio_id: int
+    ticker: str
+    shares: float
+    cost_basis: float
+    purchased_at: str | None = None
+    notes: str | None = None
+    current_price: float | None = None
+    unrealized_pnl: float | None = None
+    unrealized_pnl_pct: float | None = None
+
+
+class PortfolioCreate(BaseModel):
+    name: str
+
+
+class PortfolioOut(BaseModel):
+    id: int
+    name: str
+    positions: list[PositionOut]
+    total_cost: float
+    total_value: float
+    total_pnl: float

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import StockChart from '../components/StockChart';
 import SearchBar from '../components/SearchBar';
+import NavBar from '../components/NavBar';
 import { metricsList, groupedMetrics } from '../metricsList';
 import '../styles.css';
 
@@ -22,6 +23,7 @@ const CompanyPage = () => {
     'Momentum Oscillators': true,
     'Bollinger Bands':      true,
   });
+  const [chartType, setChartType] = useState('area');
 
   useEffect(() => {
     setCompanyInfo(null);
@@ -127,7 +129,17 @@ const CompanyPage = () => {
           )}
         </div>
         <div className="header-controls">
+          <NavBar />
           <SearchBar />
+          <div className="chart-type-toggle">
+            {[{ key: 'area', label: 'AREA' }, { key: 'candle', label: 'CANDLE' }].map(({ key, label }) => (
+              <button
+                key={key}
+                className={`toolbar-btn ${chartType === key ? 'active' : ''}`}
+                onClick={() => setChartType(key)}
+              >{label}</button>
+            ))}
+          </div>
           <Link to="/" className="back-button">← Back</Link>
         </div>
       </header>
@@ -141,6 +153,7 @@ const CompanyPage = () => {
             metrics={selectedMetrics}
             metricsList={metricsList}
             onDataLoaded={setPriceData}
+            chartType={chartType}
           />
         </div>
 
