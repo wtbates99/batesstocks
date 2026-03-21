@@ -2,7 +2,7 @@ import os
 
 from databases import Database
 from dotenv import load_dotenv
-from sqlalchemy import Column, DateTime, Float, Integer, String, Text, create_engine
+from sqlalchemy import Column, DateTime, Float, Integer, String, create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 load_dotenv()
