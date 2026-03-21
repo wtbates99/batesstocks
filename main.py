@@ -793,13 +793,15 @@ async def get_heatmap(
             """).fetchall()
             result = [
                 {"name": r[0], "market_cap": r[1], "pct_change": r[2], "ticker": None}
-                for r in rows if r[0]
+                for r in rows
+                if r[0]
             ]
 
         elif level == "subsector":
             if not sector:
                 raise HTTPException(status_code=400, detail="sector required for subsector level")
-            rows = cursor.execute(f"""
+            rows = cursor.execute(
+                f"""
                 SELECT
                     t.Subsector,
                     SUM(CAST(NULLIF(t.MarketCap, 'N/A') AS REAL)) AS market_cap,
@@ -812,16 +814,20 @@ async def get_heatmap(
                   AND t.Subsector IS NOT NULL AND t.Subsector != ''
                 GROUP BY t.Subsector
                 ORDER BY market_cap DESC
-            """, (sector,)).fetchall()
+            """,
+                (sector,),
+            ).fetchall()
             result = [
                 {"name": r[0], "market_cap": r[1], "pct_change": r[2], "ticker": None}
-                for r in rows if r[0]
+                for r in rows
+                if r[0]
             ]
 
         elif level == "stock":
             if not subsector:
                 raise HTTPException(status_code=400, detail="subsector required for stock level")
-            rows = cursor.execute(f"""
+            rows = cursor.execute(
+                f"""
                 SELECT
                     t.Ticker,
                     t.FullName,
@@ -833,7 +839,9 @@ async def get_heatmap(
                 WHERE t.Date = {latest_date_sql}
                   AND t.Subsector = ?
                 ORDER BY market_cap DESC
-            """, (subsector,)).fetchall()
+            """,
+                (subsector,),
+            ).fetchall()
             result = [
                 {"name": r[1] or r[0], "market_cap": r[2], "pct_change": r[3], "ticker": r[0]}
                 for r in rows
@@ -905,8 +913,19 @@ async def get_screener(request: Request):
         """).fetchall()
         conn.close()
 
-        cols = ["ticker", "name", "sector", "subsector", "market_cap", "pe", "eps",
-                "beta", "rsi", "latest_close", "return_52w"]
+        cols = [
+            "ticker",
+            "name",
+            "sector",
+            "subsector",
+            "market_cap",
+            "pe",
+            "eps",
+            "beta",
+            "rsi",
+            "latest_close",
+            "return_52w",
+        ]
         result = [dict(zip(cols, r)) for r in rows]
         redis.set(cache_key, json.dumps(result), ex=1800)
         return result
@@ -1018,7 +1037,8 @@ def _get_portfolio_with_positions(portfolio_id: int) -> dict | None:
         return None
 
     # Join positions with latest close prices
-    pos_rows = conn.execute("""
+    pos_rows = conn.execute(
+        """
         SELECT p.id, p.portfolio_id, p.ticker, p.shares, p.cost_basis,
                p.purchased_at, p.notes, csd.Ticker_Close
         FROM positions p
@@ -1027,7 +1047,9 @@ def _get_portfolio_with_positions(portfolio_id: int) -> dict | None:
            AND csd.Date = (SELECT MAX(Date) FROM combined_stock_data)
         WHERE p.portfolio_id = ?
         ORDER BY p.id
-    """, (portfolio_id,)).fetchall()
+    """,
+        (portfolio_id,),
+    ).fetchall()
     conn.close()
 
     positions = []
@@ -1040,14 +1062,20 @@ def _get_portfolio_with_positions(portfolio_id: int) -> dict | None:
         pnl_pct = (pnl / cost_total * 100) if cost_total else None
         total_cost += cost_total
         total_value += value_total
-        positions.append({
-            "id": r[0], "portfolio_id": r[1], "ticker": r[2],
-            "shares": r[3], "cost_basis": r[4],
-            "purchased_at": r[5], "notes": r[6],
-            "current_price": current_price,
-            "unrealized_pnl": round(pnl, 2),
-            "unrealized_pnl_pct": round(pnl_pct, 2) if pnl_pct is not None else None,
-        })
+        positions.append(
+            {
+                "id": r[0],
+                "portfolio_id": r[1],
+                "ticker": r[2],
+                "shares": r[3],
+                "cost_basis": r[4],
+                "purchased_at": r[5],
+                "notes": r[6],
+                "current_price": current_price,
+                "unrealized_pnl": round(pnl, 2),
+                "unrealized_pnl_pct": round(pnl_pct, 2) if pnl_pct is not None else None,
+            }
+        )
 
     return {
         "id": port_row[0],
@@ -1099,8 +1127,14 @@ async def add_position(request: Request, portfolio_id: int, body: PositionCreate
     cursor = conn.execute(
         "INSERT INTO positions (portfolio_id, ticker, shares, cost_basis, purchased_at, notes) "
         "VALUES (?, ?, ?, ?, ?, ?)",
-        (portfolio_id, body.ticker.upper(), body.shares, body.cost_basis,
-         body.purchased_at, body.notes),
+        (
+            portfolio_id,
+            body.ticker.upper(),
+            body.shares,
+            body.cost_basis,
+            body.purchased_at,
+            body.notes,
+        ),
     )
     pos_id = cursor.lastrowid
     conn.commit()
@@ -1119,8 +1153,15 @@ async def update_position(request: Request, portfolio_id: int, pos_id: int, body
     conn.execute(
         "UPDATE positions SET ticker=?, shares=?, cost_basis=?, purchased_at=?, notes=? "
         "WHERE id=? AND portfolio_id=?",
-        (body.ticker.upper(), body.shares, body.cost_basis,
-         body.purchased_at, body.notes, pos_id, portfolio_id),
+        (
+            body.ticker.upper(),
+            body.shares,
+            body.cost_basis,
+            body.purchased_at,
+            body.notes,
+            pos_id,
+            portfolio_id,
+        ),
     )
     conn.commit()
     conn.close()
@@ -1143,7 +1184,9 @@ async def delete_position(request: Request, portfolio_id: int, pos_id: int):
 
 @app.get("/portfolios/{portfolio_id}/chart")
 @limiter.limit("20/minute")
-async def get_portfolio_chart(request: Request, portfolio_id: int, days: int = Query(90, ge=7, le=1825)):
+async def get_portfolio_chart(
+    request: Request, portfolio_id: int, days: int = Query(90, ge=7, le=1825)
+):
     cache_key = f"portfolio_chart:{portfolio_id}:{days}"
     cached = redis.get(cache_key)
     if cached:
@@ -1158,7 +1201,8 @@ async def get_portfolio_chart(request: Request, portfolio_id: int, days: int = Q
             conn.close()
             return []
 
-        rows = conn.execute("""
+        rows = conn.execute(
+            """
             SELECT csd.Date, SUM(p.shares * csd.Ticker_Close) AS portfolio_value
             FROM positions p
             JOIN combined_stock_data csd ON csd.Ticker = p.ticker
@@ -1168,7 +1212,9 @@ async def get_portfolio_chart(request: Request, portfolio_id: int, days: int = Q
               )
             GROUP BY csd.Date
             ORDER BY csd.Date
-        """, (portfolio_id, f"-{days}")).fetchall()
+        """,
+            (portfolio_id, f"-{days}"),
+        ).fetchall()
         conn.close()
 
         result = [{"date": str(r[0])[:10], "value": round(float(r[1]), 2)} for r in rows]
