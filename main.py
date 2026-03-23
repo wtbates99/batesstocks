@@ -550,6 +550,7 @@ async def ai_chat(request: Request, body: AiChatRequest):
                             {"role": "user", "content": body.message},
                         ],
                         "stream": False,
+                        "think": False,
                     },
                 )
                 resp.raise_for_status()
