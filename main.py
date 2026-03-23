@@ -52,6 +52,7 @@ from backend.models import (
 DB_PATH = os.getenv("DB_PATH", "stock_data.db")
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3.5:cloud")
+OLLAMA_API_KEY = os.getenv("OLLAMA_API_KEY", "")
 IS_PRODUCTION = os.getenv("ENV", "development") == "production"
 CORS_ORIGINS = os.getenv(
     "CORS_ORIGINS",
@@ -536,8 +537,12 @@ async def ai_chat(request: Request, body: AiChatRequest):
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
             if provider == "ollama":
+                ollama_headers = {}
+                if OLLAMA_API_KEY:
+                    ollama_headers["Authorization"] = f"Bearer {OLLAMA_API_KEY}"
                 resp = await client.post(
                     f"{OLLAMA_HOST}/api/chat",
+                    headers=ollama_headers,
                     json={
                         "model": model,
                         "messages": [
