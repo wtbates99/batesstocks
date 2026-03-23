@@ -7,7 +7,7 @@ A self-hosted stock analysis dashboard with technical indicators, interactive ch
 - S&P 500 data via Yahoo Finance (5+ years of daily OHLCV)
 - 24 technical indicators: trend, momentum, volatility, volume
 - Interactive multi-ticker charts with customizable metrics, date ranges, and CSV export
-- AI analysis chat (Ollama, Anthropic Claude, OpenAI) with live indicator context
+- AI analysis chat with live indicator context — powered by local Ollama (`qwen3.5:cloud`) in production; Ollama/Anthropic/OpenAI available in dev
 - Bullish stock groupings: momentum, breakout, trend strength — shown as signal badges on each card
 - Real-time OHLC display (Open / High / Low) per card and on the company spotlight page
 - Sort chart grid by: default order, top gainers, top losers, or alphabetical
@@ -104,6 +104,8 @@ cp .env.example .env
 | `REDIS_HOST` | `localhost` | Redis hostname |
 | `REDIS_PORT` | `6379` | Redis port |
 | `OLLAMA_HOST` | `http://localhost:11434` | Ollama API base URL |
+| `OLLAMA_MODEL` | `qwen3.5:cloud` | Ollama model to use (production always uses this) |
+| `ENV` | `development` | Set to `production` to lock AI to ollama and enable IP rate limiting |
 | `APP_HOST` | `0.0.0.0` | Uvicorn bind host |
 | `APP_PORT` | `8000` | Uvicorn bind port |
 | `CORS_ORIGINS` | `http://localhost:8000,...` | Comma-separated allowed CORS origins |
@@ -120,7 +122,8 @@ If Redis is unavailable at startup the app automatically falls back to an in-mem
 | `GET /company/{ticker}` | 30/min | Company info and financials |
 | `GET /groupings` | 20/min | Live bullish groupings (momentum / breakout / trend strength) |
 | `GET /search?query=&limit=` | 30/min | Ticker and company name autocomplete. `limit` 1–50, default 10 |
-| `POST /ai/chat` | 10/min | AI technical analysis (Ollama / Anthropic / OpenAI) |
+| `GET /ai/config` | — | AI configuration (production mode, fixed model) |
+| `POST /ai/chat` | 10/min | AI technical analysis. In production: ollama only, 100 requests/IP |
 | `POST /refresh_data` | 2/min | Trigger full data pipeline in background |
 | `GET /refresh_status` | 20/min | Check pipeline progress |
 
@@ -144,6 +147,8 @@ Interactive docs: `http://localhost:8000/docs`
 ```
 
 Supported providers: `ollama`, `anthropic`, `openai`. `api_key` is required for Anthropic and OpenAI.
+
+In production (`ENV=production`), the `provider`, `model`, and `api_key` fields are ignored — the backend always uses Ollama with `OLLAMA_MODEL`. A 100-request limit per IP applies.
 
 ---
 

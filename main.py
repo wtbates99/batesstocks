@@ -51,6 +51,8 @@ from backend.models import (
 
 DB_PATH = os.getenv("DB_PATH", "stock_data.db")
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3.5:cloud")
+IS_PRODUCTION = os.getenv("ENV", "development") == "production"
 CORS_ORIGINS = os.getenv(
     "CORS_ORIGINS",
     "http://localhost:8000,http://localhost:3000,https://batesstocks.com,https://www.batesstocks.com",
@@ -422,6 +424,45 @@ def _get_bullish_groupings_from_db() -> dict:
         return {"momentum": [], "breakout": [], "trend_strength": []}
 
 
+# ── AI request tracking (per-IP, production only) ──────────────────────────────
+
+IP_REQUEST_LIMIT = 100
+
+_ip_request_conn: sqlite3.Connection | None = None
+
+
+def _get_ip_conn() -> sqlite3.Connection:
+    global _ip_request_conn
+    if _ip_request_conn is None:
+        _ip_request_conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        _ip_request_conn.execute(
+            "CREATE TABLE IF NOT EXISTS ip_requests "
+            "(ip TEXT PRIMARY KEY, requests_used INTEGER DEFAULT 0)"
+        )
+        _ip_request_conn.commit()
+    return _ip_request_conn
+
+
+def ip_has_requests(ip: str) -> bool:
+    conn = _get_ip_conn()
+    row = conn.execute(
+        "SELECT requests_used FROM ip_requests WHERE ip = ?", (ip,)
+    ).fetchone()
+    if row is None:
+        return True
+    return row[0] < IP_REQUEST_LIMIT
+
+
+def ip_record_request(ip: str) -> None:
+    conn = _get_ip_conn()
+    conn.execute(
+        "INSERT INTO ip_requests (ip, requests_used) VALUES (?, 1) "
+        "ON CONFLICT(ip) DO UPDATE SET requests_used = requests_used + 1",
+        (ip,),
+    )
+    conn.commit()
+
+
 # ── AI chat ────────────────────────────────────────────────────────────────────
 
 
@@ -465,18 +506,40 @@ Keep responses focused and under 300 words. Always note that technical analysis 
     return prompt
 
 
+@app.get("/ai/config")
+async def ai_config():
+    """Returns AI configuration so the frontend knows whether provider selection is available."""
+    return {
+        "production": IS_PRODUCTION,
+        "provider": "ollama" if IS_PRODUCTION else None,
+        "model": OLLAMA_MODEL if IS_PRODUCTION else None,
+        "request_limit": IP_REQUEST_LIMIT,
+    }
+
+
 @app.post("/ai/chat")
 @limiter.limit("10/minute")
 async def ai_chat(request: Request, body: AiChatRequest):
     system_prompt = build_system_prompt(body.context or {})
 
+    # In production: always use ollama with the configured model, enforce IP limit
+    if IS_PRODUCTION:
+        client_ip = request.client.host if request.client else "unknown"
+        if not ip_has_requests(client_ip):
+            raise HTTPException(status_code=429, detail="Request limit reached (100 per IP)")
+        provider = "ollama"
+        model = OLLAMA_MODEL
+    else:
+        provider = body.provider
+        model = body.model
+
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
-            if body.provider == "ollama":
+            if provider == "ollama":
                 resp = await client.post(
                     f"{OLLAMA_HOST}/api/chat",
                     json={
-                        "model": body.model,
+                        "model": model,
                         "messages": [
                             {"role": "system", "content": system_prompt},
                             {"role": "user", "content": body.message},
@@ -485,9 +548,11 @@ async def ai_chat(request: Request, body: AiChatRequest):
                     },
                 )
                 resp.raise_for_status()
+                if IS_PRODUCTION:
+                    ip_record_request(client_ip)
                 return {"response": resp.json()["message"]["content"]}
 
-            elif body.provider == "anthropic":
+            elif provider == "anthropic":
                 if not body.api_key:
                     raise HTTPException(status_code=400, detail="API key required for Anthropic")
                 resp = await client.post(
@@ -498,7 +563,7 @@ async def ai_chat(request: Request, body: AiChatRequest):
                         "content-type": "application/json",
                     },
                     json={
-                        "model": body.model,
+                        "model": model,
                         "max_tokens": 1024,
                         "system": system_prompt,
                         "messages": [{"role": "user", "content": body.message}],
@@ -508,7 +573,7 @@ async def ai_chat(request: Request, body: AiChatRequest):
                     raise HTTPException(status_code=resp.status_code, detail=resp.text)
                 return {"response": resp.json()["content"][0]["text"]}
 
-            elif body.provider == "openai":
+            elif provider == "openai":
                 if not body.api_key:
                     raise HTTPException(status_code=400, detail="API key required for OpenAI")
                 resp = await client.post(
@@ -518,7 +583,7 @@ async def ai_chat(request: Request, body: AiChatRequest):
                         "Content-Type": "application/json",
                     },
                     json={
-                        "model": body.model,
+                        "model": model,
                         "messages": [
                             {"role": "system", "content": system_prompt},
                             {"role": "user", "content": body.message},
@@ -530,7 +595,7 @@ async def ai_chat(request: Request, body: AiChatRequest):
                 return {"response": resp.json()["choices"][0]["message"]["content"]}
 
             else:
-                raise HTTPException(status_code=400, detail=f"Unknown provider: {body.provider}")
+                raise HTTPException(status_code=400, detail=f"Unknown provider: {provider}")
 
     except HTTPException:
         raise

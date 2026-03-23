@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 
 const DEFAULT_MODELS = {
-  ollama:    'qwen3.5:397b-cloud',
+  ollama:    'qwen3.5:cloud',
   anthropic: 'claude-sonnet-4-6',
   openai:    'gpt-4o-mini',
 };
@@ -51,12 +51,29 @@ const AiPanel = ({ tickers, dateRange, selectedMetrics, isOpen, onToggle }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [contextStatus, setContextStatus] = useState('idle'); // idle | loading | loaded | error
   const [contextSummary, setContextSummary] = useState('');
+  const [aiConfig, setAiConfig] = useState(null); // { production, provider, model, request_limit }
   const messagesEndRef = useRef(null);
   const cachedContextRef = useRef(null); // cache context per ticker set
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  // Fetch AI config once on mount
+  useEffect(() => {
+    fetch('/ai/config')
+      .then(r => r.json())
+      .then(cfg => {
+        setAiConfig(cfg);
+        if (cfg.production && cfg.model) {
+          setProvider('ollama');
+          setModel(cfg.model);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const isProduction = aiConfig?.production ?? false;
 
   const handleProviderChange = useCallback((newProvider) => {
     setProvider(newProvider);
@@ -173,6 +190,9 @@ const AiPanel = ({ tickers, dateRange, selectedMetrics, isOpen, onToggle }) => {
 
       if (!resp.ok) {
         const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+        if (resp.status === 429) {
+          throw new Error('Request limit reached (100 per IP). Try again later.');
+        }
         throw new Error(err.detail || 'Request failed');
       }
 
@@ -200,25 +220,33 @@ const AiPanel = ({ tickers, dateRange, selectedMetrics, isOpen, onToggle }) => {
       <div className="ai-panel-header">
         <div className="ai-panel-title">⚡ AI TERMINAL</div>
         <div className="ai-panel-controls">
-          <select className="ai-select" value={provider} onChange={(e) => handleProviderChange(e.target.value)}>
-            <option value="ollama">Ollama</option>
-            <option value="anthropic">Anthropic</option>
-            <option value="openai">OpenAI</option>
-          </select>
-          <input
-            className="ai-model-input"
-            value={model}
-            onChange={(e) => setModel(e.target.value)}
-            placeholder="model"
-          />
-          {provider !== 'ollama' && (
-            <input
-              className="ai-key-input"
-              type="password"
-              value={apiKey}
-              onChange={handleApiKeyChange}
-              placeholder="API key"
-            />
+          {isProduction ? (
+            <span className="ai-model-fixed" title="Powered by local Ollama in production">
+              {model}
+            </span>
+          ) : (
+            <>
+              <select className="ai-select" value={provider} onChange={(e) => handleProviderChange(e.target.value)}>
+                <option value="ollama">Ollama</option>
+                <option value="anthropic">Anthropic</option>
+                <option value="openai">OpenAI</option>
+              </select>
+              <input
+                className="ai-model-input"
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+                placeholder="model"
+              />
+              {provider !== 'ollama' && (
+                <input
+                  className="ai-key-input"
+                  type="password"
+                  value={apiKey}
+                  onChange={handleApiKeyChange}
+                  placeholder="API key"
+                />
+              )}
+            </>
           )}
           <button className="ai-close-btn" onClick={onToggle} aria-label="Close">✕</button>
         </div>
