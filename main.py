@@ -53,6 +53,8 @@ DB_PATH = os.getenv("DB_PATH", "stock_data.db")
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3.5:cloud")
 OLLAMA_API_KEY = os.getenv("OLLAMA_API_KEY", "")
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
 IS_PRODUCTION = os.getenv("ENV", "development") == "production"
 CORS_ORIGINS = os.getenv(
     "CORS_ORIGINS",
@@ -510,10 +512,16 @@ Keep responses focused and under 300 words. Always note that technical analysis 
 @app.get("/ai/config")
 async def ai_config():
     """Returns AI configuration so the frontend knows whether provider selection is available."""
+    if IS_PRODUCTION:
+        provider = "anthropic" if ANTHROPIC_API_KEY else "ollama"
+        model = ANTHROPIC_MODEL if ANTHROPIC_API_KEY else OLLAMA_MODEL
+    else:
+        provider = None
+        model = None
     return {
         "production": IS_PRODUCTION,
-        "provider": "ollama" if IS_PRODUCTION else None,
-        "model": OLLAMA_MODEL if IS_PRODUCTION else None,
+        "provider": provider,
+        "model": model,
         "request_limit": IP_REQUEST_LIMIT,
     }
 
@@ -523,13 +531,17 @@ async def ai_config():
 async def ai_chat(request: Request, body: AiChatRequest):
     system_prompt = build_system_prompt(body.context or {})
 
-    # In production: always use ollama with the configured model, enforce IP limit
+    # In production: prefer Anthropic if key is set, else Ollama. Enforce IP limit.
     if IS_PRODUCTION:
         client_ip = request.client.host if request.client else "unknown"
         if not ip_has_requests(client_ip):
             raise HTTPException(status_code=429, detail="Request limit reached (100 per IP)")
-        provider = "ollama"
-        model = OLLAMA_MODEL
+        if ANTHROPIC_API_KEY:
+            provider = "anthropic"
+            model = ANTHROPIC_MODEL
+        else:
+            provider = "ollama"
+            model = OLLAMA_MODEL
     else:
         provider = body.provider
         model = body.model
@@ -559,12 +571,13 @@ async def ai_chat(request: Request, body: AiChatRequest):
                 return {"response": resp.json()["message"]["content"]}
 
             elif provider == "anthropic":
-                if not body.api_key:
+                api_key = ANTHROPIC_API_KEY if IS_PRODUCTION else body.api_key
+                if not api_key:
                     raise HTTPException(status_code=400, detail="API key required for Anthropic")
                 resp = await client.post(
                     "https://api.anthropic.com/v1/messages",
                     headers={
-                        "x-api-key": body.api_key,
+                        "x-api-key": api_key,
                         "anthropic-version": "2023-06-01",
                         "content-type": "application/json",
                     },
@@ -577,6 +590,8 @@ async def ai_chat(request: Request, body: AiChatRequest):
                 )
                 if resp.status_code != 200:
                     raise HTTPException(status_code=resp.status_code, detail=resp.text)
+                if IS_PRODUCTION:
+                    ip_record_request(client_ip)
                 return {"response": resp.json()["content"][0]["text"]}
 
             elif provider == "openai":
