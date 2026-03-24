@@ -6,24 +6,36 @@ import NavBar from '../components/NavBar';
 import { metricsList, groupedMetrics } from '../metricsList';
 import '../styles.css';
 
+const DATE_RANGES = [
+  { days: 7,    label: '7D'  },
+  { days: 30,   label: '1M'  },
+  { days: 90,   label: '3M'  },
+  { days: 180,  label: '6M'  },
+  { days: 365,  label: '1Y'  },
+  { days: 730,  label: '2Y'  },
+  { days: 1095, label: '3Y'  },
+  { days: 1825, label: '5Y'  },
+];
+
 const CompanyPage = () => {
   const { ticker } = useParams();
-  const [companyInfo, setCompanyInfo]           = useState(null);
-  const [priceData, setPriceData]               = useState(null);
-  const [startDate, setStartDate]               = useState(new Date(Date.now() - 30 * 86400000));
-  const [endDate, setEndDate]                   = useState(new Date());
-  const [selectedRange, setSelectedRange]       = useState(30);
-  const [selectedMetrics, setSelectedMetrics]   = useState([
+  const [companyInfo, setCompanyInfo]         = useState(null);
+  const [priceData, setPriceData]             = useState(null);
+  const [startDate, setStartDate]             = useState(new Date(Date.now() - 90 * 86400000));
+  const [endDate, setEndDate]                 = useState(new Date());
+  const [selectedRange, setSelectedRange]     = useState(90);
+  const [selectedMetrics, setSelectedMetrics] = useState([
     'Ticker_Close', 'Ticker_SMA_10', 'Ticker_Bollinger_High', 'Ticker_Bollinger_Low',
   ]);
-  const [collapsedGroups, setCollapsedGroups]   = useState({
+  const [collapsedGroups, setCollapsedGroups] = useState({
     'Price Data':           false,
     'Volume Indicators':    true,
-    'Moving Averages':      true,
+    'Moving Averages':      false,
     'Momentum Oscillators': true,
     'Bollinger Bands':      true,
   });
   const [chartType, setChartType] = useState('area');
+  const [infoTab, setInfoTab]     = useState('financials');
 
   useEffect(() => {
     setCompanyInfo(null);
@@ -50,7 +62,7 @@ const CompanyPage = () => {
     setCollapsedGroups((prev) => ({ ...prev, [name]: !prev[name] }));
   }, []);
 
-  const formatValue = (key, value) => {
+  const fmt = (key, value) => {
     if (value === null || value === undefined) return 'N/A';
     switch (key) {
       case 'MarketCap': case 'Revenue': case 'GrossProfit': case 'FreeCashFlow':
@@ -60,9 +72,9 @@ const CompanyPage = () => {
       case 'Price': case 'DividendRate': case 'EPS':
         return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
       case 'DividendYield': case 'PayoutRatio':
-        return new Intl.NumberFormat('en-US', { style: 'percent', maximumFractionDigits: 2 }).format(value);
+        return `${(parseFloat(value) * 100).toFixed(2)}%`;
       case 'Beta': case 'PE':
-        return new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(value);
+        return parseFloat(value).toFixed(2);
       case 'Employees':
         return new Intl.NumberFormat('en-US').format(value);
       default:
@@ -70,48 +82,39 @@ const CompanyPage = () => {
     }
   };
 
-  const renderCompanyInfo = () => {
-    if (!companyInfo) return null;
-    const groups = {
-      'General':    ['FullName', 'Sector', 'Subsector', 'Country', 'Exchange', 'Currency', 'QuoteType'],
-      'Financials': ['MarketCap', 'Price', 'DividendRate', 'DividendYield', 'PayoutRatio', 'Beta', 'PE', 'EPS', 'Revenue', 'GrossProfit', 'FreeCashFlow'],
-      'Company':    ['CEO', 'Employees', 'City', 'State', 'Address', 'Phone', 'Website'],
-    };
-
+  if (!companyInfo) {
     return (
-      <div className="company-info-grid">
-        {Object.entries(groups).map(([groupName, fields]) => (
-          <div key={groupName} className="info-group">
-            <h3>{groupName}</h3>
-            <div className="info-items">
-              {fields.map((field) => {
-                const value = companyInfo[field];
-                if (value === null || value === undefined || value === '') return null;
-                return (
-                  <div key={field} className="info-item">
-                    <span className="info-label">{field.replace(/([A-Z])/g, ' $1').trim()}</span>
-                    <span className="info-value">{formatValue(field, value)}</span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        ))}
+      <div className="company-page">
+        <div className="cp-loading">
+          <span className="cp-loading-ticker">{ticker}</span>
+          <span className="cp-loading-label">Loading…</span>
+        </div>
       </div>
     );
-  };
-
-  if (!companyInfo) return <div className="loading">Loading {ticker}...</div>;
+  }
 
   const change = priceData ? priceData.latestClose - priceData.prevClose : 0;
   const pct    = priceData?.prevClose ? (change / priceData.prevClose) * 100 : 0;
   const isPos  = change >= 0;
 
+  const infoGroups = {
+    financials: ['MarketCap', 'Price', 'PE', 'EPS', 'Beta', 'DividendRate', 'DividendYield', 'PayoutRatio', 'Revenue', 'GrossProfit', 'FreeCashFlow'],
+    general:    ['FullName', 'Sector', 'Subsector', 'Country', 'Exchange', 'Currency', 'QuoteType'],
+    company:    ['CEO', 'Employees', 'City', 'State', 'Address', 'Phone', 'Website'],
+  };
+
   return (
     <div className="company-page">
+      {/* ── Header ─────────────────────────────────────────────── */}
       <header className="company-header">
         <div className="company-header-left">
-          <h1>{companyInfo.FullName} ({ticker})</h1>
+          <div className="cp-ticker-row">
+            <span className="cp-ticker">{ticker}</span>
+            <span className="cp-name">{companyInfo.FullName}</span>
+            {companyInfo.Exchange && (
+              <span className="cp-exchange">{companyInfo.Exchange}</span>
+            )}
+          </div>
           {priceData && (
             <div className="company-header-price">
               <span className="company-current-price">${priceData.latestClose.toFixed(2)}</span>
@@ -120,9 +123,9 @@ const CompanyPage = () => {
               </span>
               {priceData.latestOpen > 0 && (
                 <div className="company-ohlc">
-                  <span className="ohlc-item">O<strong>{priceData.latestOpen.toFixed(2)}</strong></span>
-                  <span className="ohlc-item">H<strong>{priceData.latestHigh.toFixed(2)}</strong></span>
-                  <span className="ohlc-item">L<strong>{priceData.latestLow.toFixed(2)}</strong></span>
+                  <span className="ohlc-item">O <strong>{priceData.latestOpen.toFixed(2)}</strong></span>
+                  <span className="ohlc-item">H <strong>{priceData.latestHigh.toFixed(2)}</strong></span>
+                  <span className="ohlc-item">L <strong>{priceData.latestLow.toFixed(2)}</strong></span>
                 </div>
               )}
             </div>
@@ -131,103 +134,170 @@ const CompanyPage = () => {
         <div className="header-controls">
           <NavBar />
           <SearchBar />
-          <div className="chart-type-toggle">
-            {[{ key: 'area', label: 'AREA' }, { key: 'candle', label: 'CANDLE' }].map(({ key, label }) => (
-              <button
-                key={key}
-                className={`toolbar-btn ${chartType === key ? 'active' : ''}`}
-                onClick={() => setChartType(key)}
-              >{label}</button>
-            ))}
-          </div>
           <Link to="/" className="back-button">← Back</Link>
         </div>
       </header>
 
-      <div className="company-content">
-        <div className="company-chart-container">
-          <StockChart
-            initialTicker={ticker}
-            startDate={startDate}
-            endDate={endDate}
-            metrics={selectedMetrics}
-            metricsList={metricsList}
-            onDataLoaded={setPriceData}
-            chartType={chartType}
-          />
-        </div>
+      {/* ── Key stats ──────────────────────────────────────────── */}
+      <div className="key-stats-strip">
+        {[
+          { label: 'MKT CAP',   value: companyInfo.MarketCap     ? new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',notation:'compact',maximumFractionDigits:1}).format(companyInfo.MarketCap) : null },
+          { label: 'P/E',       value: companyInfo.PE            ? parseFloat(companyInfo.PE).toFixed(2) : null },
+          { label: 'EPS',       value: companyInfo.EPS           ? `$${parseFloat(companyInfo.EPS).toFixed(2)}` : null },
+          { label: 'DIV YIELD', value: companyInfo.DividendYield ? `${(parseFloat(companyInfo.DividendYield)*100).toFixed(2)}%` : null },
+          { label: 'BETA',      value: companyInfo.Beta          ? parseFloat(companyInfo.Beta).toFixed(2) : null },
+          { label: 'SECTOR',    value: companyInfo.Sector },
+          { label: 'SUBSECTOR', value: companyInfo.Subsector },
+        ].filter(s => s.value).map(s => (
+          <div key={s.label} className="key-stat-item">
+            <span className="key-stat-label">{s.label}</span>
+            <span className="key-stat-value">{s.value}</span>
+          </div>
+        ))}
+      </div>
 
-      {companyInfo && (
-        <div className="key-stats-strip">
-          {[
-            { label: 'MKT CAP',  value: companyInfo.MarketCap    ? new Intl.NumberFormat('en-US',{ style:'currency',currency:'USD',notation:'compact',maximumFractionDigits:1}).format(companyInfo.MarketCap) : null },
-            { label: 'P/E',      value: companyInfo.PE           ? parseFloat(companyInfo.PE).toFixed(2) : null },
-            { label: 'EPS',      value: companyInfo.EPS          ? `$${parseFloat(companyInfo.EPS).toFixed(2)}` : null },
-            { label: 'DIV YIELD',value: companyInfo.DividendYield? `${(parseFloat(companyInfo.DividendYield)*100).toFixed(2)}%` : null },
-            { label: 'BETA',     value: companyInfo.Beta         ? parseFloat(companyInfo.Beta).toFixed(2) : null },
-            { label: 'SECTOR',   value: companyInfo.Sector },
-            { label: 'EXCHANGE', value: companyInfo.Exchange },
-          ].filter(s => s.value).map(s => (
-            <div key={s.label} className="key-stat-item">
-              <span className="key-stat-label">{s.label}</span>
-              <span className="key-stat-value">{s.value}</span>
+      {/* ── Main layout ────────────────────────────────────────── */}
+      <div className="cp-main">
+
+        {/* Left: metrics sidebar */}
+        <aside className="cp-metrics-sidebar">
+          <div className="cp-sidebar-header">INDICATORS</div>
+          {Object.entries(groupedMetrics).map(([groupName, gMetrics]) => (
+            <div className="cp-metric-group" key={groupName}>
+              <button
+                className="cp-group-header"
+                onClick={() => toggleGroupCollapse(groupName)}
+              >
+                <span>{groupName}</span>
+                <span className={`cp-collapse-icon ${collapsedGroups[groupName] ? '' : 'open'}`}>›</span>
+              </button>
+              {!collapsedGroups[groupName] && (
+                <div className="cp-group-metrics">
+                  {gMetrics.map((metric) => {
+                    const isSelected = selectedMetrics.includes(metric.name);
+                    return (
+                      <button
+                        key={metric.name}
+                        className={`cp-metric-btn ${isSelected ? 'selected' : ''}`}
+                        onClick={() => toggleMetric(metric.name)}
+                        style={isSelected ? {
+                          backgroundColor: metric.color.replace('hsl', 'hsla').replace('%)', '%, 0.12)'),
+                          borderColor:     metric.color.replace('hsl', 'hsla').replace('%)', '%, 0.4)'),
+                        } : {}}
+                      >
+                        <span
+                          className="cp-metric-dot"
+                          style={{ backgroundColor: isSelected ? metric.color : 'var(--dim)' }}
+                        />
+                        <span className="cp-metric-name">
+                          {metric.name.replace(/Ticker_/g, '').replace(/_/g, ' ')}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           ))}
-        </div>
-      )}
-        <div className="company-details">
-          <div className="company-sidebar">
-            <div className="date-buttons-grid">
-              {[7, 30, 90, 180, 365, 730, 1095, 1460, 1825].map((days) => (
+        </aside>
+
+        {/* Right: chart + company info */}
+        <div className="cp-right">
+
+          {/* Chart toolbar: date range + chart type */}
+          <div className="cp-chart-toolbar">
+            <div className="cp-date-range">
+              {DATE_RANGES.map(({ days, label }) => (
                 <button
                   key={days}
-                  className={`date-button ${selectedRange === days ? 'active' : ''}`}
+                  className={`cp-range-btn ${selectedRange === days ? 'active' : ''}`}
                   onClick={() => setDateRange(days)}
                 >
-                  {days >= 365 ? `${days / 365}Y` : `${days}D`}
+                  {label}
                 </button>
               ))}
             </div>
-
-            <div className="metrics-section">
-              {Object.entries(groupedMetrics).map(([groupName, gMetrics]) => (
-                <div className="metrics-group" key={groupName}>
-                  <h3 className="group-header" onClick={() => toggleGroupCollapse(groupName)}>
-                    {groupName}
-                    <span className={`collapse-icon ${collapsedGroups[groupName] ? 'collapsed' : ''}`}>▼</span>
-                  </h3>
-                  {!collapsedGroups[groupName] && (
-                    <div className="group-metrics">
-                      {gMetrics.map((metric) => {
-                        const isSelected = selectedMetrics.includes(metric.name);
-                        return (
-                          <div
-                            key={metric.name}
-                            className={`metric-item ${isSelected ? 'selected' : ''}`}
-                            onClick={() => toggleMetric(metric.name)}
-                            style={isSelected ? {
-                              backgroundColor: metric.color.replace('hsl', 'hsla').replace('%)', '%, 0.12)'),
-                              borderColor:     metric.color.replace('hsl', 'hsla').replace('%)', '%, 0.35)'),
-                            } : undefined}
-                          >
-                            <span className="metric-color-dot" style={{ backgroundColor: metric.color }} />
-                            <span className="metric-label-text">
-                              {metric.name.replace(/Ticker_/g, '').replace(/_/g, ' ')}
-                            </span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
+            <div className="cp-chart-type">
+              {[{ key: 'area', label: 'AREA' }, { key: 'candle', label: 'CANDLE' }].map(({ key, label }) => (
+                <button
+                  key={key}
+                  className={`cp-range-btn ${chartType === key ? 'active' : ''}`}
+                  onClick={() => setChartType(key)}
+                >
+                  {label}
+                </button>
               ))}
             </div>
           </div>
 
-          <div className="company-info">
-            <h2>Company Information</h2>
-            {renderCompanyInfo()}
+          {/* Chart */}
+          <div className="cp-chart-container">
+            <StockChart
+              initialTicker={ticker}
+              startDate={startDate}
+              endDate={endDate}
+              metrics={selectedMetrics}
+              metricsList={metricsList}
+              onDataLoaded={setPriceData}
+              chartType={chartType}
+            />
           </div>
+
+          {/* Active metrics legend */}
+          {selectedMetrics.length > 0 && (
+            <div className="cp-metrics-legend">
+              {selectedMetrics.map((m) => {
+                const meta = metricsList.find((ml) => ml.name === m);
+                if (!meta) return null;
+                return (
+                  <button
+                    key={m}
+                    className="cp-legend-chip"
+                    onClick={() => toggleMetric(m)}
+                    title="Click to remove"
+                  >
+                    <span className="cp-legend-dot" style={{ backgroundColor: meta.color }} />
+                    {m.replace(/Ticker_/g, '').replace(/_/g, ' ')}
+                    <span className="cp-legend-x">×</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Company info tabs */}
+          <div className="cp-info-card">
+            <div className="cp-info-tabs">
+              {[
+                { key: 'financials', label: 'FINANCIALS' },
+                { key: 'general',   label: 'GENERAL'    },
+                { key: 'company',   label: 'COMPANY'    },
+              ].map(({ key, label }) => (
+                <button
+                  key={key}
+                  className={`cp-info-tab ${infoTab === key ? 'active' : ''}`}
+                  onClick={() => setInfoTab(key)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="cp-info-body">
+              {(infoGroups[infoTab] || []).map((field) => {
+                const value = companyInfo[field];
+                if (value === null || value === undefined || value === '') return null;
+                return (
+                  <div key={field} className="cp-info-row">
+                    <span className="cp-info-label">
+                      {field.replace(/([A-Z])/g, ' $1').trim()}
+                    </span>
+                    <span className="cp-info-value">{fmt(field, value)}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
         </div>
       </div>
     </div>
