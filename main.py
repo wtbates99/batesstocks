@@ -512,16 +512,10 @@ Keep responses focused and under 300 words. Always note that technical analysis 
 @app.get("/ai/config")
 async def ai_config():
     """Returns AI configuration so the frontend knows whether provider selection is available."""
-    if IS_PRODUCTION:
-        provider = "anthropic" if ANTHROPIC_API_KEY else "ollama"
-        model = ANTHROPIC_MODEL if ANTHROPIC_API_KEY else OLLAMA_MODEL
-    else:
-        provider = None
-        model = None
     return {
         "production": IS_PRODUCTION,
-        "provider": provider,
-        "model": model,
+        "provider": "ollama" if IS_PRODUCTION else None,
+        "model": OLLAMA_MODEL if IS_PRODUCTION else None,
         "request_limit": IP_REQUEST_LIMIT,
     }
 
@@ -531,17 +525,13 @@ async def ai_config():
 async def ai_chat(request: Request, body: AiChatRequest):
     system_prompt = build_system_prompt(body.context or {})
 
-    # In production: prefer Anthropic if key is set, else Ollama. Enforce IP limit.
+    # In production: always Ollama. In dev: use provider from request body.
     if IS_PRODUCTION:
         client_ip = request.client.host if request.client else "unknown"
         if not ip_has_requests(client_ip):
             raise HTTPException(status_code=429, detail="Request limit reached (100 per IP)")
-        if ANTHROPIC_API_KEY:
-            provider = "anthropic"
-            model = ANTHROPIC_MODEL
-        else:
-            provider = "ollama"
-            model = OLLAMA_MODEL
+        provider = "ollama"
+        model = OLLAMA_MODEL
     else:
         provider = body.provider
         model = body.model
@@ -571,13 +561,12 @@ async def ai_chat(request: Request, body: AiChatRequest):
                 return {"response": resp.json()["message"]["content"]}
 
             elif provider == "anthropic":
-                api_key = ANTHROPIC_API_KEY if IS_PRODUCTION else body.api_key
-                if not api_key:
+                if not body.api_key:
                     raise HTTPException(status_code=400, detail="API key required for Anthropic")
                 resp = await client.post(
                     "https://api.anthropic.com/v1/messages",
                     headers={
-                        "x-api-key": api_key,
+                        "x-api-key": body.api_key,
                         "anthropic-version": "2023-06-01",
                         "content-type": "application/json",
                     },
@@ -590,8 +579,6 @@ async def ai_chat(request: Request, body: AiChatRequest):
                 )
                 if resp.status_code != 200:
                     raise HTTPException(status_code=resp.status_code, detail=resp.text)
-                if IS_PRODUCTION:
-                    ip_record_request(client_ip)
                 return {"response": resp.json()["content"][0]["text"]}
 
             elif provider == "openai":
