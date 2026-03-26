@@ -232,9 +232,9 @@ async def lifespan(app: FastAPI):
         logger.warning("Redis unavailable (%s), falling back to fakeredis", e)
         redis = fakeredis.FakeRedis()
 
-    if not _db_has_data():
-        import threading
+    import threading
 
+    if not _db_has_data():
         threading.Thread(target=run_full_pipeline, daemon=True).start()
     else:
         pipeline_status["phase"] = "complete"
