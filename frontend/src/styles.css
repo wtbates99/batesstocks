@@ -1473,10 +1473,11 @@ h1, h2, h3, h4, h5, h6 { font-weight: 600; }
   gap: 12px;
 }
 
-.grid-toolbar-left, .grid-toolbar-right {
+.grid-toolbar-left, .grid-toolbar-center, .grid-toolbar-right {
   display: flex;
   align-items: center;
   gap: 3px;
+  flex-shrink: 0;
 }
 
 .toolbar-label {
@@ -2461,15 +2462,152 @@ h1, h2, h3, h4, h5, h6 { font-weight: 600; }
 .pulse-ticker { font-size: 10px; font-weight: 700; color: var(--accent); font-family: var(--mono); min-width: 40px; }
 .pulse-headline { font-size: 9px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-/* Mobile grid fix */
-@media (max-width: 640px) {
-  .grid-container { grid-template-columns: 1fr !important; }
-  .grid-toolbar { flex-wrap: wrap; gap: 6px; }
-  .grid-toolbar-left, .grid-toolbar-center, .grid-toolbar-right { flex-wrap: wrap; }
-  .header-nav { gap: 6px; flex-wrap: nowrap; overflow-x: auto; }
-  .nav-link { font-size: 9px; padding: 4px 6px; white-space: nowrap; }
-  .chart-wrapper { min-height: 220px; }
-  .ticker-strip { overflow-x: auto; white-space: nowrap; }
-  .sidebar-container { width: 100vw !important; max-width: 100vw; }
+/* ================================================================
+   BLOOMBERG-GRADE RESPONSIVE DESIGN
+   Desktop-first → tablets → mobile
+   ================================================================ */
+
+/* ── Navbar: always scrollable, never wraps ─────────────────────── */
+.header-nav {
+  overflow-x: auto;
+  overflow-y: visible;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  flex-shrink: 1;
+  min-width: 0;
+  white-space: nowrap;
+}
+.header-nav::-webkit-scrollbar { display: none; }
+
+/* ── Grid toolbar: scrollable row on any width ──────────────────── */
+.grid-toolbar {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  flex-wrap: nowrap;
+  height: auto;
+  min-height: 30px;
+  padding: 4px 8px;
+  gap: 8px;
+}
+.grid-toolbar::-webkit-scrollbar { display: none; }
+.grid-toolbar-left, .grid-toolbar-center, .grid-toolbar-right {
+  flex-shrink: 0;
+  flex-wrap: nowrap;
+}
+
+/* ── Chart card: Bloomberg-grade polish ─────────────────────────── */
+.chart-wrapper {
+  min-height: 200px;
+  display: flex;
+  flex-direction: column;
+}
+
+.chart-card-header {
+  flex-shrink: 0;
+}
+
+/* Larger hit targets for mobile */
+.company-link { min-height: 28px; display: inline-flex; align-items: center; }
+
+/* ── Card header: tighter on mobile ────────────────────────────── */
+.card-header-left  { display: flex; align-items: center; gap: 4px; min-width: 0; flex-wrap: wrap; }
+.card-header-right { flex-shrink: 0; text-align: right; }
+
+/* ── OHLC strip: hide on small cards ───────────────────────────── */
+.card-ohlc {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* ── Ticker strip: always scrollable ───────────────────────────── */
+.ticker-strip {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.ticker-strip::-webkit-scrollbar { display: none; }
+.ticker-strip-items { flex-wrap: nowrap; white-space: nowrap; }
+
+/* ── Sidebar: drawer on mobile ──────────────────────────────────── */
+
+/* ── Tablet (≤ 1024px): 2 columns ──────────────────────────────── */
+@media (max-width: 1024px) {
+  .grid-container { grid-template-columns: repeat(2, 1fr) !important; }
+  .header-controls .group-selector { display: none; }
+}
+
+/* ── Mobile (≤ 680px): single column, full redesign ────────────── */
+@media (max-width: 680px) {
+  /* Grid */
+  .grid-container { grid-template-columns: 1fr !important; gap: 6px; padding: 6px; }
+
+  /* Header: compress controls */
+  .header { padding: 0 8px; gap: 6px; }
+  .header-title { font-size: 13px; }
+  .header-title span { font-size: 13px; }
+  .header-controls { gap: 4px; }
+  .header-controls .group-selector,
+  .header-controls .search-input { display: none; }
+
+  /* Show a compact search icon instead */
+  .header-nav { max-width: calc(100vw - 120px); }
+
+  /* Main layout: full width, no sidebar offset */
   .main-content { flex-direction: column; }
+  .sidebar-container {
+    position: fixed;
+    width: 100vw !important;
+    max-width: 100vw;
+    z-index: 800;
+    top: var(--total-header);
+    left: 0;
+    height: calc(100vh - var(--total-header));
+    overflow-y: auto;
+  }
+
+  /* Grid area: full width when sidebar hidden */
+  .grid-area { overflow-x: hidden; }
+
+  /* Chart card: better mobile card */
+  .chart-wrapper { min-height: 260px; border-radius: var(--radius); }
+  .chart-card-header { padding: 8px 10px 6px; }
+  .card-price { font-size: 14px; }
+  .card-change { font-size: 11px; }
+  .company-link { font-size: 13px; }
+
+  /* OHLC: hide on mobile to save space */
+  .card-ohlc { display: none; }
+
+  /* Toolbar: scroll horizontally */
+  .grid-toolbar { padding: 4px 6px; gap: 6px; }
+  .toolbar-btn { height: 24px; padding: 0 9px; font-size: 10px; }
+
+  /* Correlation section */
+  .corr-section { overflow-x: auto; }
+  .corr-matrix-wrap { overflow-x: auto; }
+
+  /* Backtesting layout */
+  .bt-layout { grid-template-columns: 1fr; }
+
+  /* Company page */
+  .cp-main { flex-direction: column; }
+  .cp-sidebar { width: 100% !important; max-height: 280px; overflow-y: auto; }
+  .cp-right { width: 100%; }
+  .key-stats-strip { overflow-x: auto; white-space: nowrap; flex-wrap: nowrap; }
+
+  /* Market pulse: single column */
+  .pulse-items { grid-template-columns: 1fr; }
+
+  /* Heatmap page */
+  .heatmap-container { height: 60vh; }
+
+  /* Screener table: scroll */
+  .screener-table-wrap { overflow-x: auto; }
+  .screener-table { min-width: 700px; }
+
+  /* Watchlist */
+  .wl-layout { flex-direction: column; }
+  .wl-create-row { flex-direction: column; }
 }

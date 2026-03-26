@@ -81,6 +81,17 @@ CORS_ORIGINS = os.getenv(
 ).split(",")
 
 
+_SESSION_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+
+
+def _get_session_id(request: Request) -> str:
+    """Return a validated session UUID from the X-Session-ID header, or 'default'."""
+    sid = request.headers.get("X-Session-ID", "").strip().lower()
+    if sid and _SESSION_RE.match(sid):
+        return sid
+    return "default"
+
+
 def safe_convert(value: str | int | float, target_type: type):
     if value == "N/A" or value is None:
         return None
@@ -96,13 +107,15 @@ def _create_user_tables():
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS watchlists (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
-            name       TEXT    NOT NULL UNIQUE,
+            session_id TEXT    NOT NULL DEFAULT 'default',
+            name       TEXT    NOT NULL,
             tickers    TEXT    NOT NULL DEFAULT '[]',
             created_at TEXT    DEFAULT (datetime('now')),
             updated_at TEXT    DEFAULT (datetime('now'))
         );
         CREATE TABLE IF NOT EXISTS portfolios (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT    NOT NULL DEFAULT 'default',
             name       TEXT    NOT NULL,
             created_at TEXT    DEFAULT (datetime('now'))
         );
@@ -117,6 +130,7 @@ def _create_user_tables():
         );
         CREATE TABLE IF NOT EXISTS alerts (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id   TEXT    NOT NULL DEFAULT 'default',
             ticker       TEXT NOT NULL,
             metric       TEXT NOT NULL,
             condition    TEXT NOT NULL,
@@ -140,7 +154,21 @@ def _create_user_tables():
         CREATE INDEX IF NOT EXISTS idx_stock_data_ticker_date  ON stock_data  (Ticker, Date);
         CREATE INDEX IF NOT EXISTS idx_stock_data_date         ON stock_data  (Date);
         CREATE INDEX IF NOT EXISTS idx_pattern_ticker_date ON pattern_signals (ticker, detected_at);
+        CREATE INDEX IF NOT EXISTS idx_watchlists_session ON watchlists (session_id);
+        CREATE INDEX IF NOT EXISTS idx_portfolios_session ON portfolios (session_id);
+        CREATE INDEX IF NOT EXISTS idx_alerts_session ON alerts (session_id);
     """)
+    # Migrate existing tables that may be missing session_id column
+    for table in ("watchlists", "portfolios", "alerts"):
+        try:
+            conn.execute(
+                f"ALTER TABLE {table} ADD COLUMN session_id TEXT NOT NULL DEFAULT 'default'"
+            )
+            conn.commit()
+            logger.info("Migrated %s: added session_id column", table)
+        except Exception:
+            pass  # Column already exists
+    # Drop old UNIQUE constraint on watchlists.name (name is now unique per session, not globally)
     conn.commit()
     conn.close()
 
@@ -1410,33 +1438,39 @@ async def get_correlations(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+_ALERT_KEYS = [
+    "id",
+    "ticker",
+    "metric",
+    "condition",
+    "threshold",
+    "triggered",
+    "triggered_at",
+    "created_at",
+    "notes",
+]
+
+
 @app.get("/alerts", response_model=list[AlertOut])
 async def list_alerts(request: Request):
+    sid = _get_session_id(request)
     conn = sqlite3.connect(DB_PATH)
     rows = conn.execute(
-        "SELECT id,ticker,metric,condition,threshold,triggered,triggered_at,created_at,notes FROM alerts ORDER BY created_at DESC"
+        "SELECT id,ticker,metric,condition,threshold,triggered,triggered_at,created_at,notes "
+        "FROM alerts WHERE session_id=? ORDER BY created_at DESC",
+        (sid,),
     ).fetchall()
     conn.close()
-    keys = [
-        "id",
-        "ticker",
-        "metric",
-        "condition",
-        "threshold",
-        "triggered",
-        "triggered_at",
-        "created_at",
-        "notes",
-    ]
-    return [dict(zip(keys, r)) for r in rows]
+    return [dict(zip(_ALERT_KEYS, r)) for r in rows]
 
 
 @app.post("/alerts", response_model=AlertOut)
 async def create_alert(request: Request, body: AlertCreate):
+    sid = _get_session_id(request)
     conn = sqlite3.connect(DB_PATH)
     cur = conn.execute(
-        "INSERT INTO alerts (ticker,metric,condition,threshold,notes) VALUES (?,?,?,?,?)",
-        (body.ticker.upper(), body.metric, body.condition, body.threshold, body.notes),
+        "INSERT INTO alerts (session_id,ticker,metric,condition,threshold,notes) VALUES (?,?,?,?,?,?)",
+        (sid, body.ticker.upper(), body.metric, body.condition, body.threshold, body.notes),
     )
     rid = cur.lastrowid
     conn.commit()
@@ -1445,24 +1479,14 @@ async def create_alert(request: Request, body: AlertCreate):
         (rid,),
     ).fetchone()
     conn.close()
-    keys = [
-        "id",
-        "ticker",
-        "metric",
-        "condition",
-        "threshold",
-        "triggered",
-        "triggered_at",
-        "created_at",
-        "notes",
-    ]
-    return dict(zip(keys, row))
+    return dict(zip(_ALERT_KEYS, row))
 
 
 @app.delete("/alerts/{alert_id}")
 async def delete_alert(request: Request, alert_id: int):
+    sid = _get_session_id(request)
     conn = sqlite3.connect(DB_PATH)
-    conn.execute("DELETE FROM alerts WHERE id=?", (alert_id,))
+    conn.execute("DELETE FROM alerts WHERE id=? AND session_id=?", (alert_id, sid))
     conn.commit()
     conn.close()
     return {"ok": True}
@@ -1758,9 +1782,12 @@ def _row_to_watchlist(row) -> dict:
 @app.get("/watchlists", response_model=list[WatchlistOut])
 @limiter.limit("60/minute")
 async def list_watchlists(request: Request):
+    sid = _get_session_id(request)
     conn = sqlite3.connect(DB_PATH)
     rows = conn.execute(
-        "SELECT id, name, tickers, created_at, updated_at FROM watchlists ORDER BY updated_at DESC"
+        "SELECT id, name, tickers, created_at, updated_at FROM watchlists "
+        "WHERE session_id=? ORDER BY updated_at DESC",
+        (sid,),
     ).fetchall()
     conn.close()
     return [_row_to_watchlist(r) for r in rows]
@@ -1769,11 +1796,12 @@ async def list_watchlists(request: Request):
 @app.post("/watchlists", response_model=WatchlistOut)
 @limiter.limit("30/minute")
 async def create_watchlist(request: Request, body: WatchlistCreate):
+    sid = _get_session_id(request)
     conn = sqlite3.connect(DB_PATH)
     try:
         cursor = conn.execute(
-            "INSERT INTO watchlists (name, tickers) VALUES (?, ?)",
-            (body.name, json.dumps(body.tickers)),
+            "INSERT INTO watchlists (session_id, name, tickers) VALUES (?, ?, ?)",
+            (sid, body.name, json.dumps(body.tickers)),
         )
         row_id = cursor.lastrowid
         conn.commit()
@@ -1791,10 +1819,11 @@ async def create_watchlist(request: Request, body: WatchlistCreate):
 @app.get("/watchlists/{wl_id}", response_model=WatchlistOut)
 @limiter.limit("60/minute")
 async def get_watchlist(request: Request, wl_id: int):
+    sid = _get_session_id(request)
     conn = sqlite3.connect(DB_PATH)
     row = conn.execute(
-        "SELECT id, name, tickers, created_at, updated_at FROM watchlists WHERE id = ?",
-        (wl_id,),
+        "SELECT id, name, tickers, created_at, updated_at FROM watchlists WHERE id=? AND session_id=?",
+        (wl_id, sid),
     ).fetchone()
     conn.close()
     if not row:
@@ -1805,15 +1834,16 @@ async def get_watchlist(request: Request, wl_id: int):
 @app.put("/watchlists/{wl_id}", response_model=WatchlistOut)
 @limiter.limit("30/minute")
 async def update_watchlist(request: Request, wl_id: int, body: WatchlistCreate):
+    sid = _get_session_id(request)
     conn = sqlite3.connect(DB_PATH)
     conn.execute(
-        "UPDATE watchlists SET name=?, tickers=?, updated_at=datetime('now') WHERE id=?",
-        (body.name, json.dumps(body.tickers), wl_id),
+        "UPDATE watchlists SET name=?, tickers=?, updated_at=datetime('now') WHERE id=? AND session_id=?",
+        (body.name, json.dumps(body.tickers), wl_id, sid),
     )
     conn.commit()
     row = conn.execute(
-        "SELECT id, name, tickers, created_at, updated_at FROM watchlists WHERE id = ?",
-        (wl_id,),
+        "SELECT id, name, tickers, created_at, updated_at FROM watchlists WHERE id=? AND session_id=?",
+        (wl_id, sid),
     ).fetchone()
     conn.close()
     if not row:
@@ -1824,8 +1854,9 @@ async def update_watchlist(request: Request, wl_id: int, body: WatchlistCreate):
 @app.delete("/watchlists/{wl_id}")
 @limiter.limit("30/minute")
 async def delete_watchlist(request: Request, wl_id: int):
+    sid = _get_session_id(request)
     conn = sqlite3.connect(DB_PATH)
-    conn.execute("DELETE FROM watchlists WHERE id = ?", (wl_id,))
+    conn.execute("DELETE FROM watchlists WHERE id=? AND session_id=?", (wl_id, sid))
     conn.commit()
     conn.close()
     return {"ok": True}
@@ -1834,10 +1865,11 @@ async def delete_watchlist(request: Request, wl_id: int):
 # ── Portfolio ──────────────────────────────────────────────────────────────────
 
 
-def _get_portfolio_with_positions(portfolio_id: int) -> dict | None:
+def _get_portfolio_with_positions(portfolio_id: int, session_id: str = "default") -> dict | None:
     conn = sqlite3.connect(DB_PATH)
     port_row = conn.execute(
-        "SELECT id, name, created_at FROM portfolios WHERE id = ?", (portfolio_id,)
+        "SELECT id, name, created_at FROM portfolios WHERE id=? AND session_id=?",
+        (portfolio_id, session_id),
     ).fetchone()
     if not port_row:
         conn.close()
@@ -1897,8 +1929,11 @@ def _get_portfolio_with_positions(portfolio_id: int) -> dict | None:
 @app.get("/portfolios")
 @limiter.limit("60/minute")
 async def list_portfolios(request: Request):
+    sid = _get_session_id(request)
     conn = sqlite3.connect(DB_PATH)
-    rows = conn.execute("SELECT id, name, created_at FROM portfolios ORDER BY id").fetchall()
+    rows = conn.execute(
+        "SELECT id, name, created_at FROM portfolios WHERE session_id=? ORDER BY id", (sid,)
+    ).fetchall()
     conn.close()
     return [{"id": r[0], "name": r[1], "created_at": r[2]} for r in rows]
 
@@ -1906,18 +1941,22 @@ async def list_portfolios(request: Request):
 @app.post("/portfolios")
 @limiter.limit("30/minute")
 async def create_portfolio(request: Request, body: PortfolioCreate):
+    sid = _get_session_id(request)
     conn = sqlite3.connect(DB_PATH)
-    cursor = conn.execute("INSERT INTO portfolios (name) VALUES (?)", (body.name,))
+    cursor = conn.execute(
+        "INSERT INTO portfolios (session_id, name) VALUES (?, ?)", (sid, body.name)
+    )
     row_id = cursor.lastrowid
     conn.commit()
     conn.close()
-    return _get_portfolio_with_positions(row_id)
+    return _get_portfolio_with_positions(row_id, sid)
 
 
 @app.get("/portfolios/{portfolio_id}", response_model=PortfolioOut)
 @limiter.limit("60/minute")
 async def get_portfolio(request: Request, portfolio_id: int):
-    result = _get_portfolio_with_positions(portfolio_id)
+    sid = _get_session_id(request)
+    result = _get_portfolio_with_positions(portfolio_id, sid)
     if not result:
         raise HTTPException(status_code=404, detail="Portfolio not found")
     return result
@@ -1926,8 +1965,11 @@ async def get_portfolio(request: Request, portfolio_id: int):
 @app.post("/portfolios/{portfolio_id}/positions", response_model=PositionOut)
 @limiter.limit("30/minute")
 async def add_position(request: Request, portfolio_id: int, body: PositionCreate):
+    sid = _get_session_id(request)
     conn = sqlite3.connect(DB_PATH)
-    port = conn.execute("SELECT id FROM portfolios WHERE id = ?", (portfolio_id,)).fetchone()
+    port = conn.execute(
+        "SELECT id FROM portfolios WHERE id=? AND session_id=?", (portfolio_id, sid)
+    ).fetchone()
     if not port:
         conn.close()
         raise HTTPException(status_code=404, detail="Portfolio not found")
@@ -1946,7 +1988,7 @@ async def add_position(request: Request, portfolio_id: int, body: PositionCreate
     pos_id = cursor.lastrowid
     conn.commit()
     conn.close()
-    portfolio = _get_portfolio_with_positions(portfolio_id)
+    portfolio = _get_portfolio_with_positions(portfolio_id, sid)
     pos = next((p for p in portfolio["positions"] if p["id"] == pos_id), None)
     if not pos:
         raise HTTPException(status_code=500, detail="Position creation failed")
@@ -1956,10 +1998,12 @@ async def add_position(request: Request, portfolio_id: int, body: PositionCreate
 @app.put("/portfolios/{portfolio_id}/positions/{pos_id}", response_model=PositionOut)
 @limiter.limit("30/minute")
 async def update_position(request: Request, portfolio_id: int, pos_id: int, body: PositionCreate):
+    sid = _get_session_id(request)
     conn = sqlite3.connect(DB_PATH)
     conn.execute(
         "UPDATE positions SET ticker=?, shares=?, cost_basis=?, purchased_at=?, notes=? "
-        "WHERE id=? AND portfolio_id=?",
+        "WHERE id=? AND portfolio_id=? AND portfolio_id IN "
+        "(SELECT id FROM portfolios WHERE session_id=?)",
         (
             body.ticker.upper(),
             body.shares,
@@ -1968,11 +2012,12 @@ async def update_position(request: Request, portfolio_id: int, pos_id: int, body
             body.notes,
             pos_id,
             portfolio_id,
+            sid,
         ),
     )
     conn.commit()
     conn.close()
-    portfolio = _get_portfolio_with_positions(portfolio_id)
+    portfolio = _get_portfolio_with_positions(portfolio_id, sid)
     pos = next((p for p in portfolio["positions"] if p["id"] == pos_id), None)
     if not pos:
         raise HTTPException(status_code=404, detail="Position not found")
@@ -1982,8 +2027,13 @@ async def update_position(request: Request, portfolio_id: int, pos_id: int, body
 @app.delete("/portfolios/{portfolio_id}/positions/{pos_id}")
 @limiter.limit("30/minute")
 async def delete_position(request: Request, portfolio_id: int, pos_id: int):
+    sid = _get_session_id(request)
     conn = sqlite3.connect(DB_PATH)
-    conn.execute("DELETE FROM positions WHERE id = ? AND portfolio_id = ?", (pos_id, portfolio_id))
+    conn.execute(
+        "DELETE FROM positions WHERE id=? AND portfolio_id=? AND portfolio_id IN "
+        "(SELECT id FROM portfolios WHERE session_id=?)",
+        (pos_id, portfolio_id, sid),
+    )
     conn.commit()
     conn.close()
     return {"ok": True}
@@ -1994,13 +2044,21 @@ async def delete_position(request: Request, portfolio_id: int, pos_id: int):
 async def get_portfolio_chart(
     request: Request, portfolio_id: int, days: int = Query(90, ge=7, le=1825)
 ):
-    cache_key = f"portfolio_chart:{portfolio_id}:{days}"
+    sid = _get_session_id(request)
+    cache_key = f"portfolio_chart:{sid}:{portfolio_id}:{days}"
     cached = redis.get(cache_key)
     if cached:
         return json.loads(cached)
 
     try:
         conn = sqlite3.connect(DB_PATH)
+        # Verify portfolio belongs to this session
+        owns = conn.execute(
+            "SELECT id FROM portfolios WHERE id=? AND session_id=?", (portfolio_id, sid)
+        ).fetchone()
+        if not owns:
+            conn.close()
+            return []
         has_positions = conn.execute(
             "SELECT COUNT(*) FROM positions WHERE portfolio_id = ?", (portfolio_id,)
         ).fetchone()[0]
