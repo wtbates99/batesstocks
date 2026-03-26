@@ -7,6 +7,7 @@ import PresetManager from '../components/PresetManager';
 import KeyboardShortcutsHelp from '../components/KeyboardShortcutsHelp';
 import NavBar from '../components/NavBar';
 import CorrelationMatrix from '../components/CorrelationMatrix';
+import MarketClock from '../components/MarketClock';
 import '../styles.css';
 import { metricsList, groupedMetrics } from '../metricsList';
 
@@ -47,6 +48,29 @@ function useLivePrices(tickers, enabled) {
 
   return { prices, flashing };
 }
+
+const MacroStrip = () => {
+  const [indices, setIndices] = React.useState([]);
+  React.useEffect(() => {
+    fetch('/market-indices').then(r => r.json()).then(setIndices).catch(() => {});
+  }, []);
+  if (!indices.length) return null;
+  return (
+    <div className="macro-strip">
+      {indices.map(idx => (
+        <span key={idx.ticker} className="macro-item">
+          <span className="macro-ticker">{idx.ticker}</span>
+          <span className="macro-price">${idx.price.toFixed(2)}</span>
+          {idx.change_pct != null && (
+            <span className={`macro-chg ${idx.change_pct >= 0 ? 'positive' : 'negative'}`}>
+              {idx.change_pct >= 0 ? '▲' : '▼'}{Math.abs(idx.change_pct).toFixed(2)}%
+            </span>
+          )}
+        </span>
+      ))}
+    </div>
+  );
+};
 
 const MarketPulseWidget = () => {
   const [pulse, setPulse] = React.useState(null);
@@ -330,6 +354,7 @@ const HomePage = () => {
             ))}
           </select>
           <SearchBar />
+          <MarketClock />
           <button
             className="sidebar-toggle-button"
             onClick={() => setTheme((t) => t === 'dark' ? 'light' : 'dark')}
@@ -376,6 +401,7 @@ const HomePage = () => {
           <span className={`market-dot ${marketOpen ? 'open' : 'closed'}`} />
           {marketOpen ? 'OPEN' : 'CLOSED'}
         </div>
+        <MacroStrip />
         <div className="ticker-strip-items">
           {selectedTickers.map((ticker) => {
             const pd = priceData[ticker];

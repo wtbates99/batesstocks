@@ -3,6 +3,25 @@ import { useNavigate } from 'react-router-dom';
 import NavBar from '../components/NavBar';
 import '../styles.css';
 
+function Sparkline({ data, width = 60, height = 24 }) {
+  if (!data || data.length < 2) return <span style={{ color: 'var(--dim)', fontSize: 9 }}>—</span>;
+  const min = Math.min(...data), max = Math.max(...data);
+  const range = max - min || 1;
+  const pts = data.map((v, i) => {
+    const x = (i / (data.length - 1)) * width;
+    const y = height - ((v - min) / range) * height;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+  const last = data[data.length - 1];
+  const first = data[0];
+  const color = last >= first ? '#22c55e' : '#ef4444';
+  return (
+    <svg width={width} height={height} style={{ display: 'block' }}>
+      <polyline points={pts} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 function fmt(key, val) {
   if (val == null) return <span style={{ color: 'var(--dim)' }}>—</span>;
   switch (key) {
@@ -10,8 +29,16 @@ function fmt(key, val) {
     case 'latest_close': return `$${Number(val).toFixed(2)}`;
     case 'pe':           return Number(val).toFixed(1);
     case 'eps':          return `$${Number(val).toFixed(2)}`;
-    case 'beta':         return Number(val).toFixed(2);
-    case 'rsi':          return Number(val).toFixed(1);
+    case 'beta':         return (
+      <span style={{ color: val > 1.5 ? 'var(--red)' : val < 0.5 ? 'var(--cyan)' : 'var(--text)' }}>
+        {Number(val).toFixed(2)}
+      </span>
+    );
+    case 'rsi':          return (
+      <span style={{ color: val > 70 ? 'var(--red)' : val < 30 ? 'var(--green)' : 'var(--text)' }}>
+        {Number(val).toFixed(1)}
+      </span>
+    );
     case 'tech_score':   return (
       <span style={{ color: val >= 70 ? 'var(--green)' : val < 40 ? 'var(--red)' : 'var(--text)' }}>
         {Number(val).toFixed(0)}
@@ -104,6 +131,26 @@ const ScreenerPage = () => {
     });
   }, []);
 
+  const exportCSV = () => {
+    const headers = ['Ticker','Name','Sector','Market Cap','P/E','EPS','Beta','RSI','Price','52W Return','Score'];
+    const rows = filtered.map(r => [
+      r.ticker, r.name || '', r.sector || '',
+      r.market_cap ? (r.market_cap / 1e9).toFixed(2) + 'B' : '',
+      r.pe ? r.pe.toFixed(1) : '',
+      r.eps ? r.eps.toFixed(2) : '',
+      r.beta ? r.beta.toFixed(2) : '',
+      r.rsi ? r.rsi.toFixed(1) : '',
+      r.latest_close ? r.latest_close.toFixed(2) : '',
+      r.return_52w != null ? r.return_52w.toFixed(1) + '%' : '',
+      r.tech_score ? r.tech_score.toFixed(0) : '',
+    ]);
+    const csv = [headers, ...rows].map(r => r.map(v => `"${v}"`).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = 'screener.csv'; a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const clearFilters = () => {
     setFilters({
       sector: '', minPE: '', maxPE: '', minMktCap: '', maxMktCap: '',
@@ -113,6 +160,7 @@ const ScreenerPage = () => {
   };
 
   const colHeaders = [
+    { key: 'spark',       label: 'SPARK',   noSort: true },
     { key: 'ticker',      label: 'TICKER'   },
     { key: 'name',        label: 'NAME'     },
     { key: 'sector',      label: 'SECTOR'   },
@@ -135,6 +183,7 @@ const ScreenerPage = () => {
         </div>
         <div className="header-controls">
           <span className="screener-count">{sorted.length} / {allData.length} stocks</span>
+          <button className="toolbar-btn" onClick={exportCSV} title="Export to CSV">⬇ CSV</button>
         </div>
       </header>
 
@@ -210,11 +259,12 @@ const ScreenerPage = () => {
             <table className="screener-table">
               <thead>
                 <tr>
-                  {colHeaders.map(({ key, label }) => (
+                  {colHeaders.map(({ key, label, noSort }) => (
                     <th
                       key={key}
                       className={`screener-th ${sortKey === key ? 'sort-active' : ''}`}
-                      onClick={() => handleSort(key)}
+                      onClick={() => !noSort && handleSort(key)}
+                      style={noSort ? { cursor: 'default' } : undefined}
                     >
                       {label}
                       {sortKey === key && (
@@ -231,6 +281,7 @@ const ScreenerPage = () => {
                     className="screener-row"
                     onClick={() => navigate(`/spotlight/${row.ticker}`)}
                   >
+                    <td className="screener-td num-cell"><Sparkline data={row.spark} /></td>
                     <td className="screener-td ticker-cell">{row.ticker}</td>
                     <td className="screener-td name-cell">{row.name || '—'}</td>
                     <td className="screener-td">{row.sector || '—'}</td>

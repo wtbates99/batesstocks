@@ -7,6 +7,8 @@ import StockChart from '../components/StockChart';
 import SearchBar from '../components/SearchBar';
 import NavBar from '../components/NavBar';
 import StockRadar from '../components/RadarChart';
+import MarketClock from '../components/MarketClock';
+import TechnicalSummaryPanel from '../components/TechnicalSummary';
 import { metricsList, groupedMetrics } from '../metricsList';
 import '../styles.css';
 
@@ -204,6 +206,7 @@ const CompanyPage = () => {
         <div className="header-controls">
           <NavBar />
           <SearchBar />
+          <MarketClock />
           <Link to="/" className="back-button">← Back</Link>
         </div>
       </header>
@@ -317,6 +320,8 @@ const CompanyPage = () => {
           <div className="cp-radar-section">
             <StockRadar ticker={ticker} />
           </div>
+
+          <TechnicalSummaryPanel ticker={ticker} />
 
           {/* Active metrics legend */}
           {selectedMetrics.length > 0 && (
