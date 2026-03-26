@@ -5,6 +5,8 @@ import CompanyPage from './pages/CompanyPage';
 import HeatmapPage from './pages/HeatmapPage';
 import ScreenerPage from './pages/ScreenerPage';
 import WatchlistPage from './pages/WatchlistPage';
+import CalendarPage from './pages/CalendarPage';
+import MarketPage from './pages/MarketPage';
 
 function App() {
   return (
@@ -16,6 +18,8 @@ function App() {
           <Route path="/heatmap"           element={<HeatmapPage />} />
           <Route path="/screener"          element={<ScreenerPage />} />
           <Route path="/watchlist"         element={<WatchlistPage />} />
+          <Route path="/calendar"          element={<CalendarPage />} />
+          <Route path="/market"            element={<MarketPage />} />
         </Routes>
       </div>
     </Router>

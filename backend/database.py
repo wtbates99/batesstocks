@@ -60,6 +60,8 @@ class CombinedStockData(Base):
     Ticker_Chaikin_MF = Column(Float)
     Ticker_Force_Index = Column(Float)
     Ticker_MFI = Column(Float)
+    Ticker_VWAP = Column(Float)
+    Ticker_Tech_Score = Column(Float)
 
     # Company info
     Sector = Column(String, index=True)

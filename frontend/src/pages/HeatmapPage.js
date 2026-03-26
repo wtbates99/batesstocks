@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Treemap } from 'recharts';
+import { Treemap, BarChart, Bar, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import NavBar from '../components/NavBar';
 import '../styles.css';
 
@@ -79,6 +79,9 @@ const HeatmapPage = () => {
   const [data, setData]     = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError]   = useState(null);
+  const [view, setView] = useState('heatmap');
+  const [rotationData, setRotationData] = useState([]);
+  const [rotDays, setRotDays] = useState(90);
 
   // Measure container so Treemap gets explicit pixel dimensions
   useEffect(() => {
@@ -119,6 +122,14 @@ const HeatmapPage = () => {
   }, []);
 
   useEffect(() => { fetchData('sector', null, null); }, [fetchData]);
+
+  useEffect(() => {
+    if (view !== 'rotation') return;
+    fetch(`/sector-rotation?days=${rotDays}`)
+      .then(r => r.json())
+      .then(d => setRotationData(Array.isArray(d) ? d : []))
+      .catch(() => {});
+  }, [view, rotDays]);
 
   const handleNodeClick = useCallback(({ name, ticker }) => {
     if (level === 'sector') {
@@ -164,47 +175,81 @@ const HeatmapPage = () => {
       </header>
 
       <div className="heatmap-body">
-        {/* Breadcrumb */}
+        {/* View toggle */}
         <div className="heatmap-breadcrumb">
-          <button className="breadcrumb-item" onClick={() => goToLevel('sector')}>S&amp;P 500</button>
-          {activeSector && (
+          <button className={`breadcrumb-item ${view === 'heatmap' ? 'active' : ''}`} onClick={() => setView('heatmap')}>HEATMAP</button>
+          <span className="breadcrumb-sep">|</span>
+          <button className={`breadcrumb-item ${view === 'rotation' ? 'active' : ''}`} onClick={() => setView('rotation')}>SECTOR ROTATION</button>
+          {view === 'rotation' && (
             <>
-              <span className="breadcrumb-sep">›</span>
-              <button className="breadcrumb-item" onClick={() => goToLevel('subsector')}>{activeSector}</button>
+              <span className="breadcrumb-sep">|</span>
+              {[30, 90, 180, 365].map(d => (
+                <button key={d} className={`breadcrumb-item ${rotDays===d?'active':''}`} onClick={() => setRotDays(d)}>{d}D</button>
+              ))}
             </>
           )}
-          {activeSubsector && (
-            <>
-              <span className="breadcrumb-sep">›</span>
-              <span className="breadcrumb-item active">{activeSubsector}</span>
-            </>
-          )}
-          <span className="breadcrumb-hint">
-            {level === 'sector'    && '· click sector to drill down'}
-            {level === 'subsector' && '· click subsector to drill down'}
-            {level === 'stock'     && '· click ticker to view spotlight'}
-          </span>
         </div>
 
-        {/* Treemap container — measured by ResizeObserver */}
-        <div className="heatmap-treemap" ref={containerRef}>
-          {loading && (
-            <div className="heatmap-overlay">Loading…</div>
-          )}
-          {!loading && error && (
-            <div className="heatmap-overlay heatmap-error">{error}</div>
-          )}
-          {!loading && !error && data.length > 0 && dims.width > 0 && dims.height > 0 && (
-            <Treemap
-              width={dims.width}
-              height={dims.height}
-              data={data}
-              dataKey="value"
-              isAnimationActive={false}
-              content={(props) => <TreeNode {...props} onClick={handleNodeClick} />}
-            />
-          )}
-        </div>
+        {view === 'rotation' ? (
+          <div className="rotation-chart-wrap" style={{ margin: '12px 16px' }}>
+            <ResponsiveContainer width="100%" height={Math.max(240, rotationData.length * 32)}>
+              <BarChart data={rotationData} layout="vertical" margin={{ top: 4, right: 60, bottom: 4, left: 120 }}>
+                <XAxis type="number" tick={{ fill: '#3e3e58', fontSize: 9, fontFamily: 'JetBrains Mono, Fira Code, monospace' }} tickFormatter={v => `${v > 0 ? '+' : ''}${v?.toFixed(1)}%`} axisLine={false} tickLine={false} />
+                <YAxis type="category" dataKey="sector" tick={{ fill: '#8b8ba7', fontSize: 9, fontFamily: 'JetBrains Mono, Fira Code, monospace' }} axisLine={false} tickLine={false} width={116} />
+                <Tooltip formatter={(v) => [`${v > 0 ? '+' : ''}${v?.toFixed(2)}%`, 'Return']} contentStyle={{ background: 'var(--surface-2)', border: '1px solid var(--border)', fontSize: 10 }} />
+                <Bar dataKey="return_pct" radius={[0, 3, 3, 0]}>
+                  {rotationData.map((entry, i) => (
+                    <Cell key={i} fill={entry.return_pct >= 0 ? '#22c55e' : '#ef4444'} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        ) : null}
+
+        {/* Breadcrumb + Treemap (heatmap view) */}
+        {view === 'heatmap' && <>
+          <div className="heatmap-breadcrumb">
+            <button className="breadcrumb-item" onClick={() => goToLevel('sector')}>S&amp;P 500</button>
+            {activeSector && (
+              <>
+                <span className="breadcrumb-sep">›</span>
+                <button className="breadcrumb-item" onClick={() => goToLevel('subsector')}>{activeSector}</button>
+              </>
+            )}
+            {activeSubsector && (
+              <>
+                <span className="breadcrumb-sep">›</span>
+                <span className="breadcrumb-item active">{activeSubsector}</span>
+              </>
+            )}
+            <span className="breadcrumb-hint">
+              {level === 'sector'    && '· click sector to drill down'}
+              {level === 'subsector' && '· click subsector to drill down'}
+              {level === 'stock'     && '· click ticker to view spotlight'}
+            </span>
+          </div>
+
+          {/* Treemap container — measured by ResizeObserver */}
+          <div className="heatmap-treemap" ref={containerRef}>
+            {loading && (
+              <div className="heatmap-overlay">Loading…</div>
+            )}
+            {!loading && error && (
+              <div className="heatmap-overlay heatmap-error">{error}</div>
+            )}
+            {!loading && !error && data.length > 0 && dims.width > 0 && dims.height > 0 && (
+              <Treemap
+                width={dims.width}
+                height={dims.height}
+                data={data}
+                dataKey="value"
+                isAnimationActive={false}
+                content={(props) => <TreeNode {...props} onClick={handleNodeClick} />}
+              />
+            )}
+          </div>
+        </>}
       </div>
     </div>
   );
