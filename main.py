@@ -183,16 +183,29 @@ async def lifespan(app: FastAPI):
         pipeline_status["phase"] = "complete"
         await build_search_index()
 
-    # Daily incremental refresh at 18:30 ET (after market close)
+    # Every 15 min during market hours (9:30–16:00 ET, Mon–Fri)
+    # Every hour off-hours for catch-up / after-hours data
     scheduler = BackgroundScheduler(timezone="US/Eastern")
     scheduler.add_job(
+        run_intraday_update,
+        CronTrigger(day_of_week="mon-fri", hour="9-15", minute="*/15", timezone="US/Eastern"),
+        id="market_hours_update",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        run_intraday_update,
+        CronTrigger(day_of_week="mon-fri", hour=16, minute=0, timezone="US/Eastern"),
+        id="market_close_update",
+        replace_existing=True,
+    )
+    scheduler.add_job(
         run_daily_update,
-        CronTrigger(hour=18, minute=30, timezone="US/Eastern"),
-        id="daily_update",
+        CronTrigger(minute=0, timezone="US/Eastern"),
+        id="hourly_update",
         replace_existing=True,
     )
     scheduler.start()
-    logger.info("Scheduler started — daily update at 18:30 US/Eastern")
+    logger.info("Scheduler started — intraday every 15 min (9–16 ET M-F), hourly off-hours")
 
     yield
 
@@ -463,6 +476,73 @@ def _evaluate_alerts(conn: sqlite3.Connection):
         except Exception as e:
             logger.warning("Alert eval error id=%s: %s", aid, e)
     conn.commit()
+
+
+def run_intraday_update():
+    """Refresh today's live prices — deletes today's rows and re-fetches the current bar.
+
+    Runs every 15 min during market hours so intraday prices + all signals stay current.
+    All technical indicators, pattern signals, and alerts are recomputed on each run.
+    """
+    if pipeline_status["running"]:
+        logger.info("Intraday update skipped: pipeline already running")
+        return
+
+    pipeline_status.update({"running": True, "phase": "intraday_update", "loaded": 0, "total": 0})
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        tickers = [
+            r[0] for r in conn.execute("SELECT DISTINCT Ticker FROM stock_information").fetchall()
+        ]
+        if not tickers:
+            conn.close()
+            pipeline_status["phase"] = "complete"
+            return
+
+        today = datetime.date.today().isoformat()
+        # Delete today's stale rows so we can re-insert fresh ones
+        conn.execute("DELETE FROM stock_data WHERE Date >= ?", (today,))
+        conn.commit()
+
+        data = yf.download(
+            tickers,
+            start=today,
+            interval="1d",
+            group_by="ticker",
+            auto_adjust=True,
+            progress=False,
+        )
+        if data is None or data.empty:
+            logger.info("Intraday update: no data returned for %s", today)
+            conn.close()
+            pipeline_status["phase"] = "complete"
+            return
+
+        result = data.stack(level=0, future_stack=True).reset_index()
+        if result.empty:
+            conn.close()
+            pipeline_status["phase"] = "complete"
+            return
+
+        result.to_sql("stock_data", conn, if_exists="append", index=False)
+        new_rows = len(result)
+        logger.info("Intraday update: inserted %d rows for %s", new_rows, today)
+
+        process_stock_data(conn)
+        create_signal_views(conn)
+        detect_patterns(conn)
+        _evaluate_alerts(conn)
+        conn.close()
+        _flush_stock_cache()
+        _build_search_index_sync()
+        logger.info("Intraday update complete — indicators, patterns, alerts recomputed")
+
+        pipeline_status["phase"] = "complete"
+    except Exception as e:
+        logger.error("Intraday update error: %s", e)
+        pipeline_status["phase"] = "error"
+    finally:
+        pipeline_status["running"] = False
 
 
 def run_daily_update():
