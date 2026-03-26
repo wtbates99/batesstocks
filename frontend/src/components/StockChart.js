@@ -125,7 +125,7 @@ const StockChart = memo(({ initialTicker, startDate, endDate, metrics, metricsLi
     }
 
     const end   = new Date().toISOString().split('T')[0];
-    const start = new Date(Date.now() - 5 * 365 * 86400000).toISOString().split('T')[0];
+    const start = new Date(Date.now() - 2 * 365 * 86400000).toISOString().split('T')[0];
     const metricsParam = metricsList.map((m) => m.name).join(',');
 
     fetch(`/stock/${initialTicker}?start_date=${start}&end_date=${end}&metrics=${metricsParam}`)

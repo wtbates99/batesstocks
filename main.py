@@ -32,7 +32,7 @@ from slowapi.util import get_remote_address
 from sqlalchemy import select
 
 from backend.data_manipulation import process_stock_data
-from backend.data_pull import fetch_write_financial_data, get_sp500_table
+from backend.data_pull import fetch_incremental_ohlcv, fetch_write_financial_data, get_sp500_table
 from backend.database import CombinedStockData, database
 from backend.models import (
     CompanyInfo,
@@ -104,6 +104,9 @@ def _create_user_tables():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global redis
+    from apscheduler.schedulers.background import BackgroundScheduler
+    from apscheduler.triggers.cron import CronTrigger
+
     await database.connect()
     _create_user_tables()
 
@@ -135,7 +138,21 @@ async def lifespan(app: FastAPI):
     else:
         pipeline_status["phase"] = "complete"
         await build_search_index()
+
+    # Daily incremental refresh at 18:30 ET (after market close)
+    scheduler = BackgroundScheduler(timezone="US/Eastern")
+    scheduler.add_job(
+        run_daily_update,
+        CronTrigger(hour=18, minute=30, timezone="US/Eastern"),
+        id="daily_update",
+        replace_existing=True,
+    )
+    scheduler.start()
+    logger.info("Scheduler started — daily update at 18:30 US/Eastern")
+
     yield
+
+    scheduler.shutdown(wait=False)
     await database.disconnect()
     redis.close()
 
@@ -369,6 +386,58 @@ def run_full_pipeline():
         pipeline_status["running"] = False
 
 
+def _flush_stock_cache():
+    """Evict all stock/heatmap/screener entries from Redis so fresh data is served."""
+    try:
+        for pattern in ("stock_data:*", "heatmap:*", "groupings:*", "screener:*"):
+            keys = redis.keys(pattern)
+            if keys:
+                redis.delete(*keys)
+        logger.info("Redis cache flushed after daily update")
+    except Exception as e:
+        logger.warning("Cache flush failed: %s", e)
+
+
+def run_daily_update():
+    """Incremental daily refresh — appends only new OHLCV rows since the last stored date."""
+    if pipeline_status["running"]:
+        logger.info("Daily update skipped: pipeline already running")
+        return
+
+    pipeline_status.update({"running": True, "phase": "daily_update", "loaded": 0, "total": 0})
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT DISTINCT Ticker FROM stock_information")
+        tickers = [row[0] for row in cursor.fetchall()]
+
+        if not tickers:
+            logger.info("No tickers in stock_information — daily update skipped")
+            conn.close()
+            return
+
+        pipeline_status["total"] = len(tickers)
+        new_rows = fetch_incremental_ohlcv(conn, tickers)
+
+        if new_rows > 0:
+            process_stock_data(conn)
+            create_signal_views(conn)
+            conn.close()
+            _flush_stock_cache()
+            _build_search_index_sync()
+            logger.info("Daily update complete: %d new rows, %d tickers", new_rows, len(tickers))
+        else:
+            conn.close()
+            logger.info("Daily update: no new data to process")
+
+        pipeline_status["phase"] = "complete"
+    except Exception as e:
+        logger.error("Daily update error: %s", e)
+        pipeline_status["phase"] = "error"
+    finally:
+        pipeline_status["running"] = False
+
+
 def _db_has_data() -> bool:
     try:
         conn = sqlite3.connect(DB_PATH)
@@ -448,9 +517,7 @@ def _get_ip_conn() -> sqlite3.Connection:
 
 def ip_has_requests(ip: str) -> bool:
     conn = _get_ip_conn()
-    row = conn.execute(
-        "SELECT requests_used FROM ip_requests WHERE ip = ?", (ip,)
-    ).fetchone()
+    row = conn.execute("SELECT requests_used FROM ip_requests WHERE ip = ?", (ip,)).fetchone()
     if row is None:
         return True
     return row[0] < IP_REQUEST_LIMIT

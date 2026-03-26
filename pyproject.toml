@@ -23,6 +23,7 @@ dependencies = [
     "python-dateutil==2.9.0.post0",
     "python-dotenv>=1.0.0",
     "slowapi>=0.1.9",
+    "apscheduler>=3.10.0,<4.0",
 ]
 
 [dependency-groups]

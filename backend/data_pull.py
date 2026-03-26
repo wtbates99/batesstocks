@@ -1,5 +1,7 @@
 import concurrent.futures
+import datetime as dt
 import logging
+import sqlite3
 
 import pandas as pd
 import yfinance as yf
@@ -20,8 +22,14 @@ def fetch_write_financial_data(conn, table, tickers, append=False):
     filtered = table[table["Symbol"].isin(set(tickers))].copy()
 
     def quant_data():
+        start_date = (dt.date.today() - dt.timedelta(days=2 * 365)).isoformat()
         data = yf.download(
-            tickers, interval="1d", group_by="ticker", auto_adjust=True, progress=False
+            tickers,
+            start=start_date,
+            interval="1d",
+            group_by="ticker",
+            auto_adjust=True,
+            progress=False,
         )
         result = data.stack(level=0, future_stack=True).reset_index()
         result.to_sql("stock_data", conn, if_exists=if_exists, index=False)
@@ -98,3 +106,52 @@ def fetch_write_financial_data(conn, table, tickers, append=False):
 
     qual_data()
     quant_data()
+
+
+def fetch_incremental_ohlcv(conn: sqlite3.Connection, tickers: list[str]) -> int:
+    """Download only new OHLCV rows since the latest date already in stock_data.
+
+    Returns the number of new rows appended (0 if already up-to-date).
+    """
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT MAX(Date) FROM stock_data")
+        latest_str = cursor.fetchone()[0]
+    except Exception as e:
+        logger.warning("Could not query latest date from stock_data: %s", e)
+        return 0
+
+    if not latest_str:
+        logger.info("stock_data is empty — skipping incremental update")
+        return 0
+
+    latest_date = dt.date.fromisoformat(str(latest_str)[:10])
+    start = (latest_date + dt.timedelta(days=1)).isoformat()
+    end = dt.date.today().isoformat()
+
+    if start > end:
+        logger.info("Data already up to date (latest: %s)", latest_date)
+        return 0
+
+    logger.info("Fetching incremental OHLCV %s → %s for %d tickers", start, end, len(tickers))
+    data = yf.download(
+        tickers,
+        start=start,
+        end=end,
+        interval="1d",
+        group_by="ticker",
+        auto_adjust=True,
+        progress=False,
+    )
+
+    if data is None or data.empty:
+        logger.info("No new data available for %s → %s", start, end)
+        return 0
+
+    result = data.stack(level=0, future_stack=True).reset_index()
+    if result.empty:
+        return 0
+
+    result.to_sql("stock_data", conn, if_exists="append", index=False)
+    logger.info("Appended %d new rows to stock_data", len(result))
+    return len(result)
