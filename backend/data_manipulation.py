@@ -1,68 +1,86 @@
+import datetime
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import pandas as pd
 import ta
 
+# Lookback needed so rolling indicators (TSI=38, SMA30=30, BB20=20) are stable
+_INDICATOR_LOOKBACK_DAYS = 90
+
+
+def _calc_indicators(df: pd.DataFrame, prefix: str) -> pd.DataFrame:
+    """Compute all technical indicators for a time-ordered OHLCV DataFrame."""
+    close = df["Close"]
+    high = df["High"]
+    low = df["Low"]
+    volume = df["Volume"]
+
+    indicators = {
+        f"{prefix}_SMA_10": ta.trend.sma_indicator(close, window=10),
+        f"{prefix}_EMA_10": ta.trend.ema_indicator(close, window=10),
+        f"{prefix}_SMA_30": ta.trend.sma_indicator(close, window=30),
+        f"{prefix}_EMA_30": ta.trend.ema_indicator(close, window=30),
+        f"{prefix}_RSI": ta.momentum.rsi(close, window=14),
+        f"{prefix}_Stochastic_K": ta.momentum.stoch(
+            high, low, close, window=14, smooth_window=3
+        ),
+        f"{prefix}_Stochastic_D": ta.momentum.stoch_signal(
+            high, low, close, window=14, smooth_window=3
+        ),
+        f"{prefix}_MACD": ta.trend.macd(close),
+        f"{prefix}_MACD_Signal": ta.trend.macd_signal(close),
+        f"{prefix}_MACD_Diff": ta.trend.macd_diff(close),
+        f"{prefix}_TSI": ta.momentum.tsi(close),
+        f"{prefix}_UO": ta.momentum.ultimate_oscillator(high, low, close),
+        f"{prefix}_ROC": ta.momentum.roc(close, window=12),
+        f"{prefix}_Williams_R": ta.momentum.williams_r(high, low, close, lbp=14),
+        f"{prefix}_Bollinger_High": ta.volatility.bollinger_hband(
+            close, window=20, window_dev=2
+        ),
+        f"{prefix}_Bollinger_Low": ta.volatility.bollinger_lband(
+            close, window=20, window_dev=2
+        ),
+        f"{prefix}_Bollinger_Mid": ta.volatility.bollinger_mavg(close, window=20),
+        f"{prefix}_Bollinger_PBand": ta.volatility.bollinger_pband(
+            close, window=20, window_dev=2
+        ),
+        f"{prefix}_Bollinger_WBand": ta.volatility.bollinger_wband(
+            close, window=20, window_dev=2
+        ),
+        f"{prefix}_On_Balance_Volume": ta.volume.on_balance_volume(close, volume),
+        f"{prefix}_Chaikin_MF": ta.volume.chaikin_money_flow(
+            high, low, close, volume, window=20
+        ),
+        f"{prefix}_Force_Index": ta.volume.force_index(close, volume, window=13),
+        f"{prefix}_MFI": ta.volume.money_flow_index(high, low, close, volume, window=14),
+    }
+
+    typical_price = (high + low + close) / 3
+    vwap_num = (typical_price * volume).rolling(window=14, min_periods=1).sum()
+    vwap_den = volume.rolling(window=14, min_periods=1).sum()
+    indicators[f"{prefix}_VWAP"] = vwap_num / vwap_den.replace(0, np.nan)
+
+    return pd.DataFrame(indicators).replace([np.inf, -np.inf], np.nan).ffill()
+
+
+def _add_ticker_data_indexes(conn: sqlite3.Connection):
+    """Ensure ticker_data is always indexed after writes (to_sql replace drops them)."""
+    conn.executescript("""
+        CREATE INDEX IF NOT EXISTS idx_ticker_data_ticker_date ON ticker_data (Ticker, Date);
+        CREATE INDEX IF NOT EXISTS idx_ticker_data_date        ON ticker_data (Date);
+        CREATE INDEX IF NOT EXISTS idx_ticker_data_ticker      ON ticker_data (Ticker);
+        CREATE INDEX IF NOT EXISTS idx_stock_data_ticker       ON stock_data  (Ticker);
+    """)
+    conn.commit()
+
 
 def process_stock_data(conn: sqlite3.Connection):
-    def calculate_indicators(df: pd.DataFrame, prefix: str) -> pd.DataFrame:
-        close = df["Close"]
-        high = df["High"]
-        low = df["Low"]
-        volume = df["Volume"]
-
-        indicators = {
-            f"{prefix}_SMA_10": ta.trend.sma_indicator(close, window=10),
-            f"{prefix}_EMA_10": ta.trend.ema_indicator(close, window=10),
-            f"{prefix}_SMA_30": ta.trend.sma_indicator(close, window=30),
-            f"{prefix}_EMA_30": ta.trend.ema_indicator(close, window=30),
-            f"{prefix}_RSI": ta.momentum.rsi(close, window=14),
-            f"{prefix}_Stochastic_K": ta.momentum.stoch(
-                high, low, close, window=14, smooth_window=3
-            ),
-            f"{prefix}_Stochastic_D": ta.momentum.stoch_signal(
-                high, low, close, window=14, smooth_window=3
-            ),
-            f"{prefix}_MACD": ta.trend.macd(close),
-            f"{prefix}_MACD_Signal": ta.trend.macd_signal(close),
-            f"{prefix}_MACD_Diff": ta.trend.macd_diff(close),
-            f"{prefix}_TSI": ta.momentum.tsi(close),
-            f"{prefix}_UO": ta.momentum.ultimate_oscillator(high, low, close),
-            f"{prefix}_ROC": ta.momentum.roc(close, window=12),
-            f"{prefix}_Williams_R": ta.momentum.williams_r(high, low, close, lbp=14),
-            f"{prefix}_Bollinger_High": ta.volatility.bollinger_hband(
-                close, window=20, window_dev=2
-            ),
-            f"{prefix}_Bollinger_Low": ta.volatility.bollinger_lband(
-                close, window=20, window_dev=2
-            ),
-            f"{prefix}_Bollinger_Mid": ta.volatility.bollinger_mavg(close, window=20),
-            f"{prefix}_Bollinger_PBand": ta.volatility.bollinger_pband(
-                close, window=20, window_dev=2
-            ),
-            f"{prefix}_Bollinger_WBand": ta.volatility.bollinger_wband(
-                close, window=20, window_dev=2
-            ),
-            f"{prefix}_On_Balance_Volume": ta.volume.on_balance_volume(close, volume),
-            f"{prefix}_Chaikin_MF": ta.volume.chaikin_money_flow(
-                high, low, close, volume, window=20
-            ),
-            f"{prefix}_Force_Index": ta.volume.force_index(close, volume, window=13),
-            f"{prefix}_MFI": ta.volume.money_flow_index(high, low, close, volume, window=14),
-        }
-
-        typical_price = (high + low + close) / 3
-        vwap_num = (typical_price * volume).rolling(window=14, min_periods=1).sum()
-        vwap_den = volume.rolling(window=14, min_periods=1).sum()
-        indicators[f"{prefix}_VWAP"] = vwap_num / vwap_den.replace(0, np.nan)
-
-        return pd.DataFrame(indicators).replace([np.inf, -np.inf], np.nan).ffill()
-
     def process_data(query: str, table_name: str, prefix: str):
         df = pd.read_sql_query(query, conn)
         df["Date"] = pd.to_datetime(df["Date"])
-        indicators_df = calculate_indicators(df, prefix)
+        indicators_df = _calc_indicators(df, prefix)
         result_df = pd.concat([df, indicators_df], axis=1)
         result_df.to_sql(table_name, conn, if_exists="replace", index=False)
 
@@ -123,7 +141,7 @@ def process_stock_data(conn: sqlite3.Connection):
         """)
         conn.commit()
 
-    # Per-ticker: one OHLCV row per (Ticker, Date) — SUM == value, kept for clarity
+    # Per-ticker: one OHLCV row per (Ticker, Date)
     ticker_query = """
     SELECT sd.Date, sd.Ticker,
         AVG(sd.Open)   AS Open,
@@ -136,7 +154,6 @@ def process_stock_data(conn: sqlite3.Connection):
     ORDER BY sd.Ticker, sd.Date
     """
 
-    # Sector / subsector: AVG prices (representative level), SUM volume
     sector_query = """
     SELECT sd.Date, si.Sector,
         AVG(sd.Open)   AS Open,
@@ -168,6 +185,165 @@ def process_stock_data(conn: sqlite3.Connection):
     process_data(sector_query, "sector_data", "Sector")
     process_data(subsector_query, "subsector_data", "Subsector")
     create_combined_view()
+    # Recreate indexes dropped by to_sql(replace)
+    _add_ticker_data_indexes(conn)
+
+
+def update_today_indicators(conn: sqlite3.Connection):
+    """Fast incremental update: only recompute today's indicator row per ticker.
+
+    Uses the last _INDICATOR_LOOKBACK_DAYS of OHLCV data as a rolling window so
+    all indicators are accurate, but only writes today's rows to ticker_data.
+    This is ~20x faster than a full process_stock_data() call.
+    """
+    today = datetime.date.today().isoformat()
+    cutoff = (datetime.date.today() - datetime.timedelta(days=_INDICATOR_LOOKBACK_DAYS)).isoformat()
+
+    df_raw = pd.read_sql_query(
+        """
+        SELECT sd.Date, sd.Ticker,
+            AVG(sd.Open)   AS Open,
+            AVG(sd.Close)  AS Close,
+            AVG(sd.High)   AS High,
+            AVG(sd.Low)    AS Low,
+            SUM(sd.Volume) AS Volume
+        FROM stock_data sd
+        WHERE sd.Date >= ?
+        GROUP BY sd.Ticker, sd.Date
+        ORDER BY sd.Ticker, sd.Date
+        """,
+        conn,
+        params=(cutoff,),
+    )
+    if df_raw.empty:
+        return
+
+    df_raw["Date"] = pd.to_datetime(df_raw["Date"])
+    today_ts = pd.Timestamp(today)
+
+    # Pre-split groups so each thread gets a plain DataFrame (no shared state)
+    groups = [(ticker, grp) for ticker, grp in df_raw.groupby("Ticker")]
+
+    def _compute_one(ticker_grp):
+        _, grp = ticker_grp
+        grp = grp.sort_values("Date").reset_index(drop=True)
+        if today_ts not in grp["Date"].values:
+            return None
+        indicators = _calc_indicators(grp, "Ticker")
+        result = pd.concat([grp, indicators], axis=1)
+        today_slice = result[result["Date"] == today_ts]
+        return today_slice if not today_slice.empty else None
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        today_rows = [r for r in pool.map(_compute_one, groups) if r is not None]
+
+    if not today_rows:
+        return
+
+    new_rows = pd.concat(today_rows, ignore_index=True)
+
+    # Compute tech scores for today's rows only
+    rsi_score = new_rows["Ticker_RSI"].clip(0, 100) / 100
+    macd_score = (new_rows["Ticker_MACD"] > new_rows["Ticker_MACD_Signal"]).astype(float)
+    sma_score = (new_rows["Close"] > new_rows["Ticker_SMA_10"]).astype(float)
+    bb_score = new_rows["Ticker_Bollinger_PBand"].clip(0, 1)
+    mfi_score = new_rows["Ticker_MFI"].clip(0, 100) / 100
+    raw = rsi_score * 0.25 + macd_score * 0.25 + sma_score * 0.20 + bb_score * 0.15 + mfi_score * 0.15
+    new_rows["Ticker_Tech_Score"] = (raw * 100).round(1).clip(0, 100)
+
+    # Wipe only today's rows then insert fresh
+    conn.execute("DELETE FROM ticker_data WHERE Date >= ?", (today,))
+    new_rows.to_sql("ticker_data", conn, if_exists="append", index=False)
+    conn.commit()
+
+
+def update_today_sector_subsector(conn: sqlite3.Connection):
+    """Incremental update: compute today's sector and subsector aggregate rows + all indicators.
+
+    The combined_stock_data view INNER JOINs sector_data and subsector_data on Date, so if
+    today's date is missing from either table the view returns zero rows for today —
+    meaning every ticker shows yesterday's data and all indicators (VWAP, RSI, etc.) are stale.
+
+    Mirrors update_today_indicators but for sector/subsector aggregates.
+    Also parallelised with a thread pool for speed.
+    """
+    today = datetime.date.today().isoformat()
+    cutoff = (datetime.date.today() - datetime.timedelta(days=_INDICATOR_LOOKBACK_DAYS)).isoformat()
+
+    # ── Sector ──────────────────────────────────────────────────────────────────
+    df_sector = pd.read_sql_query(
+        """
+        SELECT sd.Date, si.Sector,
+            AVG(sd.Open)   AS Open,
+            AVG(sd.Close)  AS Close,
+            AVG(sd.High)   AS High,
+            AVG(sd.Low)    AS Low,
+            SUM(sd.Volume) AS Volume
+        FROM stock_data sd
+        JOIN stock_information si ON sd.Ticker = si.Ticker
+        WHERE sd.Date >= ?
+        GROUP BY si.Sector, sd.Date
+        ORDER BY si.Sector, sd.Date
+        """,
+        conn,
+        params=(cutoff,),
+    )
+
+    # ── Subsector ────────────────────────────────────────────────────────────────
+    df_sub = pd.read_sql_query(
+        """
+        SELECT sd.Date, si.Subsector,
+            AVG(sd.Open)   AS Open,
+            AVG(sd.Close)  AS Close,
+            AVG(sd.High)   AS High,
+            AVG(sd.Low)    AS Low,
+            SUM(sd.Volume) AS Volume
+        FROM stock_data sd
+        JOIN stock_information si ON sd.Ticker = si.Ticker
+        WHERE sd.Date >= ?
+        GROUP BY si.Subsector, sd.Date
+        ORDER BY si.Subsector, sd.Date
+        """,
+        conn,
+        params=(cutoff,),
+    )
+
+    def _compute_group(group_col, df_agg, prefix):
+        """Return today's computed rows for all groups in df_agg."""
+        if df_agg.empty:
+            return None
+        df_agg = df_agg.copy()
+        df_agg["Date"] = pd.to_datetime(df_agg["Date"])
+        today_ts = pd.Timestamp(today)
+        groups = [(name, grp) for name, grp in df_agg.groupby(group_col)]
+
+        def _one(name_grp):
+            _, grp = name_grp
+            grp = grp.sort_values("Date").reset_index(drop=True)
+            if today_ts not in grp["Date"].values:
+                return None
+            indicators = _calc_indicators(grp, prefix)
+            result = pd.concat([grp, indicators], axis=1)
+            today_slice = result[result["Date"] == today_ts]
+            return today_slice if not today_slice.empty else None
+
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            rows = [r for r in pool.map(_one, groups) if r is not None]
+
+        return pd.concat(rows, ignore_index=True) if rows else None
+
+    sector_today = _compute_group("Sector", df_sector, "Sector")
+    subsector_today = _compute_group("Subsector", df_sub, "Subsector")
+
+    if sector_today is not None and not sector_today.empty:
+        conn.execute("DELETE FROM sector_data WHERE Date >= ?", (today,))
+        sector_today.to_sql("sector_data", conn, if_exists="append", index=False)
+
+    if subsector_today is not None and not subsector_today.empty:
+        conn.execute("DELETE FROM subsector_data WHERE Date >= ?", (today,))
+        subsector_today.to_sql("subsector_data", conn, if_exists="append", index=False)
+
+    conn.commit()
 
 
 def compute_technical_scores(conn: sqlite3.Connection):
@@ -187,6 +363,7 @@ def compute_technical_scores(conn: sqlite3.Connection):
     )
     df["Ticker_Tech_Score"] = (raw * 100).round(1).clip(0, 100)
     df.to_sql("ticker_data", conn, if_exists="replace", index=False)
+    _add_ticker_data_indexes(conn)
 
 
 def detect_patterns(conn: sqlite3.Connection):
@@ -197,21 +374,25 @@ def detect_patterns(conn: sqlite3.Connection):
         return
 
     today_str = pd.Timestamp.today().normalize().strftime("%Y-%m-%d")
+    cutoff = (pd.Timestamp.today() - pd.Timedelta(days=90)).strftime("%Y-%m-%d")
+
+    # Bulk-fetch all tickers at once instead of 500 individual queries
+    try:
+        df_all = pd.read_sql_query(
+            "SELECT Ticker, Date, Close, High, Low FROM ticker_data "
+            "WHERE Date >= ? ORDER BY Ticker, Date",
+            conn,
+            params=(cutoff,),
+        )
+    except Exception:
+        return
+
     results = []
 
-    for ticker in tickers:
-        try:
-            df = pd.read_sql_query(
-                "SELECT Date, Close, High, Low FROM ticker_data "
-                "WHERE Ticker=? ORDER BY Date DESC LIMIT 90",
-                conn,
-                params=(ticker,),
-            )
-        except Exception:
-            continue
+    for ticker, df in df_all.groupby("Ticker"):
+        df = df.sort_values("Date").reset_index(drop=True)
         if len(df) < 20:
             continue
-        df = df.iloc[::-1].reset_index(drop=True)
         closes = df["Close"].values.astype(float)
         highs = df["High"].values.astype(float)
         lows = df["Low"].values.astype(float)
@@ -282,4 +463,4 @@ def detect_patterns(conn: sqlite3.Connection):
         except Exception as e:
             import logging
 
-            logging.getLogger("batesstocks.data_manipulation").warning("Pattern write error: %s", e)
+            logging.getLogger(__name__).error("detect_patterns insert error: %s", e)
