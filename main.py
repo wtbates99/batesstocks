@@ -64,6 +64,8 @@ from backend.models import (
     SectorRotationRow,
     StockData,
     StockGroupings,
+    TechnicalSignal,
+    TechnicalSummary,
     WatchlistCreate,
     WatchlistOut,
 )
@@ -1741,7 +1743,6 @@ async def get_screener(request: Request):
             WHERE l.Ticker IS NOT NULL
             ORDER BY market_cap DESC
         """).fetchall()
-        conn.close()
 
         cols = [
             "ticker",
@@ -1758,6 +1759,31 @@ async def get_screener(request: Request):
             "tech_score",
         ]
         result = [dict(zip(cols, r)) for r in rows]
+
+        # Batch fetch sparkline data for all returned tickers
+        tickers_in_page = [r["ticker"] for r in result]
+        if tickers_in_page:
+            ph = ",".join("?" * len(tickers_in_page))
+            spark_rows = conn.execute(
+                f"""
+                SELECT Ticker, Ticker_Close
+                FROM combined_stock_data
+                WHERE Ticker IN ({ph})
+                  AND Date >= date((SELECT MAX(Date) FROM combined_stock_data), '-30 days')
+                ORDER BY Ticker, Date ASC
+            """,
+                tickers_in_page,
+            ).fetchall()
+            spark_map = {}
+            for t, c in spark_rows:
+                if t not in spark_map:
+                    spark_map[t] = []
+                if c is not None:
+                    spark_map[t].append(round(float(c), 2))
+            for r in result:
+                r["spark"] = spark_map.get(r["ticker"], [])
+
+        conn.close()
         redis.set(cache_key, json.dumps(result), ex=1800)
         return result
 
@@ -2358,6 +2384,234 @@ async def get_live_prices(request: Request, tickers: list[str] = Query(...)):
         return result
     except Exception as e:
         logger.error("Live prices error: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/market-indices")
+@limiter.limit("30/minute")
+async def get_market_indices(request: Request):
+    cache_key = "market_indices"
+    cached = redis.get(cache_key)
+    if cached:
+        return json.loads(cached)
+    try:
+        INDEX_TICKERS = ["SPY", "QQQ", "DIA", "IWM", "GLD", "TLT"]
+        conn = sqlite3.connect(DB_PATH)
+        latest_date = conn.execute("SELECT MAX(Date) FROM combined_stock_data").fetchone()[0]
+        prev_date = conn.execute(
+            "SELECT MAX(Date) FROM combined_stock_data WHERE Date < ?", (latest_date,)
+        ).fetchone()[0]
+        placeholders = ",".join("?" * len(INDEX_TICKERS))
+        latest_rows = conn.execute(
+            f"SELECT Ticker, Ticker_Close FROM combined_stock_data WHERE Ticker IN ({placeholders}) AND Date=?",
+            INDEX_TICKERS + [latest_date],
+        ).fetchall()
+        prev_rows = conn.execute(
+            f"SELECT Ticker, Ticker_Close FROM combined_stock_data WHERE Ticker IN ({placeholders}) AND Date=?",
+            INDEX_TICKERS + [prev_date],
+        ).fetchall()
+        conn.close()
+        latest = {r[0]: float(r[1]) for r in latest_rows}
+        prev = {r[0]: float(r[1]) for r in prev_rows}
+        result = []
+        for t in INDEX_TICKERS:
+            if t not in latest:
+                continue
+            p = prev.get(t)
+            chg_pct = round((latest[t] - p) / p * 100, 2) if p else None
+            result.append({"ticker": t, "price": round(latest[t], 2), "change_pct": chg_pct})
+        redis.set(cache_key, json.dumps(result), ex=300)
+        return result
+    except Exception as e:
+        logger.error("Market indices error: %s", e)
+        return []
+
+
+@app.get("/technical-summary/{ticker}", response_model=TechnicalSummary)
+@limiter.limit("20/minute")
+async def get_technical_summary(request: Request, ticker: str):
+    cache_key = f"tech_summary:{ticker.upper()}"
+    cached = redis.get(cache_key)
+    if cached:
+        return json.loads(cached)
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        row = conn.execute(
+            """
+            SELECT Ticker_RSI, Ticker_MACD, Ticker_MACD_Signal, Ticker_MACD_Diff,
+                   Ticker_Close, Ticker_SMA_10, Ticker_SMA_30,
+                   Ticker_Bollinger_PBand, Ticker_Bollinger_WBand,
+                   Ticker_MFI, Ticker_Stochastic_K, Ticker_Tech_Score
+            FROM combined_stock_data WHERE Ticker=? ORDER BY Date DESC LIMIT 1
+        """,
+            (ticker.upper(),),
+        ).fetchone()
+        conn.close()
+        if not row:
+            raise HTTPException(status_code=404, detail="Ticker not found")
+        (
+            rsi,
+            macd,
+            macd_sig,
+            macd_diff,
+            close,
+            sma10,
+            sma30,
+            bb_pb,
+            bb_wb,
+            mfi,
+            stoch_k,
+            tech_score,
+        ) = row
+
+        def s(v):
+            return float(v) if v is not None else None
+
+        signals = []
+        bull_count = 0
+        bear_count = 0
+
+        # RSI
+        r = s(rsi)
+        if r is not None:
+            if r > 70:
+                sig = "bear"
+                bear_count += 1
+            elif r < 30:
+                sig = "bull"
+                bull_count += 1
+            else:
+                sig = "neutral"
+            signals.append(
+                TechnicalSignal(
+                    label="RSI",
+                    signal=sig,
+                    value=f"{r:.1f}",
+                    detail="Overbought" if r > 70 else "Oversold" if r < 30 else "Neutral",
+                )
+            )
+
+        # MACD
+        md, ms = s(macd), s(macd_sig)
+        if md is not None and ms is not None:
+            sig = "bull" if md > ms else "bear"
+            if sig == "bull":
+                bull_count += 1
+            else:
+                bear_count += 1
+            signals.append(
+                TechnicalSignal(
+                    label="MACD",
+                    signal=sig,
+                    value=f"{s(macd_diff):+.3f}" if s(macd_diff) is not None else "—",
+                    detail="Bullish crossover" if sig == "bull" else "Bearish crossover",
+                )
+            )
+
+        # Trend (price vs SMAs)
+        c = s(close)
+        s10 = s(sma10)
+        s30 = s(sma30)
+        if c and s10 and s30:
+            if c > s10 > s30:
+                sig, detail = "bull", "Price > SMA10 > SMA30"
+            elif c < s10 < s30:
+                sig, detail = "bear", "Price < SMA10 < SMA30"
+            else:
+                sig, detail = "neutral", "Mixed trend"
+            if sig == "bull":
+                bull_count += 1
+            elif sig == "bear":
+                bear_count += 1
+            signals.append(
+                TechnicalSignal(label="TREND", signal=sig, value=f"${c:.2f}", detail=detail)
+            )
+
+        # Bollinger
+        pb = s(bb_pb)
+        if pb is not None:
+            if pb > 0.9:
+                sig, detail = "bear", "Near upper band"
+            elif pb < 0.1:
+                sig, detail = "bull", "Near lower band"
+            else:
+                sig, detail = "neutral", f"%B {pb:.2f}"
+            if sig == "bull":
+                bull_count += 1
+            elif sig == "bear":
+                bear_count += 1
+            signals.append(
+                TechnicalSignal(label="BOLLINGER", signal=sig, value=f"{pb:.2f}", detail=detail)
+            )
+
+        # MFI
+        m = s(mfi)
+        if m is not None:
+            if m > 80:
+                sig, detail = "bear", "Overbought"
+            elif m < 20:
+                sig, detail = "bull", "Oversold"
+            else:
+                sig, detail = "neutral", "Normal flow"
+            if sig == "bull":
+                bull_count += 1
+            elif sig == "bear":
+                bear_count += 1
+            signals.append(
+                TechnicalSignal(label="MFI", signal=sig, value=f"{m:.1f}", detail=detail)
+            )
+
+        # Stochastic
+        sk = s(stoch_k)
+        if sk is not None:
+            if sk > 80:
+                sig, detail = "bear", "Overbought"
+            elif sk < 20:
+                sig, detail = "bull", "Oversold"
+            else:
+                sig, detail = "neutral", "Normal"
+            if sig == "bull":
+                bull_count += 1
+            elif sig == "bear":
+                bear_count += 1
+            signals.append(
+                TechnicalSignal(label="STOCH %K", signal=sig, value=f"{sk:.1f}", detail=detail)
+            )
+
+        # Tech Score
+        ts = s(tech_score)
+        if ts is not None:
+            if ts >= 70:
+                sig, detail = "bull", "Strong"
+            elif ts < 40:
+                sig, detail = "bear", "Weak"
+            else:
+                sig, detail = "neutral", "Moderate"
+            if sig == "bull":
+                bull_count += 1
+            elif sig == "bear":
+                bear_count += 1
+            signals.append(
+                TechnicalSignal(label="TECH SCORE", signal=sig, value=f"{ts:.0f}", detail=detail)
+            )
+
+        total = bull_count + bear_count
+        if total == 0:
+            overall = "neutral"
+        elif bull_count / total >= 0.6:
+            overall = "bull"
+        elif bear_count / total >= 0.6:
+            overall = "bear"
+        else:
+            overall = "neutral"
+
+        result = TechnicalSummary(ticker=ticker.upper(), signals=signals, overall=overall)
+        redis.set(cache_key, result.model_dump_json(), ex=1800)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Technical summary error: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 

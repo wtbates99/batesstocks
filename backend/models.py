@@ -99,6 +99,20 @@ class ScreenerRow(BaseModel):
     latest_close: float | None = None
     return_52w: float | None = None
     tech_score: float | None = None
+    spark: list[float] = []
+
+
+class TechnicalSignal(BaseModel):
+    label: str
+    signal: str
+    value: str
+    detail: str
+
+
+class TechnicalSummary(BaseModel):
+    ticker: str
+    signals: list[TechnicalSignal]
+    overall: str
 
 
 class WatchlistCreate(BaseModel):

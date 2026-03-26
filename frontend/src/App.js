@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { BrowserRouter as Router, Route, Routes } from 'react-router-dom';
+import React, { useState } from 'react';
+import { BrowserRouter as Router, Route, Routes, useNavigate } from 'react-router-dom';
 import HomePage from './pages/HomePage';
 import CompanyPage from './pages/CompanyPage';
 import HeatmapPage from './pages/HeatmapPage';
@@ -9,6 +9,22 @@ import CalendarPage from './pages/CalendarPage';
 import MarketPage from './pages/MarketPage';
 import BacktestPage from './pages/BacktestPage';
 import CommandPalette from './components/CommandPalette';
+
+function KeyboardNav({ onCmdK }) {
+  const navigate = useNavigate();
+  React.useEffect(() => {
+    const handler = (e) => {
+      if (!e.metaKey && !e.ctrlKey) return;
+      if (e.key === 'k') { e.preventDefault(); onCmdK(); return; }
+      const pages = ['/', '/heatmap', '/screener', '/market', '/calendar', '/watchlist', '/backtest'];
+      const idx = parseInt(e.key, 10) - 1;
+      if (idx >= 0 && idx < pages.length) { e.preventDefault(); navigate(pages[idx]); }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [navigate, onCmdK]);
+  return null;
+}
 
 function App() {
   const [cmdOpen, setCmdOpen] = useState(false);
@@ -20,20 +36,10 @@ function App() {
     localStorage.setItem('batesstocks_theme', next);
   };
 
-  useEffect(() => {
-    const handler = (e) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-        e.preventDefault();
-        setCmdOpen(o => !o);
-      }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, []);
-
   return (
     <Router>
       <div className="App">
+        <KeyboardNav onCmdK={() => setCmdOpen(o => !o)} />
         <Routes>
           <Route path="/"                  element={<HomePage />}    />
           <Route path="/spotlight/:ticker" element={<CompanyPage />} />
