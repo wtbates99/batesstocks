@@ -33,7 +33,13 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 from sqlalchemy import select
 
-from backend.data_manipulation import detect_patterns, process_stock_data
+from backend.data_manipulation import (
+    _add_ticker_data_indexes,
+    detect_patterns,
+    process_stock_data,
+    update_today_indicators,
+    update_today_sector_subsector,
+)
 from backend.data_pull import fetch_incremental_ohlcv, fetch_write_financial_data, get_sp500_table
 from backend.database import CombinedStockData, database
 from backend.models import (
@@ -101,6 +107,27 @@ def safe_convert(value: str | int | float, target_type: type):
         return target_type(value)
     except (ValueError, TypeError):
         return None
+
+
+def _enable_wal_and_indexes():
+    """Enable WAL mode for concurrent reads during writes, and ensure all indexes exist."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA cache_size=-32000")   # 32 MB page cache
+    # Stock data indexes (may already exist; IF NOT EXISTS is safe)
+    conn.executescript("""
+        CREATE INDEX IF NOT EXISTS idx_stock_data_ticker       ON stock_data  (Ticker);
+        CREATE INDEX IF NOT EXISTS idx_stock_data_ticker_date  ON stock_data  (Ticker, Date);
+        CREATE INDEX IF NOT EXISTS idx_stock_data_date         ON stock_data  (Date);
+    """)
+    # ticker_data indexes (dropped each full rebuild — recreated here on startup)
+    try:
+        _add_ticker_data_indexes(conn)
+    except Exception:
+        pass  # ticker_data may not exist yet on first run
+    conn.commit()
+    conn.close()
 
 
 def _create_user_tables():
@@ -181,6 +208,7 @@ async def lifespan(app: FastAPI):
     from apscheduler.triggers.cron import CronTrigger
 
     await database.connect()
+    _enable_wal_and_indexes()
     _create_user_tables()
 
     # Try real Redis first, fall back to fakeredis
@@ -211,6 +239,11 @@ async def lifespan(app: FastAPI):
     else:
         pipeline_status["phase"] = "complete"
         await build_search_index()
+        # Pre-warm homepage and screener caches in background so startup is instant
+        threading.Thread(
+            target=lambda: [_prewarm_homepage_caches(), _prewarm_screener_cache()],
+            daemon=True,
+        ).start()
 
     # Every 15 min during market hours (9:30–16:00 ET, Mon–Fri)
     # Every hour off-hours for catch-up / after-hours data
@@ -475,13 +508,180 @@ def run_full_pipeline():
 def _flush_stock_cache():
     """Evict all stock/heatmap/screener entries from Redis so fresh data is served."""
     try:
-        for pattern in ("stock_data:*", "heatmap:*", "groupings:*", "screener:*"):
+        for pattern in ("stock_data:*", "heatmap:*", "groupings:*", "screener:*",
+                        "market_pulse:*", "live_prices:*", "market_indices:*"):
             keys = redis.keys(pattern)
             if keys:
                 redis.delete(*keys)
         logger.info("Redis cache flushed after daily update")
     except Exception as e:
         logger.warning("Cache flush failed: %s", e)
+
+
+def _prewarm_screener_cache():
+    """Build screener data synchronously and populate Redis so the first user request is instant."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        rows = cursor.execute("""
+            WITH latest AS (
+                SELECT * FROM combined_stock_data
+                WHERE Date = (SELECT MAX(Date) FROM combined_stock_data)
+            ),
+            year_ago AS (
+                SELECT Ticker, Ticker_Close AS year_ago_close
+                FROM combined_stock_data
+                WHERE Date = (
+                    SELECT MAX(Date) FROM combined_stock_data
+                    WHERE Date <= date(
+                        (SELECT MAX(Date) FROM combined_stock_data), '-1 year'
+                    )
+                )
+            )
+            SELECT
+                l.Ticker,
+                l.FullName,
+                l.Sector,
+                l.Subsector,
+                CAST(NULLIF(l.MarketCap, 'N/A') AS REAL)  AS market_cap,
+                CAST(NULLIF(l.PE,        'N/A') AS REAL)  AS pe,
+                CAST(NULLIF(l.EPS,       'N/A') AS REAL)  AS eps,
+                CAST(NULLIF(l.Beta,      'N/A') AS REAL)  AS beta,
+                l.Ticker_RSI                              AS rsi,
+                l.Ticker_Close                            AS latest_close,
+                CASE
+                    WHEN y.year_ago_close IS NOT NULL AND y.year_ago_close > 0
+                    THEN ROUND((l.Ticker_Close - y.year_ago_close) / y.year_ago_close * 100, 2)
+                    ELSE NULL
+                END AS return_52w,
+                l.Ticker_Tech_Score                       AS tech_score
+            FROM latest l
+            LEFT JOIN year_ago y ON y.Ticker = l.Ticker
+            WHERE l.Ticker IS NOT NULL
+            ORDER BY market_cap DESC
+        """).fetchall()
+
+        cols = ["ticker", "name", "sector", "subsector", "market_cap", "pe",
+                "eps", "beta", "rsi", "latest_close", "return_52w", "tech_score"]
+        result = [dict(zip(cols, r)) for r in rows]
+
+        tickers_in_page = [r["ticker"] for r in result]
+        if tickers_in_page:
+            ph = ",".join("?" * len(tickers_in_page))
+            spark_rows = conn.execute(
+                f"""
+                SELECT Ticker, Ticker_Close
+                FROM combined_stock_data
+                WHERE Ticker IN ({ph})
+                  AND Date >= date((SELECT MAX(Date) FROM combined_stock_data), '-30 days')
+                ORDER BY Ticker, Date ASC
+                """,
+                tickers_in_page,
+            ).fetchall()
+            spark_map: dict = {}
+            for t, c in spark_rows:
+                if t not in spark_map:
+                    spark_map[t] = []
+                if c is not None:
+                    spark_map[t].append(round(float(c), 2))
+            for r in result:
+                r["spark"] = spark_map.get(r["ticker"], [])
+
+        conn.close()
+        redis.set("screener:all", json.dumps(result), ex=1800)
+        logger.info("Screener cache pre-warmed with %d tickers", len(result))
+    except Exception as e:
+        logger.warning("Screener pre-warm failed: %s", e)
+
+
+def _prewarm_homepage_caches():
+    """Pre-warm all caches hit on page load so the site is instant after a sync."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+
+        # 1. Groupings (homepage sidebar — no cache otherwise)
+        groupings = _get_bullish_groupings_from_db()
+        redis.set("groupings:bullish", json.dumps(groupings), ex=300)
+
+        # 2. Market indices (macro strip at top of page)
+        INDEX_TICKERS = ["SPY", "QQQ", "DIA", "IWM", "GLD", "TLT"]
+        latest_date = conn.execute("SELECT MAX(Date) FROM combined_stock_data").fetchone()[0]
+        prev_date = conn.execute(
+            "SELECT MAX(Date) FROM combined_stock_data WHERE Date < ?", (latest_date,)
+        ).fetchone()[0]
+        if latest_date and prev_date:
+            ph = ",".join("?" * len(INDEX_TICKERS))
+            latest_rows = conn.execute(
+                f"SELECT Ticker, Ticker_Close FROM combined_stock_data WHERE Ticker IN ({ph}) AND Date=?",
+                INDEX_TICKERS + [latest_date],
+            ).fetchall()
+            prev_rows = conn.execute(
+                f"SELECT Ticker, Ticker_Close FROM combined_stock_data WHERE Ticker IN ({ph}) AND Date=?",
+                INDEX_TICKERS + [prev_date],
+            ).fetchall()
+            latest_m = {r[0]: float(r[1]) for r in latest_rows}
+            prev_m = {r[0]: float(r[1]) for r in prev_rows}
+            indices_result = []
+            for t in INDEX_TICKERS:
+                if t not in latest_m:
+                    continue
+                p = prev_m.get(t)
+                chg_pct = round((latest_m[t] - p) / p * 100, 2) if p else None
+                indices_result.append({"ticker": t, "price": round(latest_m[t], 2), "change_pct": chg_pct})
+            redis.set("market_indices", json.dumps(indices_result), ex=300)
+
+        # 3. Live prices for priority tickers
+        if latest_date:
+            ph = ",".join("?" * len(PRIORITY_TICKERS))
+            price_rows = conn.execute(
+                f"SELECT Ticker, Ticker_Close FROM combined_stock_data WHERE Ticker IN ({ph}) AND Date=?",
+                PRIORITY_TICKERS + [latest_date],
+            ).fetchall()
+            prices_map = {r[0]: float(r[1]) for r in price_rows if r[1] is not None}
+            live_key = f"live:{','.join(sorted(PRIORITY_TICKERS[:9]))}"
+            redis.set(live_key, json.dumps({
+                "prices": prices_map,
+                "timestamp": datetime.datetime.utcnow().isoformat(),
+            }), ex=60)
+
+        # 4. Stock data for priority tickers (30-day range, most common page load)
+        cutoff_30 = (datetime.date.today() - datetime.timedelta(days=30)).isoformat()
+        cols = [
+            "Date", "Ticker", "Ticker_Open", "Ticker_Close", "Ticker_High", "Ticker_Low",
+            "Ticker_Volume", "Ticker_SMA_10", "Ticker_EMA_10", "Ticker_SMA_30", "Ticker_EMA_30",
+            "Ticker_RSI", "Ticker_Stochastic_K", "Ticker_Stochastic_D",
+            "Ticker_MACD", "Ticker_MACD_Signal", "Ticker_MACD_Diff",
+            "Ticker_TSI", "Ticker_UO", "Ticker_ROC", "Ticker_Williams_R",
+            "Ticker_Bollinger_High", "Ticker_Bollinger_Low", "Ticker_Bollinger_Mid",
+            "Ticker_Bollinger_PBand", "Ticker_Bollinger_WBand",
+            "Ticker_On_Balance_Volume", "Ticker_Chaikin_MF", "Ticker_Force_Index", "Ticker_MFI",
+        ]
+        col_sel = ", ".join(cols)
+        for ticker in PRIORITY_TICKERS[:20]:
+            try:
+                rows_t = conn.execute(
+                    f"SELECT {col_sel} FROM combined_stock_data "
+                    f"WHERE Ticker=? AND Date>=? ORDER BY Date DESC",
+                    (ticker, cutoff_30),
+                ).fetchall()
+                if not rows_t:
+                    continue
+                data_list = []
+                for row in rows_t:
+                    d = dict(zip(cols, row))
+                    if d["Date"]:
+                        d["Date"] = str(d["Date"])[:10]
+                    data_list.append(d)
+                cache_key = f"stock_data:{ticker}:{cutoff_30}:None:1:100"
+                redis.set(cache_key, json.dumps(data_list), ex=3600)
+            except Exception:
+                pass
+
+        conn.close()
+        logger.info("Homepage caches pre-warmed (groupings, indices, live-prices, %d priority stocks)",
+                    len(PRIORITY_TICKERS[:20]))
+    except Exception as e:
+        logger.warning("Homepage pre-warm failed: %s", e)
 
 
 def _evaluate_alerts(conn: sqlite3.Connection):
@@ -557,7 +757,9 @@ def run_intraday_update():
         new_rows = len(result)
         logger.info("Intraday update: inserted %d rows for %s", new_rows, today)
 
-        process_stock_data(conn)
+        # Fast incremental path: only recompute today's rows (~2-3s vs ~38s full rebuild)
+        update_today_indicators(conn)
+        update_today_sector_subsector(conn)  # keeps combined_stock_data JOIN intact for today
         create_signal_views(conn)
         detect_patterns(conn)
         _evaluate_alerts(conn)
@@ -566,7 +768,15 @@ def run_intraday_update():
         _build_search_index_sync()
         logger.info("Intraday update complete — indicators, patterns, alerts recomputed")
 
+        # Mark complete NOW so the site stops showing the loading state immediately,
+        # then pre-warm all caches in a background thread so the first page load is fast.
         pipeline_status["phase"] = "complete"
+        pipeline_status["running"] = False
+        import threading
+        threading.Thread(
+            target=lambda: [_prewarm_homepage_caches(), _prewarm_screener_cache()],
+            daemon=True,
+        ).start()
     except Exception as e:
         logger.error("Intraday update error: %s", e)
         pipeline_status["phase"] = "error"
@@ -604,11 +814,19 @@ def run_daily_update():
             _flush_stock_cache()
             _build_search_index_sync()
             logger.info("Daily update complete: %d new rows, %d tickers", new_rows, len(tickers))
+
+            # Mark complete immediately, then pre-warm caches in background
+            pipeline_status["phase"] = "complete"
+            pipeline_status["running"] = False
+            import threading
+            threading.Thread(
+                target=lambda: [_prewarm_homepage_caches(), _prewarm_screener_cache()],
+                daemon=True,
+            ).start()
         else:
             conn.close()
             logger.info("Daily update: no new data to process")
-
-        pipeline_status["phase"] = "complete"
+            pipeline_status["phase"] = "complete"
     except Exception as e:
         logger.error("Daily update error: %s", e)
         pipeline_status["phase"] = "error"
@@ -1547,7 +1765,12 @@ async def get_recent_patterns(
 @app.get("/groupings", response_model=StockGroupings)
 @limiter.limit("20/minute")
 async def get_stock_groupings(request: Request):
-    return _get_bullish_groupings_from_db()
+    cached = redis.get("groupings:bullish")
+    if cached:
+        return json.loads(cached)
+    result = _get_bullish_groupings_from_db()
+    redis.set("groupings:bullish", json.dumps(result), ex=300)
+    return result
 
 
 @app.get("/search", response_model=list[SearchResult])
