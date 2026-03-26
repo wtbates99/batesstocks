@@ -23,9 +23,7 @@ def _calc_indicators(df: pd.DataFrame, prefix: str) -> pd.DataFrame:
         f"{prefix}_SMA_30": ta.trend.sma_indicator(close, window=30),
         f"{prefix}_EMA_30": ta.trend.ema_indicator(close, window=30),
         f"{prefix}_RSI": ta.momentum.rsi(close, window=14),
-        f"{prefix}_Stochastic_K": ta.momentum.stoch(
-            high, low, close, window=14, smooth_window=3
-        ),
+        f"{prefix}_Stochastic_K": ta.momentum.stoch(high, low, close, window=14, smooth_window=3),
         f"{prefix}_Stochastic_D": ta.momentum.stoch_signal(
             high, low, close, window=14, smooth_window=3
         ),
@@ -36,23 +34,13 @@ def _calc_indicators(df: pd.DataFrame, prefix: str) -> pd.DataFrame:
         f"{prefix}_UO": ta.momentum.ultimate_oscillator(high, low, close),
         f"{prefix}_ROC": ta.momentum.roc(close, window=12),
         f"{prefix}_Williams_R": ta.momentum.williams_r(high, low, close, lbp=14),
-        f"{prefix}_Bollinger_High": ta.volatility.bollinger_hband(
-            close, window=20, window_dev=2
-        ),
-        f"{prefix}_Bollinger_Low": ta.volatility.bollinger_lband(
-            close, window=20, window_dev=2
-        ),
+        f"{prefix}_Bollinger_High": ta.volatility.bollinger_hband(close, window=20, window_dev=2),
+        f"{prefix}_Bollinger_Low": ta.volatility.bollinger_lband(close, window=20, window_dev=2),
         f"{prefix}_Bollinger_Mid": ta.volatility.bollinger_mavg(close, window=20),
-        f"{prefix}_Bollinger_PBand": ta.volatility.bollinger_pband(
-            close, window=20, window_dev=2
-        ),
-        f"{prefix}_Bollinger_WBand": ta.volatility.bollinger_wband(
-            close, window=20, window_dev=2
-        ),
+        f"{prefix}_Bollinger_PBand": ta.volatility.bollinger_pband(close, window=20, window_dev=2),
+        f"{prefix}_Bollinger_WBand": ta.volatility.bollinger_wband(close, window=20, window_dev=2),
         f"{prefix}_On_Balance_Volume": ta.volume.on_balance_volume(close, volume),
-        f"{prefix}_Chaikin_MF": ta.volume.chaikin_money_flow(
-            high, low, close, volume, window=20
-        ),
+        f"{prefix}_Chaikin_MF": ta.volume.chaikin_money_flow(high, low, close, volume, window=20),
         f"{prefix}_Force_Index": ta.volume.force_index(close, volume, window=13),
         f"{prefix}_MFI": ta.volume.money_flow_index(high, low, close, volume, window=14),
     }
@@ -248,7 +236,9 @@ def update_today_indicators(conn: sqlite3.Connection):
     sma_score = (new_rows["Close"] > new_rows["Ticker_SMA_10"]).astype(float)
     bb_score = new_rows["Ticker_Bollinger_PBand"].clip(0, 1)
     mfi_score = new_rows["Ticker_MFI"].clip(0, 100) / 100
-    raw = rsi_score * 0.25 + macd_score * 0.25 + sma_score * 0.20 + bb_score * 0.15 + mfi_score * 0.15
+    raw = (
+        rsi_score * 0.25 + macd_score * 0.25 + sma_score * 0.20 + bb_score * 0.15 + mfi_score * 0.15
+    )
     new_rows["Ticker_Tech_Score"] = (raw * 100).round(1).clip(0, 100)
 
     # Wipe only today's rows then insert fresh
@@ -369,7 +359,7 @@ def compute_technical_scores(conn: sqlite3.Connection):
 def detect_patterns(conn: sqlite3.Connection):
     """Detect chart patterns for all tickers using last 90 days of data."""
     try:
-        tickers = [r[0] for r in conn.execute("SELECT DISTINCT Ticker FROM ticker_data").fetchall()]
+        conn.execute("SELECT 1 FROM ticker_data LIMIT 1").fetchone()
     except Exception:
         return
 
