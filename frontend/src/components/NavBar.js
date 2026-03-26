@@ -22,6 +22,9 @@ const NavBar = () => (
     <NavLink to="/watchlist" className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>
       WATCHLIST
     </NavLink>
+    <NavLink to="/backtest" className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>
+      BACKTEST
+    </NavLink>
   </nav>
 );
 

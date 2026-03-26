@@ -12,6 +12,77 @@ import { metricsList, groupedMetrics } from '../metricsList';
 
 const defaultTickers = ['AAPL', 'GOOGL', 'AMZN', 'MSFT', 'TSLA', 'NKE', 'NVDA', 'NFLX', 'JPM'];
 
+function useLivePrices(tickers, enabled) {
+  const [prices, setPrices]     = React.useState({});
+  const [flashing, setFlashing] = React.useState({});
+  const prevRef                 = React.useRef({});
+
+  React.useEffect(() => {
+    if (!enabled || !tickers.length) return;
+    const poll = () => {
+      const params = tickers.map(t => `tickers=${t}`).join('&');
+      fetch(`/live-prices?${params}`)
+        .then(r => r.json())
+        .then(data => {
+          if (!data.prices) return;
+          const newFlash = {};
+          Object.entries(data.prices).forEach(([t, p]) => {
+            if (prevRef.current[t] != null && p !== prevRef.current[t]) {
+              newFlash[t] = p > prevRef.current[t] ? 'up' : 'down';
+            }
+          });
+          prevRef.current = data.prices;
+          setPrices(data.prices);
+          if (Object.keys(newFlash).length) {
+            setFlashing(newFlash);
+            setTimeout(() => setFlashing({}), 800);
+          }
+        })
+        .catch(() => {});
+    };
+    poll();
+    const id = setInterval(poll, 60000);
+    return () => clearInterval(id);
+  }, [tickers, enabled]);
+
+  return { prices, flashing };
+}
+
+const MarketPulseWidget = () => {
+  const [pulse, setPulse] = React.useState(null);
+  const [open, setOpen]   = React.useState(true);
+
+  React.useEffect(() => {
+    fetch('/market-pulse')
+      .then(r => r.json())
+      .then(setPulse)
+      .catch(() => {});
+  }, []);
+
+  if (!pulse?.items?.length) return null;
+
+  return (
+    <div className="pulse-widget">
+      <button className="pulse-header" onClick={() => setOpen(o => !o)}>
+        <span className="pulse-dot" />
+        <span className="pulse-title">MARKET PULSE</span>
+        <span className="pulse-toggle">{open ? '▲' : '▼'}</span>
+      </button>
+      {open && (
+        <div className="pulse-items">
+          {pulse.items.map((item, i) => (
+            <a key={i} className="pulse-item" href={`/spotlight/${item.ticker}`}>
+              <span className={`pulse-item-dot ${item.color}`} />
+              <span className="pulse-ticker">{item.ticker}</span>
+              <span className="pulse-headline">{item.headline}</span>
+            </a>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const formatGroupName = (name) =>
   name.split('_').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
 
@@ -228,6 +299,8 @@ const HomePage = () => {
     return tickers;
   }, [selectedTickers, sortOrder, priceData]);
 
+  const { prices: livePrices, flashing } = useLivePrices(selectedTickers, marketOpen);
+
   const sidebarVisible = !sidebarHidden || isHovering;
 
   const rootClass = [
@@ -391,6 +464,7 @@ const HomePage = () => {
 
         {/* Chart Grid */}
         <div className="grid-area">
+          <MarketPulseWidget />
           <div className="grid-toolbar">
             <div className="grid-toolbar-left">
               <span className="toolbar-label">SORT</span>
@@ -436,9 +510,12 @@ const HomePage = () => {
             const isPos   = change >= 0;
             const trend   = pd ? (isPos ? 'up' : 'down') : 'none';
 
+            const livePrice = livePrices[ticker];
+            const displayPrice = livePrice ?? pd?.latestClose;
+
             return (
               <div className="chart-wrapper" key={ticker} data-trend={trend}>
-                <div className="chart-card-header">
+                <div className={`chart-card-header ${flashing[ticker] === 'up' ? 'flash-up' : flashing[ticker] === 'down' ? 'flash-down' : ''}`}>
                   <div className="card-header-left">
                     <Link to={`/spotlight/${ticker}`} className="company-link">{ticker}</Link>
                     {tickerGroups && Object.entries(tickerGroups).map(([group, gtickers]) =>
@@ -452,7 +529,7 @@ const HomePage = () => {
                   {pd && (
                     <div className="card-header-right">
                       <div className="chart-card-price-block">
-                        <span className="card-price">${pd.latestClose.toFixed(2)}</span>
+                        <span className="card-price">${displayPrice ? displayPrice.toFixed(2) : pd.latestClose.toFixed(2)}</span>
                         <span className={`card-change ${isPos ? 'positive' : 'negative'}`}>
                           {isPos ? '+' : ''}{pct.toFixed(2)}%
                         </span>

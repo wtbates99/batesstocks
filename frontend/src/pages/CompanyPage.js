@@ -6,6 +6,7 @@ import {
 import StockChart from '../components/StockChart';
 import SearchBar from '../components/SearchBar';
 import NavBar from '../components/NavBar';
+import StockRadar from '../components/RadarChart';
 import { metricsList, groupedMetrics } from '../metricsList';
 import '../styles.css';
 
@@ -310,6 +311,11 @@ const CompanyPage = () => {
               onDataLoaded={setPriceData}
               chartType={chartType}
             />
+          </div>
+
+          {/* Stock DNA Radar */}
+          <div className="cp-radar-section">
+            <StockRadar ticker={ticker} />
           </div>
 
           {/* Active metrics legend */}

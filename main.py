@@ -39,11 +39,17 @@ from backend.database import CombinedStockData, database
 from backend.models import (
     AlertCreate,
     AlertOut,
+    BacktestRequest,
+    BacktestResult,
+    BacktestTrade,
     CompanyInfo,
     CorrelationMatrix,
     EarningsEvent,
     HeatmapNode,
+    LivePrices,
     MarketBreadth,
+    MarketPulse,
+    MarketPulseItem,
     NewsItem,
     OptionsChain,
     PatternSignal,
@@ -52,6 +58,7 @@ from backend.models import (
     PortfolioOut,
     PositionCreate,
     PositionOut,
+    RadarData,
     ScreenerRow,
     SearchResult,
     SectorRotationRow,
@@ -1936,6 +1943,367 @@ async def get_portfolio_chart(
     except Exception as e:
         logger.error("Portfolio chart error: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+ALLOWED_BACKTEST_METRICS = {
+    "Ticker_RSI",
+    "Ticker_MACD",
+    "Ticker_MACD_Diff",
+    "Ticker_MACD_Signal",
+    "Ticker_Close",
+    "Ticker_SMA_10",
+    "Ticker_SMA_30",
+    "Ticker_EMA_10",
+    "Ticker_Bollinger_PBand",
+    "Ticker_Bollinger_WBand",
+    "Ticker_MFI",
+    "Ticker_Tech_Score",
+    "Ticker_Stochastic_K",
+}
+
+
+@app.post("/backtest", response_model=BacktestResult)
+@limiter.limit("5/minute")
+async def run_backtest(request: Request, body: BacktestRequest):
+    if body.entry_metric not in ALLOWED_BACKTEST_METRICS:
+        raise HTTPException(status_code=400, detail=f"Invalid entry_metric: {body.entry_metric}")
+    if body.exit_metric not in ALLOWED_BACKTEST_METRICS:
+        raise HTTPException(status_code=400, detail=f"Invalid exit_metric: {body.exit_metric}")
+
+    cache_key = (
+        f"backtest:{body.ticker}:{body.entry_metric}:{body.entry_condition}:"
+        f"{body.entry_threshold}:{body.exit_metric}:{body.exit_condition}:"
+        f"{body.exit_threshold}:{body.start_date}:{body.end_date}"
+    )
+    cached = redis.get(cache_key)
+    if cached:
+        return json.loads(cached)
+
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        date_filter = ""
+        params: list = [body.ticker.upper()]
+        if body.start_date:
+            date_filter += " AND Date >= ?"
+            params.append(body.start_date)
+        if body.end_date:
+            date_filter += " AND Date <= ?"
+            params.append(body.end_date)
+
+        query = (
+            f"SELECT Date, Ticker_Close, {body.entry_metric}, {body.exit_metric} "
+            f"FROM combined_stock_data WHERE Ticker = ? {date_filter} ORDER BY Date ASC"
+        )
+        rows = conn.execute(query, params).fetchall()
+        conn.close()
+
+        if not rows:
+            raise HTTPException(status_code=404, detail="No data found for ticker")
+
+        df = pd.DataFrame(rows, columns=["date", "close", "entry_val", "exit_val"])
+        df["close"] = df["close"].astype(float)
+        df["entry_val"] = pd.to_numeric(df["entry_val"], errors="coerce")
+        df["exit_val"] = pd.to_numeric(df["exit_val"], errors="coerce")
+        df = df.dropna().reset_index(drop=True)
+
+        def check_condition(val, prev_val, cond, threshold):
+            if cond == "above":
+                return val > threshold
+            if cond == "below":
+                return val < threshold
+            if cond == "crosses_above":
+                return prev_val is not None and prev_val <= threshold and val > threshold
+            if cond == "crosses_below":
+                return prev_val is not None and prev_val >= threshold and val < threshold
+            return False
+
+        capital = body.initial_capital
+        in_position = False
+        entry_price = 0.0
+        entry_date = ""
+        shares = 0.0
+        trades: list[BacktestTrade] = []
+        equity_curve = []
+
+        for i in range(len(df)):
+            row = df.iloc[i]
+            prev_entry = df.iloc[i - 1]["entry_val"] if i > 0 else None
+            prev_exit = df.iloc[i - 1]["exit_val"] if i > 0 else None
+
+            if not in_position:
+                if check_condition(
+                    row["entry_val"], prev_entry, body.entry_condition, body.entry_threshold
+                ):
+                    in_position = True
+                    entry_price = float(row["close"])
+                    entry_date = str(row["date"])[:10]
+                    shares = capital / entry_price
+            else:
+                if check_condition(
+                    row["exit_val"], prev_exit, body.exit_condition, body.exit_threshold
+                ):
+                    exit_price = float(row["close"])
+                    ret = (exit_price - entry_price) / entry_price * 100
+                    pnl = (exit_price - entry_price) * shares
+                    capital += pnl
+                    trades.append(
+                        BacktestTrade(
+                            entry_date=entry_date,
+                            entry_price=round(entry_price, 2),
+                            exit_date=str(row["date"])[:10],
+                            exit_price=round(exit_price, 2),
+                            return_pct=round(ret, 2),
+                            pnl=round(pnl, 2),
+                        )
+                    )
+                    in_position = False
+
+            equity_curve.append({"date": str(row["date"])[:10], "value": round(capital, 2)})
+
+        first_price = float(df.iloc[0]["close"])
+        last_price = float(df.iloc[-1]["close"])
+        buy_hold = (last_price - first_price) / first_price * 100
+
+        returns = [t.return_pct for t in trades]
+        win_rate = sum(1 for r in returns if r > 0) / len(returns) if returns else 0
+        avg_ret = sum(returns) / len(returns) if returns else 0
+
+        peak = body.initial_capital
+        max_dd = 0.0
+        for pt in equity_curve:
+            if pt["value"] > peak:
+                peak = pt["value"]
+            dd = (peak - pt["value"]) / peak * 100
+            if dd > max_dd:
+                max_dd = dd
+
+        sharpe = None
+        if len(returns) >= 5:
+            import statistics
+
+            std = statistics.stdev(returns) if len(returns) > 1 else 0
+            if std > 0:
+                sharpe = round((avg_ret - 5.0 / 252) / std * (252**0.5), 2)
+
+        total_ret = (capital - body.initial_capital) / body.initial_capital * 100
+
+        result = BacktestResult(
+            ticker=body.ticker.upper(),
+            total_return_pct=round(total_ret, 2),
+            buy_hold_return_pct=round(buy_hold, 2),
+            num_trades=len(trades),
+            win_rate=round(win_rate * 100, 1),
+            avg_return_pct=round(avg_ret, 2),
+            max_drawdown_pct=round(max_dd, 2),
+            sharpe_ratio=sharpe,
+            equity_curve=equity_curve,
+            trades=trades,
+            strategy=(
+                f"{body.entry_metric} {body.entry_condition} {body.entry_threshold} "
+                f"→ {body.exit_metric} {body.exit_condition} {body.exit_threshold}"
+            ),
+        )
+        redis.set(cache_key, result.model_dump_json(), ex=3600)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Backtest error: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/radar/{ticker}", response_model=RadarData)
+@limiter.limit("20/minute")
+async def get_radar(request: Request, ticker: str):
+    cache_key = f"radar:{ticker.upper()}"
+    cached = redis.get(cache_key)
+    if cached:
+        return json.loads(cached)
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        row = conn.execute(
+            """
+            SELECT t.Ticker_RSI, t.Ticker_MACD, t.Ticker_MACD_Signal,
+                   t.Ticker_Close, t.Ticker_SMA_10, t.Ticker_SMA_30,
+                   t.Ticker_MFI, t.Ticker_Chaikin_MF,
+                   t.Ticker_Bollinger_WBand, t.Ticker_Bollinger_PBand,
+                   CAST(NULLIF(t.PE, 'N/A') AS REAL), t.Ticker_Tech_Score
+            FROM combined_stock_data t
+            WHERE t.Ticker = ?
+            ORDER BY t.Date DESC LIMIT 1
+            """,
+            (ticker.upper(),),
+        ).fetchone()
+        conn.close()
+
+        if not row:
+            raise HTTPException(status_code=404, detail="Ticker not found")
+
+        rsi, macd, macd_sig, close, sma10, sma30, mfi, cmf, bb_w, bb_pb, pe, _tech = row
+
+        def safe(v, default=50.0):
+            return float(v) if v is not None else default
+
+        # Momentum: RSI + MACD direction
+        momentum = safe(rsi) * 0.6 + (70 if safe(macd, 0) > safe(macd_sig, 0) else 30) * 0.4
+        momentum = max(0.0, min(100.0, momentum))
+
+        # Trend: price vs SMAs
+        c = safe(close, 100)
+        s10 = safe(sma10, c)
+        s30 = safe(sma30, c)
+        trend = 100.0 if c > s10 > s30 else (70.0 if c > s10 else (40.0 if c > s30 else 20.0))
+
+        # Volume: MFI + CMF
+        volume_score = safe(mfi) * 0.7 + (70 if safe(cmf, 0) > 0 else 30) * 0.3
+        volume_score = max(0.0, min(100.0, volume_score))
+
+        # Volatility: inverse Bollinger width + %B position
+        bw = safe(bb_w, 0.1)
+        bb_p = safe(bb_pb, 0.5)
+        vol_score = max(0.0, min(100.0, 100 - bw * 100)) * 0.5 + bb_p * 100 * 0.5
+
+        # Value: P/E relative
+        pe_v = safe(pe, 20)
+        value_score = max(0.0, min(100.0, 100 - (pe_v - 10) * 2)) if pe_v > 0 else 50.0
+
+        result = RadarData(
+            ticker=ticker.upper(),
+            momentum=round(momentum, 1),
+            trend=round(trend, 1),
+            volume=round(volume_score, 1),
+            volatility=round(vol_score, 1),
+            value=round(value_score, 1),
+            sector_momentum=50.0,
+            sector_trend=50.0,
+            sector_volume=50.0,
+            sector_volatility=50.0,
+            sector_value=50.0,
+        )
+        redis.set(cache_key, result.model_dump_json(), ex=1800)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Radar error for %s: %s", ticker, e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/live-prices", response_model=LivePrices)
+@limiter.limit("30/minute")
+async def get_live_prices(request: Request, tickers: list[str] = Query(...)):
+    tickers = [t.upper() for t in tickers if t][:20]
+    cache_key = f"live:{','.join(sorted(tickers))}"
+    cached = redis.get(cache_key)
+    if cached:
+        return json.loads(cached)
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        placeholders = ",".join("?" * len(tickers))
+        rows = conn.execute(
+            f"SELECT Ticker, Ticker_Close FROM combined_stock_data "
+            f"WHERE Ticker IN ({placeholders}) "
+            f"AND Date = (SELECT MAX(Date) FROM combined_stock_data)",
+            tickers,
+        ).fetchall()
+        conn.close()
+        prices = {r[0]: float(r[1]) if r[1] is not None else None for r in rows}
+        result = LivePrices(prices=prices, timestamp=datetime.datetime.utcnow().isoformat())
+        redis.set(cache_key, result.model_dump_json(), ex=60)
+        return result
+    except Exception as e:
+        logger.error("Live prices error: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/market-pulse", response_model=MarketPulse)
+@limiter.limit("10/minute")
+async def get_market_pulse(request: Request):
+    cache_key = "market_pulse"
+    cached = redis.get(cache_key)
+    if cached:
+        return json.loads(cached)
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        items: list[MarketPulseItem] = []
+
+        # Top movers (by absolute % change)
+        movers = conn.execute("""
+            WITH latest AS (
+                SELECT Ticker, Ticker_Close FROM combined_stock_data
+                WHERE Date = (SELECT MAX(Date) FROM combined_stock_data)
+            ),
+            prev AS (
+                SELECT Ticker, Ticker_Close AS pc FROM combined_stock_data
+                WHERE Date = (
+                    SELECT MAX(Date) FROM combined_stock_data
+                    WHERE Date < (SELECT MAX(Date) FROM combined_stock_data)
+                )
+            )
+            SELECT l.Ticker, ROUND((l.Ticker_Close - p.pc) / NULLIF(p.pc, 0) * 100, 2) AS chg
+            FROM latest l JOIN prev p ON p.Ticker = l.Ticker
+            ORDER BY ABS(chg) DESC LIMIT 6
+        """).fetchall()
+        for ticker_m, chg in movers:
+            if chg is None:
+                continue
+            items.append(
+                MarketPulseItem(
+                    type="mover",
+                    ticker=ticker_m,
+                    headline=f"{'▲' if chg > 0 else '▼'} {abs(chg):.1f}% today",
+                    value=f"{chg:+.1f}%",
+                    color="green" if chg > 0 else "red",
+                )
+            )
+
+        # RSI extremes
+        extremes = conn.execute("""
+            SELECT Ticker, Ticker_RSI FROM combined_stock_data
+            WHERE Date = (SELECT MAX(Date) FROM combined_stock_data)
+              AND (Ticker_RSI > 75 OR Ticker_RSI < 25)
+            ORDER BY ABS(Ticker_RSI - 50) DESC LIMIT 4
+        """).fetchall()
+        for ticker_e, rsi in extremes:
+            if rsi is None:
+                continue
+            overbought = rsi > 70
+            items.append(
+                MarketPulseItem(
+                    type="extreme",
+                    ticker=ticker_e,
+                    headline=f"RSI {'overbought' if overbought else 'oversold'} at {rsi:.0f}",
+                    value=f"RSI {rsi:.0f}",
+                    color="red" if overbought else "green",
+                )
+            )
+
+        # Pattern signals
+        patterns = conn.execute("""
+            SELECT ticker, pattern_type FROM pattern_signals
+            WHERE pattern_type IN ('double_bottom', 'double_top')
+            ORDER BY detected_at DESC LIMIT 4
+        """).fetchall()
+        for ticker_p, ptype in patterns:
+            color = "green" if "bottom" in ptype else "red"
+            label = ptype.replace("_", " ").title()
+            items.append(
+                MarketPulseItem(
+                    type="signal",
+                    ticker=ticker_p,
+                    headline=f"{label} pattern detected",
+                    value=label,
+                    color=color,
+                )
+            )
+
+        conn.close()
+        result = MarketPulse(items=items[:12], generated_at=datetime.datetime.utcnow().isoformat())
+        redis.set(cache_key, result.model_dump_json(), ex=600)
+        return result
+    except Exception as e:
+        logger.error("Market pulse error: %s", e)
+        return MarketPulse(items=[], generated_at=datetime.datetime.utcnow().isoformat())
 
 
 @app.get("/{full_path:path}", response_class=HTMLResponse)
