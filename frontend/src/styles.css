@@ -1649,8 +1649,9 @@ h1, h2, h3, h4, h5, h6 { font-weight: 600; }
   .header-title { display: none; }
   .sidebar-visible .main-content { margin-left: 0; }
   .sidebar-container { width: 100%; }
-  .main-content { flex-direction: column; height: auto; overflow: visible; }
+  .main-content { flex-direction: column; height: auto; min-height: calc(100vh - var(--header-h)); overflow: visible; margin-top: var(--header-h); }
   .grid-container { grid-template-columns: 1fr; overflow-y: visible; }
+  .grid-area { overflow: visible; }
   .group-selector { width: 96px; }
   .search-input { width: 130px; }
   .company-info-grid { grid-template-columns: 1fr; }
@@ -1659,7 +1660,6 @@ h1, h2, h3, h4, h5, h6 { font-weight: 600; }
   .ai-model-input { width: 90px; }
   .ai-key-input { width: 100px; }
   .ticker-strip { display: none; }
-  .main-content { margin-top: var(--header-h); height: calc(100vh - var(--header-h)); }
   .sidebar-container { top: var(--header-h); }
   .backdrop { inset: var(--header-h) 0 0 0; }
   .company-page { padding-top: calc(var(--header-h) + 14px); }
