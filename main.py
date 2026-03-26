@@ -109,7 +109,6 @@ def _create_user_tables():
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS watchlists (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
-            session_id TEXT    NOT NULL DEFAULT 'default',
             name       TEXT    NOT NULL,
             tickers    TEXT    NOT NULL DEFAULT '[]',
             created_at TEXT    DEFAULT (datetime('now')),
@@ -117,7 +116,6 @@ def _create_user_tables():
         );
         CREATE TABLE IF NOT EXISTS portfolios (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
-            session_id TEXT    NOT NULL DEFAULT 'default',
             name       TEXT    NOT NULL,
             created_at TEXT    DEFAULT (datetime('now'))
         );
@@ -132,7 +130,6 @@ def _create_user_tables():
         );
         CREATE TABLE IF NOT EXISTS alerts (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            session_id   TEXT    NOT NULL DEFAULT 'default',
             ticker       TEXT NOT NULL,
             metric       TEXT NOT NULL,
             condition    TEXT NOT NULL,
@@ -156,9 +153,6 @@ def _create_user_tables():
         CREATE INDEX IF NOT EXISTS idx_stock_data_ticker_date  ON stock_data  (Ticker, Date);
         CREATE INDEX IF NOT EXISTS idx_stock_data_date         ON stock_data  (Date);
         CREATE INDEX IF NOT EXISTS idx_pattern_ticker_date ON pattern_signals (ticker, detected_at);
-        CREATE INDEX IF NOT EXISTS idx_watchlists_session ON watchlists (session_id);
-        CREATE INDEX IF NOT EXISTS idx_portfolios_session ON portfolios (session_id);
-        CREATE INDEX IF NOT EXISTS idx_alerts_session ON alerts (session_id);
     """)
     # Migrate existing tables that may be missing session_id column
     for table in ("watchlists", "portfolios", "alerts"):
@@ -170,7 +164,12 @@ def _create_user_tables():
             logger.info("Migrated %s: added session_id column", table)
         except Exception:
             pass  # Column already exists
-    # Drop old UNIQUE constraint on watchlists.name (name is now unique per session, not globally)
+    # Create session indexes after migration ensures column exists
+    conn.executescript("""
+        CREATE INDEX IF NOT EXISTS idx_watchlists_session ON watchlists (session_id);
+        CREATE INDEX IF NOT EXISTS idx_portfolios_session ON portfolios (session_id);
+        CREATE INDEX IF NOT EXISTS idx_alerts_session ON alerts (session_id);
+    """)
     conn.commit()
     conn.close()
 
