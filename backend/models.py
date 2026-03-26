@@ -251,3 +251,71 @@ class PatternSignal(BaseModel):
     level: float | None = None
     confidence: float | None = None
     notes: str | None = None
+
+
+class BacktestRequest(BaseModel):
+    ticker: str
+    entry_metric: str
+    entry_condition: str
+    entry_threshold: float
+    exit_metric: str
+    exit_condition: str
+    exit_threshold: float
+    start_date: str | None = None
+    end_date: str | None = None
+    initial_capital: float = 10000.0
+
+
+class BacktestTrade(BaseModel):
+    entry_date: str
+    entry_price: float
+    exit_date: str
+    exit_price: float
+    return_pct: float
+    pnl: float
+
+
+class BacktestResult(BaseModel):
+    ticker: str
+    total_return_pct: float
+    buy_hold_return_pct: float
+    num_trades: int
+    win_rate: float
+    avg_return_pct: float
+    max_drawdown_pct: float
+    sharpe_ratio: float | None
+    equity_curve: list[dict]
+    trades: list[BacktestTrade]
+    strategy: str
+
+
+class RadarData(BaseModel):
+    ticker: str
+    momentum: float
+    trend: float
+    volume: float
+    volatility: float
+    value: float
+    sector_momentum: float
+    sector_trend: float
+    sector_volume: float
+    sector_volatility: float
+    sector_value: float
+
+
+class LivePrices(BaseModel):
+    prices: dict[str, float | None]
+    timestamp: str
+
+
+class MarketPulseItem(BaseModel):
+    type: str
+    ticker: str
+    headline: str
+    value: str | None = None
+    color: str
+
+
+class MarketPulse(BaseModel):
+    items: list[MarketPulseItem]
+    generated_at: str
