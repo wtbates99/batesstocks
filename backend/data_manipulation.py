@@ -241,8 +241,21 @@ def update_today_indicators(conn: sqlite3.Connection):
     )
     new_rows["Ticker_Tech_Score"] = (raw * 100).round(1).clip(0, 100)
 
-    # Wipe only today's rows then insert fresh
-    conn.execute("DELETE FROM ticker_data WHERE Date >= ?", (today,))
+    # Drop tickers where yfinance returned a null Close (incomplete intraday bar).
+    # Leaving them out means the combined_stock_data view falls back to their last
+    # valid date, which is better than surfacing null OHLCV rows downstream.
+    new_rows = new_rows[new_rows["Close"].notna()]
+    if new_rows.empty:
+        return
+
+    # Only delete/replace tickers we have fresh data for — don't wipe valid rows
+    # for tickers whose new bar came back null and were filtered out above.
+    tickers_with_data = new_rows["Ticker"].tolist()
+    placeholders = ",".join("?" * len(tickers_with_data))
+    conn.execute(
+        f"DELETE FROM ticker_data WHERE Date >= ? AND Ticker IN ({placeholders})",
+        [today, *tickers_with_data],
+    )
     new_rows.to_sql("ticker_data", conn, if_exists="append", index=False)
     conn.commit()
 
@@ -326,12 +339,16 @@ def update_today_sector_subsector(conn: sqlite3.Connection):
     subsector_today = _compute_group("Subsector", df_sub, "Subsector")
 
     if sector_today is not None and not sector_today.empty:
-        conn.execute("DELETE FROM sector_data WHERE Date >= ?", (today,))
-        sector_today.to_sql("sector_data", conn, if_exists="append", index=False)
+        sector_today = sector_today[sector_today["Close"].notna()]
+        if not sector_today.empty:
+            conn.execute("DELETE FROM sector_data WHERE Date >= ?", (today,))
+            sector_today.to_sql("sector_data", conn, if_exists="append", index=False)
 
     if subsector_today is not None and not subsector_today.empty:
-        conn.execute("DELETE FROM subsector_data WHERE Date >= ?", (today,))
-        subsector_today.to_sql("subsector_data", conn, if_exists="append", index=False)
+        subsector_today = subsector_today[subsector_today["Close"].notna()]
+        if not subsector_today.empty:
+            conn.execute("DELETE FROM subsector_data WHERE Date >= ?", (today,))
+            subsector_today.to_sql("subsector_data", conn, if_exists="append", index=False)
 
     conn.commit()
 
