@@ -3,7 +3,7 @@ import { NavLink } from 'react-router-dom';
 import '../styles.css';
 
 const NavBar = () => (
-  <nav className="header-nav">
+  <nav className="header-nav" style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none' }}>
     <NavLink to="/" end className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>
       CHARTS
     </NavLink>

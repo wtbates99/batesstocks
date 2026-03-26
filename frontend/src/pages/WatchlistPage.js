@@ -6,6 +6,7 @@ import {
 } from 'recharts';
 import NavBar from '../components/NavBar';
 import { metricsList } from '../metricsList';
+import { sessionFetch } from '../hooks/useSessionId';
 import '../styles.css';
 
 // ── Watchlist tab ──────────────────────────────────────────────────────────────
@@ -20,7 +21,7 @@ function WatchlistTab() {
   const [editTickers, setEditTickers] = useState('');
 
   const load = useCallback(() => {
-    fetch('/watchlists').then((r) => r.json()).then(setLists).catch(console.error);
+    sessionFetch('/watchlists').then((r) => r.json()).then(setLists).catch(console.error);
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -28,7 +29,7 @@ function WatchlistTab() {
   const create = async () => {
     if (!newName.trim()) return;
     const tickers = newTickers.split(',').map((t) => t.trim().toUpperCase()).filter(Boolean);
-    await fetch('/watchlists', {
+    await sessionFetch('/watchlists', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: newName.trim(), tickers }),
@@ -39,7 +40,7 @@ function WatchlistTab() {
   };
 
   const del = async (id) => {
-    await fetch(`/watchlists/${id}`, { method: 'DELETE' });
+    await sessionFetch(`/watchlists/${id}`, { method: 'DELETE' });
     load();
   };
 
@@ -51,7 +52,7 @@ function WatchlistTab() {
 
   const saveEdit = async () => {
     const tickers = editTickers.split(',').map((t) => t.trim().toUpperCase()).filter(Boolean);
-    await fetch(`/watchlists/${editId}`, {
+    await sessionFetch(`/watchlists/${editId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: editName.trim(), tickers }),
@@ -149,7 +150,7 @@ function PortfolioTab() {
   const [editCost,   setEditCost]       = useState('');
 
   const loadPortfolios = useCallback(() => {
-    fetch('/portfolios').then((r) => r.json()).then((list) => {
+    sessionFetch('/portfolios').then((r) => r.json()).then((list) => {
       setPortfolios(list);
       if (list.length > 0 && !activePort) {
         loadPortfolio(list[0].id);
@@ -158,8 +159,8 @@ function PortfolioTab() {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadPortfolio = useCallback((id) => {
-    fetch(`/portfolios/${id}`).then((r) => r.json()).then(setActivePort).catch(console.error);
-    fetch(`/portfolios/${id}/chart?days=${chartDays}`)
+    sessionFetch(`/portfolios/${id}`).then((r) => r.json()).then(setActivePort).catch(console.error);
+    sessionFetch(`/portfolios/${id}/chart?days=${chartDays}`)
       .then((r) => r.json()).then(setChartData).catch(console.error);
   }, [chartDays]);
 
@@ -167,14 +168,14 @@ function PortfolioTab() {
 
   useEffect(() => {
     if (activePort) {
-      fetch(`/portfolios/${activePort.id}/chart?days=${chartDays}`)
+      sessionFetch(`/portfolios/${activePort.id}/chart?days=${chartDays}`)
         .then((r) => r.json()).then(setChartData).catch(console.error);
     }
   }, [chartDays, activePort?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const createPortfolio = async () => {
     if (!portName.trim()) return;
-    const resp = await fetch('/portfolios', {
+    const resp = await sessionFetch('/portfolios', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: portName.trim() }),
@@ -187,7 +188,7 @@ function PortfolioTab() {
 
   const addPosition = async () => {
     if (!activePort || !newTicker || !newShares || !newCost) return;
-    await fetch(`/portfolios/${activePort.id}/positions`, {
+    await sessionFetch(`/portfolios/${activePort.id}/positions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -202,7 +203,7 @@ function PortfolioTab() {
   };
 
   const deletePosition = async (posId) => {
-    await fetch(`/portfolios/${activePort.id}/positions/${posId}`, { method: 'DELETE' });
+    await sessionFetch(`/portfolios/${activePort.id}/positions/${posId}`, { method: 'DELETE' });
     loadPortfolio(activePort.id);
   };
 
@@ -213,7 +214,7 @@ function PortfolioTab() {
   };
 
   const saveEditPos = async (pos) => {
-    await fetch(`/portfolios/${activePort.id}/positions/${pos.id}`, {
+    await sessionFetch(`/portfolios/${activePort.id}/positions/${pos.id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -429,14 +430,14 @@ function AlertsTab() {
   const [alertForm, setAlertForm] = useState({ ticker: '', metric: 'Ticker_Close', condition: 'above', threshold: '', notes: '' });
 
   const loadAlerts = useCallback(() => {
-    fetch('/alerts').then(r => r.json()).then(setAlerts).catch(console.error);
+    sessionFetch('/alerts').then(r => r.json()).then(setAlerts).catch(console.error);
   }, []);
 
   useEffect(() => { loadAlerts(); }, [loadAlerts]);
 
   const createAlert = async () => {
     if (!alertForm.ticker || !alertForm.threshold) return;
-    await fetch('/alerts', {
+    await sessionFetch('/alerts', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ...alertForm, threshold: parseFloat(alertForm.threshold) }),
@@ -446,7 +447,7 @@ function AlertsTab() {
   };
 
   const deleteAlert = async (id) => {
-    await fetch(`/alerts/${id}`, { method: 'DELETE' });
+    await sessionFetch(`/alerts/${id}`, { method: 'DELETE' });
     loadAlerts();
   };
 
