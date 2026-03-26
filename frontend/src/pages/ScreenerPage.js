@@ -12,6 +12,11 @@ function fmt(key, val) {
     case 'eps':          return `$${Number(val).toFixed(2)}`;
     case 'beta':         return Number(val).toFixed(2);
     case 'rsi':          return Number(val).toFixed(1);
+    case 'tech_score':   return (
+      <span style={{ color: val >= 70 ? 'var(--green)' : val < 40 ? 'var(--red)' : 'var(--text)' }}>
+        {Number(val).toFixed(0)}
+      </span>
+    );
     case 'return_52w':   return (
       <span style={{ color: val >= 0 ? 'var(--green)' : 'var(--red)' }}>
         {val >= 0 ? '+' : ''}{Number(val).toFixed(1)}%
@@ -31,12 +36,28 @@ const ScreenerPage = () => {
     sector: '', minPE: '', maxPE: '', minMktCap: '', maxMktCap: '',
     minRSI: '', maxRSI: '', min52W: '', max52W: '',
   });
+  const [patternFilter, setPatternFilter] = useState('');
+  const [patternMap, setPatternMap] = useState({});
 
   useEffect(() => {
     fetch('/screener')
       .then((r) => r.json())
       .then((d) => { setAllData(d); setLoading(false); })
       .catch((e) => { console.error(e); setLoading(false); });
+  }, []);
+
+  useEffect(() => {
+    fetch('/patterns?days=1')
+      .then(r => r.json())
+      .then(d => {
+        const map = {};
+        (Array.isArray(d) ? d : []).forEach(p => {
+          if (!map[p.ticker]) map[p.ticker] = [];
+          map[p.ticker].push(p.pattern_type);
+        });
+        setPatternMap(map);
+      })
+      .catch(() => {});
   }, []);
 
   const sectors = useMemo(() => {
@@ -60,8 +81,9 @@ const ScreenerPage = () => {
     if (maxRSI)   rows = rows.filter((r) => r.rsi   != null && r.rsi   <= parseFloat(maxRSI));
     if (min52W)   rows = rows.filter((r) => r.return_52w != null && r.return_52w >= parseFloat(min52W));
     if (max52W)   rows = rows.filter((r) => r.return_52w != null && r.return_52w <= parseFloat(max52W));
+    if (patternFilter) rows = rows.filter((r) => (patternMap[r.ticker] || []).includes(patternFilter));
     return rows;
-  }, [allData, filters]);
+  }, [allData, filters, patternFilter, patternMap]);
 
   const sorted = useMemo(() => {
     return [...filtered].sort((a, b) => {
@@ -82,10 +104,13 @@ const ScreenerPage = () => {
     });
   }, []);
 
-  const clearFilters = () => setFilters({
-    sector: '', minPE: '', maxPE: '', minMktCap: '', maxMktCap: '',
-    minRSI: '', maxRSI: '', min52W: '', max52W: '',
-  });
+  const clearFilters = () => {
+    setFilters({
+      sector: '', minPE: '', maxPE: '', minMktCap: '', maxMktCap: '',
+      minRSI: '', maxRSI: '', min52W: '', max52W: '',
+    });
+    setPatternFilter('');
+  };
 
   const colHeaders = [
     { key: 'ticker',      label: 'TICKER'   },
@@ -98,6 +123,7 @@ const ScreenerPage = () => {
     { key: 'rsi',         label: 'RSI'      },
     { key: 'latest_close',label: 'PRICE'    },
     { key: 'return_52w',  label: '52W RET'  },
+    { key: 'tech_score',  label: 'SCORE'    },
   ];
 
   return (
@@ -163,6 +189,17 @@ const ScreenerPage = () => {
               <input className="filter-input" type="number" placeholder="Max" value={filters.max52W} onChange={(e) => setFilter('max52W', e.target.value)} />
             </div>
           </div>
+
+          <div className="filter-group">
+            <label className="filter-label">PATTERN</label>
+            <select className="filter-select" value={patternFilter} onChange={(e) => setPatternFilter(e.target.value)}>
+              <option value="">All</option>
+              <option value="double_top">Double Top</option>
+              <option value="double_bottom">Double Bottom</option>
+              <option value="support">Support</option>
+              <option value="resistance">Resistance</option>
+            </select>
+          </div>
         </div>
 
         {/* Table */}
@@ -197,7 +234,7 @@ const ScreenerPage = () => {
                     <td className="screener-td ticker-cell">{row.ticker}</td>
                     <td className="screener-td name-cell">{row.name || '—'}</td>
                     <td className="screener-td">{row.sector || '—'}</td>
-                    {['market_cap','pe','eps','beta','rsi','latest_close','return_52w'].map((k) => (
+                    {['market_cap','pe','eps','beta','rsi','latest_close','return_52w','tech_score'].map((k) => (
                       <td key={k} className="screener-td num-cell">{fmt(k, row[k])}</td>
                     ))}
                   </tr>
