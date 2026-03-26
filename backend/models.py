@@ -32,6 +32,8 @@ class StockData(BaseModel):
     Ticker_Chaikin_MF: float | None = None
     Ticker_Force_Index: float | None = None
     Ticker_MFI: float | None = None
+    Ticker_VWAP: float | None = None
+    Ticker_Tech_Score: float | None = None
 
 
 class CompanyInfo(BaseModel):
@@ -96,6 +98,7 @@ class ScreenerRow(BaseModel):
     rsi: float | None = None
     latest_close: float | None = None
     return_52w: float | None = None
+    tech_score: float | None = None
 
 
 class WatchlistCreate(BaseModel):
@@ -143,3 +146,108 @@ class PortfolioOut(BaseModel):
     total_cost: float
     total_value: float
     total_pnl: float
+
+
+class NewsItem(BaseModel):
+    title: str
+    publisher: str
+    link: str
+    published_at: str
+    thumbnail: str | None = None
+
+
+class OptionContract(BaseModel):
+    contractSymbol: str
+    strike: float
+    lastPrice: float | None = None
+    bid: float | None = None
+    ask: float | None = None
+    volume: int | None = None
+    openInterest: int | None = None
+    impliedVolatility: float | None = None
+    inTheMoney: bool | None = None
+
+
+class OptionsChain(BaseModel):
+    expiry: str
+    calls: list[OptionContract]
+    puts: list[OptionContract]
+    expirations: list[str]
+
+
+class EarningsEvent(BaseModel):
+    ticker: str
+    company_name: str | None = None
+    earnings_date: str
+    eps_estimate: float | None = None
+    eps_actual: float | None = None
+    surprise_pct: float | None = None
+
+
+class PeerRow(BaseModel):
+    ticker: str
+    name: str | None = None
+    market_cap: float | None = None
+    pe: float | None = None
+    eps: float | None = None
+    beta: float | None = None
+    rsi: float | None = None
+    return_52w: float | None = None
+    tech_score: float | None = None
+
+
+class SectorRotationRow(BaseModel):
+    sector: str
+    return_pct: float | None = None
+    avg_rsi: float | None = None
+    avg_tech_score: float | None = None
+
+
+class MarketBreadth(BaseModel):
+    date: str
+    advancing: int
+    declining: int
+    unchanged: int
+    new_highs_52w: int
+    new_lows_52w: int
+    above_sma50: int
+    below_sma50: int
+    avg_rsi: float | None = None
+    avg_tech_score: float | None = None
+    pct_advancing: float | None = None
+    total: int
+
+
+class CorrelationMatrix(BaseModel):
+    tickers: list[str]
+    matrix: list[list[float | None]]
+
+
+class AlertCreate(BaseModel):
+    ticker: str
+    metric: str
+    condition: str
+    threshold: float
+    notes: str | None = None
+
+
+class AlertOut(BaseModel):
+    id: int
+    ticker: str
+    metric: str
+    condition: str
+    threshold: float
+    triggered: bool
+    triggered_at: str | None = None
+    created_at: str
+    notes: str | None = None
+
+
+class PatternSignal(BaseModel):
+    id: int
+    ticker: str
+    detected_at: str
+    pattern_type: str
+    level: float | None = None
+    confidence: float | None = None
+    notes: str | None = None

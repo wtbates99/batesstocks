@@ -5,6 +5,7 @@ import {
   CartesianGrid, Tooltip,
 } from 'recharts';
 import NavBar from '../components/NavBar';
+import { metricsList } from '../metricsList';
 import '../styles.css';
 
 // ── Watchlist tab ──────────────────────────────────────────────────────────────
@@ -421,6 +422,75 @@ function PortfolioTab() {
   );
 }
 
+// ── Alerts tab ─────────────────────────────────────────────────────────────────
+
+function AlertsTab() {
+  const [alerts, setAlerts] = useState([]);
+  const [alertForm, setAlertForm] = useState({ ticker: '', metric: 'Ticker_Close', condition: 'above', threshold: '', notes: '' });
+
+  const loadAlerts = useCallback(() => {
+    fetch('/alerts').then(r => r.json()).then(setAlerts).catch(console.error);
+  }, []);
+
+  useEffect(() => { loadAlerts(); }, [loadAlerts]);
+
+  const createAlert = async () => {
+    if (!alertForm.ticker || !alertForm.threshold) return;
+    await fetch('/alerts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...alertForm, threshold: parseFloat(alertForm.threshold) }),
+    });
+    setAlertForm({ ticker: '', metric: 'Ticker_Close', condition: 'above', threshold: '', notes: '' });
+    loadAlerts();
+  };
+
+  const deleteAlert = async (id) => {
+    await fetch(`/alerts/${id}`, { method: 'DELETE' });
+    loadAlerts();
+  };
+
+  return (
+    <div className="wl-tab-content">
+      <div className="wl-create-section">
+        <h3 className="wl-section-title">NEW ALERT</h3>
+        <div className="wl-create-row" style={{ flexWrap: 'wrap', gap: 6 }}>
+          <input className="wl-input" placeholder="Ticker" value={alertForm.ticker} onChange={e => setAlertForm(p => ({ ...p, ticker: e.target.value.toUpperCase() }))} />
+          <select className="filter-select" value={alertForm.metric} onChange={e => setAlertForm(p => ({ ...p, metric: e.target.value }))}>
+            {metricsList.map(m => <option key={m.name} value={m.name}>{m.name.replace('Ticker_', '').replace(/_/g, ' ')}</option>)}
+          </select>
+          <select className="filter-select" value={alertForm.condition} onChange={e => setAlertForm(p => ({ ...p, condition: e.target.value }))}>
+            <option value="above">Above</option>
+            <option value="below">Below</option>
+          </select>
+          <input className="wl-input" type="number" placeholder="Threshold" value={alertForm.threshold} onChange={e => setAlertForm(p => ({ ...p, threshold: e.target.value }))} />
+          <input className="wl-input wl-input-wide" placeholder="Notes (optional)" value={alertForm.notes} onChange={e => setAlertForm(p => ({ ...p, notes: e.target.value }))} />
+          <button className="wl-btn-accent" onClick={createAlert}>+ CREATE</button>
+        </div>
+      </div>
+      <div className="wl-list">
+        {alerts.length === 0 && <div className="wl-empty">No alerts yet.</div>}
+        {alerts.map(a => (
+          <div key={a.id} className="wl-card" style={{ background: a.triggered ? 'rgba(34,197,94,0.08)' : undefined }}>
+            <div className="wl-card-header">
+              <span className="wl-card-name">{a.ticker}</span>
+              <span style={{ fontSize: 10, color: 'var(--dim)' }}>
+                {a.metric.replace('Ticker_','').replace(/_/g,' ')} {a.condition} {a.threshold}
+              </span>
+              {a.triggered && <span className="signal-badge signal-momentum">TRIGGERED</span>}
+              <div className="wl-card-actions">
+                <button className="wl-btn-danger" onClick={() => deleteAlert(a.id)}>✕</button>
+              </div>
+            </div>
+            {a.notes && <div style={{ fontSize: 9, color: 'var(--dim)', padding: '2px 0' }}>{a.notes}</div>}
+            {a.triggered_at && <div style={{ fontSize: 9, color: 'var(--green)' }}>Triggered: {a.triggered_at}</div>}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ── Main page ──────────────────────────────────────────────────────────────────
 
 const WatchlistPage = () => {
@@ -445,9 +515,13 @@ const WatchlistPage = () => {
             className={`wl-tab-btn ${activeTab === 'portfolio' ? 'active' : ''}`}
             onClick={() => setActiveTab('portfolio')}
           >PORTFOLIO</button>
+          <button
+            className={`wl-tab-btn ${activeTab === 'alerts' ? 'active' : ''}`}
+            onClick={() => setActiveTab('alerts')}
+          >ALERTS</button>
         </div>
 
-        {activeTab === 'watchlists' ? <WatchlistTab /> : <PortfolioTab />}
+        {activeTab === 'watchlists' ? <WatchlistTab /> : activeTab === 'alerts' ? <AlertsTab /> : <PortfolioTab />}
       </div>
     </div>
   );

@@ -1,5 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
+import {
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
+} from 'recharts';
 import StockChart from '../components/StockChart';
 import SearchBar from '../components/SearchBar';
 import NavBar from '../components/NavBar';
@@ -35,6 +38,28 @@ const CompanyPage = () => {
   const [chartType, setChartType] = useState('area');
   const [infoTab, setInfoTab]     = useState('financials');
 
+  // News state
+  const [newsItems, setNewsItems] = useState([]);
+  const [newsLoading, setNewsLoading] = useState(false);
+
+  // Options state
+  const [optionsData, setOptionsData] = useState(null);
+  const [optionsExpiry, setOptionsExpiry] = useState(null);
+  const [optionsSide, setOptionsSide] = useState('calls');
+  const [optionsLoading, setOptionsLoading] = useState(false);
+
+  // Earnings state
+  const [earningsHistory, setEarningsHistory] = useState([]);
+  const [earningsLoading, setEarningsLoading] = useState(false);
+
+  // Peers state
+  const [peersData, setPeersData] = useState([]);
+  const [peersLoading, setPeersLoading] = useState(false);
+
+  // Patterns state
+  const [patterns, setPatterns] = useState([]);
+  const [patternsLoading, setPatternsLoading] = useState(false);
+
   useEffect(() => {
     setCompanyInfo(null);
     setPriceData(null);
@@ -43,6 +68,52 @@ const CompanyPage = () => {
       .then(setCompanyInfo)
       .catch(console.error);
   }, [ticker]);
+
+  useEffect(() => {
+    if (infoTab !== 'news') return;
+    setNewsLoading(true);
+    fetch(`/news/${ticker}`)
+      .then(r => r.json())
+      .then(d => { setNewsItems(Array.isArray(d) ? d : []); setNewsLoading(false); })
+      .catch(() => setNewsLoading(false));
+  }, [infoTab, ticker]);
+
+  useEffect(() => {
+    if (infoTab !== 'options') return;
+    setOptionsLoading(true);
+    const url = optionsExpiry ? `/options/${ticker}?expiry=${optionsExpiry}` : `/options/${ticker}`;
+    fetch(url)
+      .then(r => r.json())
+      .then(d => { setOptionsData(d); if (!optionsExpiry && d.expiry) setOptionsExpiry(d.expiry); setOptionsLoading(false); })
+      .catch(() => setOptionsLoading(false));
+  }, [infoTab, ticker, optionsExpiry]);
+
+  useEffect(() => {
+    if (infoTab !== 'earnings') return;
+    setEarningsLoading(true);
+    fetch(`/earnings/${ticker}`)
+      .then(r => r.json())
+      .then(d => { setEarningsHistory(Array.isArray(d) ? d : []); setEarningsLoading(false); })
+      .catch(() => setEarningsLoading(false));
+  }, [infoTab, ticker]);
+
+  useEffect(() => {
+    if (infoTab !== 'peers') return;
+    setPeersLoading(true);
+    fetch(`/peers/${ticker}`)
+      .then(r => r.json())
+      .then(d => { setPeersData(Array.isArray(d) ? d : []); setPeersLoading(false); })
+      .catch(() => setPeersLoading(false));
+  }, [infoTab, ticker]);
+
+  useEffect(() => {
+    if (infoTab !== 'patterns') return;
+    setPatternsLoading(true);
+    fetch(`/patterns/${ticker}?days=30`)
+      .then(r => r.json())
+      .then(d => { setPatterns(Array.isArray(d) ? d : []); setPatternsLoading(false); })
+      .catch(() => setPatternsLoading(false));
+  }, [infoTab, ticker]);
 
   const setDateRange = useCallback((days) => {
     setStartDate(new Date(Date.now() - days * 86400000));
@@ -216,7 +287,7 @@ const CompanyPage = () => {
               ))}
             </div>
             <div className="cp-chart-type">
-              {[{ key: 'area', label: 'AREA' }, { key: 'candle', label: 'CANDLE' }].map(({ key, label }) => (
+              {[{ key: 'area', label: 'AREA' }, { key: 'candle', label: 'CANDLE' }, { key: 'relative', label: 'RELATIVE' }].map(({ key, label }) => (
                 <button
                   key={key}
                   className={`cp-range-btn ${chartType === key ? 'active' : ''}`}
@@ -270,6 +341,11 @@ const CompanyPage = () => {
                 { key: 'financials', label: 'FINANCIALS' },
                 { key: 'general',   label: 'GENERAL'    },
                 { key: 'company',   label: 'COMPANY'    },
+                { key: 'news',      label: 'NEWS'       },
+                { key: 'options',   label: 'OPTIONS'    },
+                { key: 'earnings',  label: 'EARNINGS'   },
+                { key: 'peers',     label: 'PEERS'      },
+                { key: 'patterns',  label: 'PATTERNS'   },
               ].map(({ key, label }) => (
                 <button
                   key={key}
@@ -293,6 +369,151 @@ const CompanyPage = () => {
                   </div>
                 );
               })}
+
+              {infoTab === 'news' && (
+                <div className="news-panel">
+                  {newsLoading ? <div className="cp-loading-label">Loading…</div>
+                  : newsItems.length === 0 ? <div className="cp-loading-label">No news available.</div>
+                  : newsItems.map((item, i) => (
+                    <a key={i} className="news-item" href={item.link} target="_blank" rel="noreferrer">
+                      <div className="news-meta">
+                        <span className="news-publisher">{item.publisher}</span>
+                        <span className="news-date">{item.published_at?.slice(0,10)}</span>
+                      </div>
+                      <div className="news-title">{item.title}</div>
+                    </a>
+                  ))}
+                </div>
+              )}
+
+              {infoTab === 'options' && (
+                <div className="options-panel">
+                  {optionsLoading ? <div className="cp-loading-label">Loading…</div>
+                  : !optionsData ? <div className="cp-loading-label">No options data.</div>
+                  : <>
+                    <div className="options-toolbar">
+                      <select className="options-expiry-select" value={optionsExpiry || ''} onChange={e => setOptionsExpiry(e.target.value)}>
+                        {(optionsData.expirations || []).map(e => <option key={e} value={e}>{e}</option>)}
+                      </select>
+                      <div className="options-side-toggle">
+                        {['calls','puts'].map(s => (
+                          <button key={s} className={`cp-range-btn ${optionsSide===s?'active':''}`} onClick={() => setOptionsSide(s)}>{s.toUpperCase()}</button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="options-table-wrap">
+                      <table className="options-table">
+                        <thead><tr><th>STRIKE</th><th>LAST</th><th>BID</th><th>ASK</th><th>VOL</th><th>OI</th><th>IV</th><th>ITM</th></tr></thead>
+                        <tbody>
+                          {(optionsData[optionsSide] || []).map((c, i) => (
+                            <tr key={i} className={c.inTheMoney ? 'itm-row' : ''}>
+                              <td>{c.strike?.toFixed(2)}</td>
+                              <td>{c.lastPrice?.toFixed(2) ?? '—'}</td>
+                              <td>{c.bid?.toFixed(2) ?? '—'}</td>
+                              <td>{c.ask?.toFixed(2) ?? '—'}</td>
+                              <td>{c.volume?.toLocaleString() ?? '—'}</td>
+                              <td>{c.openInterest?.toLocaleString() ?? '—'}</td>
+                              <td>{c.impliedVolatility != null ? `${(c.impliedVolatility*100).toFixed(1)}%` : '—'}</td>
+                              <td style={{color: c.inTheMoney ? 'var(--green)' : 'var(--dim)'}}>{c.inTheMoney ? '✓' : '—'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>}
+                </div>
+              )}
+
+              {infoTab === 'earnings' && (
+                <div className="earnings-panel">
+                  {earningsLoading ? <div className="cp-loading-label">Loading…</div>
+                  : earningsHistory.length === 0 ? <div className="cp-loading-label">No earnings data available.</div>
+                  : <>
+                    <ResponsiveContainer width="100%" height={180}>
+                      <BarChart data={earningsHistory.slice(0, 8).reverse()} margin={{ top: 8, right: 8, bottom: 8, left: 8 }}>
+                        <XAxis dataKey="earnings_date" tick={{ fill: '#3e3e58', fontSize: 8 }} tickFormatter={v => v?.slice(0,7)} />
+                        <YAxis tick={{ fill: '#3e3e58', fontSize: 8 }} orientation="right" axisLine={false} tickLine={false} />
+                        <Tooltip contentStyle={{ background: 'var(--surface-2)', border: '1px solid var(--border)', fontSize: 10 }} />
+                        <Bar dataKey="eps_estimate" fill="#3e3e58" name="EPS Est" radius={[2,2,0,0]} />
+                        <Bar dataKey="eps_actual" name="EPS Act" radius={[2,2,0,0]}>
+                          {earningsHistory.slice(0,8).reverse().map((e, i) => (
+                            <Cell key={i} fill={e.eps_actual >= (e.eps_estimate || 0) ? '#22c55e' : '#ef4444'} />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                    <table className="options-table" style={{ marginTop: 8 }}>
+                      <thead><tr><th>DATE</th><th>EPS EST</th><th>EPS ACT</th><th>SURPRISE</th></tr></thead>
+                      <tbody>
+                        {earningsHistory.map((e, i) => (
+                          <tr key={i}>
+                            <td>{e.earnings_date}</td>
+                            <td>{e.eps_estimate != null ? e.eps_estimate.toFixed(2) : '—'}</td>
+                            <td>{e.eps_actual != null ? e.eps_actual.toFixed(2) : '—'}</td>
+                            <td style={{ color: e.surprise_pct == null ? 'var(--dim)' : e.surprise_pct >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                              {e.surprise_pct != null ? `${e.surprise_pct > 0 ? '+' : ''}${e.surprise_pct.toFixed(1)}%` : '—'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </>}
+                </div>
+              )}
+
+              {infoTab === 'peers' && (
+                <div className="peers-panel">
+                  {peersLoading ? <div className="cp-loading-label">Loading…</div>
+                  : <table className="options-table">
+                      <thead>
+                        <tr><th>TICKER</th><th className="num-col">MKT CAP</th><th className="num-col">P/E</th><th className="num-col">EPS</th><th className="num-col">BETA</th><th className="num-col">RSI</th><th className="num-col">52W RET</th><th className="num-col">SCORE</th></tr>
+                      </thead>
+                      <tbody>
+                        {peersData.map(p => {
+                          const isSelected = p.ticker === ticker;
+                          return (
+                            <tr key={p.ticker} className={isSelected ? 'selected-peer-row' : ''} style={{ cursor: 'pointer' }} onClick={() => window.location.href = `/spotlight/${p.ticker}`}>
+                              <td style={{ color: isSelected ? 'var(--accent)' : 'var(--text)', fontWeight: isSelected ? 700 : 400 }}>{p.ticker}</td>
+                              <td className="num-col">{p.market_cap ? new Intl.NumberFormat('en-US', { notation: 'compact', style: 'currency', currency: 'USD', maximumFractionDigits: 1 }).format(p.market_cap) : '—'}</td>
+                              <td className="num-col">{p.pe?.toFixed(1) ?? '—'}</td>
+                              <td className="num-col">{p.eps?.toFixed(2) ?? '—'}</td>
+                              <td className="num-col">{p.beta?.toFixed(2) ?? '—'}</td>
+                              <td className="num-col" style={{ color: p.rsi > 70 ? 'var(--red)' : p.rsi < 30 ? 'var(--green)' : 'var(--text)' }}>{p.rsi?.toFixed(0) ?? '—'}</td>
+                              <td className="num-col" style={{ color: p.return_52w >= 0 ? 'var(--green)' : 'var(--red)' }}>{p.return_52w != null ? `${p.return_52w > 0 ? '+' : ''}${p.return_52w.toFixed(1)}%` : '—'}</td>
+                              <td className="num-col" style={{ color: p.tech_score >= 70 ? 'var(--green)' : p.tech_score < 40 ? 'var(--red)' : 'var(--text)' }}>{p.tech_score?.toFixed(0) ?? '—'}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  }
+                </div>
+              )}
+
+              {infoTab === 'patterns' && (
+                <div className="patterns-panel">
+                  {patternsLoading ? <div className="cp-loading-label">Loading…</div>
+                  : patterns.length === 0 ? <div className="cp-loading-label">No patterns detected recently.</div>
+                  : patterns.map(p => {
+                      const colors = { double_top: 'var(--red)', double_bottom: 'var(--green)', resistance: 'var(--red)', support: 'var(--green)' };
+                      const col = colors[p.pattern_type] || 'var(--muted)';
+                      return (
+                        <div key={p.id} className="pattern-card">
+                          <div className="pattern-header">
+                            <span className="pattern-badge" style={{ color: col, borderColor: col }}>{p.pattern_type.replace(/_/g,' ').toUpperCase()}</span>
+                            <span className="pattern-date">{p.detected_at}</span>
+                          </div>
+                          <div className="pattern-details">
+                            {p.level != null && <span>Level: <strong>{p.level.toFixed(2)}</strong></span>}
+                            <span>Confidence: <strong>{p.confidence != null ? `${(p.confidence*100).toFixed(0)}%` : '—'}</strong></span>
+                          </div>
+                          {p.notes && <div className="pattern-notes">{p.notes}</div>}
+                        </div>
+                      );
+                    })
+                  }
+                </div>
+              )}
             </div>
           </div>
 
