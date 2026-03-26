@@ -21,6 +21,14 @@ const DATE_RANGES = [
   { days: 730, label: '2Y' },
 ];
 
+const EXCHANGE_LABELS = {
+  NMS: 'NASDAQ', NGM: 'NASDAQ', NasdaqGS: 'NASDAQ', NasdaqGM: 'NASDAQ', NasdaqCM: 'NASDAQ',
+  NYQ: 'NYSE', NYSE: 'NYSE',
+  ASE: 'AMEX', AMEX: 'AMEX',
+  PCX: 'NYSE Arca', NYSEArca: 'NYSE Arca',
+  BTS: 'BATS', BATS: 'BATS',
+};
+
 const CompanyPage = () => {
   const { ticker } = useParams();
   const [companyInfo, setCompanyInfo]         = useState(null);
@@ -184,7 +192,9 @@ const CompanyPage = () => {
             <span className="cp-ticker">{ticker}</span>
             <span className="cp-name">{companyInfo.FullName}</span>
             {companyInfo.Exchange && (
-              <span className="cp-exchange">{companyInfo.Exchange}</span>
+              <span className="cp-exchange">
+                {EXCHANGE_LABELS[companyInfo.Exchange] || companyInfo.Exchange}
+              </span>
             )}
           </div>
           {priceData && (

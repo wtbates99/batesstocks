@@ -1116,6 +1116,9 @@ h1, h2, h3, h4, h5, h6 { font-weight: 600; }
   .cp-metric-btn      { width: auto; }
   .cp-date-range      { flex-wrap: wrap; }
   .cp-info-body       { grid-template-columns: repeat(2, 1fr); }
+  .company-header     { flex-direction: column; align-items: flex-start; gap: 8px; }
+  .company-header .header-controls { width: 100%; justify-content: flex-end; flex-wrap: wrap; }
+  .cp-ticker-row      { flex-wrap: wrap; }
 }
 @media (max-width: 480px) {
   .cp-info-body { grid-template-columns: 1fr; }
