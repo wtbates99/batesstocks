@@ -21,6 +21,8 @@ from collections import defaultdict
 
 import fakeredis
 import httpx
+import pandas as pd
+import yfinance as yf
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
@@ -31,18 +33,28 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 from sqlalchemy import select
 
-from backend.data_manipulation import process_stock_data
+from backend.data_manipulation import detect_patterns, process_stock_data
 from backend.data_pull import fetch_incremental_ohlcv, fetch_write_financial_data, get_sp500_table
 from backend.database import CombinedStockData, database
 from backend.models import (
+    AlertCreate,
+    AlertOut,
     CompanyInfo,
+    CorrelationMatrix,
+    EarningsEvent,
     HeatmapNode,
+    MarketBreadth,
+    NewsItem,
+    OptionsChain,
+    PatternSignal,
+    PeerRow,
     PortfolioCreate,
     PortfolioOut,
     PositionCreate,
     PositionOut,
     ScreenerRow,
     SearchResult,
+    SectorRotationRow,
     StockData,
     StockGroupings,
     WatchlistCreate,
@@ -96,6 +108,31 @@ def _create_user_tables():
             purchased_at TEXT,
             notes        TEXT
         );
+        CREATE TABLE IF NOT EXISTS alerts (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker       TEXT NOT NULL,
+            metric       TEXT NOT NULL,
+            condition    TEXT NOT NULL,
+            threshold    REAL NOT NULL,
+            triggered    INTEGER DEFAULT 0,
+            triggered_at TEXT DEFAULT NULL,
+            created_at   TEXT DEFAULT (datetime('now')),
+            notes        TEXT
+        );
+        CREATE TABLE IF NOT EXISTS pattern_signals (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker       TEXT NOT NULL,
+            detected_at  TEXT NOT NULL,
+            pattern_type TEXT NOT NULL,
+            level        REAL,
+            confidence   REAL,
+            notes        TEXT,
+            created_at   TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_ticker_data_ticker_date ON ticker_data (Ticker, Date);
+        CREATE INDEX IF NOT EXISTS idx_stock_data_ticker_date  ON stock_data  (Ticker, Date);
+        CREATE INDEX IF NOT EXISTS idx_stock_data_date         ON stock_data  (Date);
+        CREATE INDEX IF NOT EXISTS idx_pattern_ticker_date ON pattern_signals (ticker, detected_at);
     """)
     conn.commit()
     conn.close()
@@ -398,6 +435,29 @@ def _flush_stock_cache():
         logger.warning("Cache flush failed: %s", e)
 
 
+def _evaluate_alerts(conn: sqlite3.Connection):
+    pending = conn.execute(
+        "SELECT id, ticker, metric, condition, threshold FROM alerts WHERE triggered=0"
+    ).fetchall()
+    for aid, ticker, metric, cond, threshold in pending:
+        try:
+            row = conn.execute(
+                f"SELECT {metric} FROM combined_stock_data WHERE Ticker=? ORDER BY Date DESC LIMIT 1",
+                (ticker,),
+            ).fetchone()
+            if not row or row[0] is None:
+                continue
+            val = float(row[0])
+            if (cond == "above" and val > threshold) or (cond == "below" and val < threshold):
+                conn.execute(
+                    "UPDATE alerts SET triggered=1, triggered_at=datetime('now') WHERE id=?",
+                    (aid,),
+                )
+        except Exception as e:
+            logger.warning("Alert eval error id=%s: %s", aid, e)
+    conn.commit()
+
+
 def run_daily_update():
     """Incremental daily refresh — appends only new OHLCV rows since the last stored date."""
     if pipeline_status["running"]:
@@ -422,6 +482,8 @@ def run_daily_update():
         if new_rows > 0:
             process_stock_data(conn)
             create_signal_views(conn)
+            detect_patterns(conn)
+            _evaluate_alerts(conn)
             conn.close()
             _flush_stock_cache()
             _build_search_index_sync()
@@ -854,6 +916,515 @@ async def get_company_info(request: Request, ticker: str):
     return CompanyInfo(**company_data)
 
 
+@app.get("/news/{ticker}", response_model=list[NewsItem])
+@limiter.limit("20/minute")
+async def get_news(request: Request, ticker: str):
+    cache_key = f"news:{ticker}"
+    cached = redis.get(cache_key)
+    if cached:
+        return json.loads(cached)
+    try:
+        raw = yf.Ticker(ticker).news or []
+        items = []
+        for n in raw[:15]:
+            ct = n.get("content", {}) or {}
+            pub = n.get("providerPublishTime") or ct.get("pubDate", "")
+            if isinstance(pub, (int, float)):
+                pub = datetime.datetime.utcfromtimestamp(pub).isoformat()
+            items.append(
+                NewsItem(
+                    title=ct.get("title") or n.get("title", ""),
+                    publisher=(ct.get("provider") or {}).get("displayName", "")
+                    or n.get("publisher", ""),
+                    link=(ct.get("canonicalUrl") or {}).get("url", "") or n.get("link", ""),
+                    published_at=str(pub),
+                    thumbnail=(((ct.get("thumbnail") or {}).get("resolutions") or [{}])[0]).get(
+                        "url"
+                    ),
+                )
+            )
+        redis.set(cache_key, json.dumps([i.model_dump() for i in items]), ex=900)
+        return items
+    except Exception as e:
+        logger.error("News fetch error for %s: %s", ticker, e)
+        return []
+
+
+@app.get("/options/{ticker}", response_model=OptionsChain)
+@limiter.limit("10/minute")
+async def get_options(request: Request, ticker: str, expiry: str | None = None):
+    cache_key = f"options:{ticker}:{expiry}"
+    cached = redis.get(cache_key)
+    if cached:
+        return json.loads(cached)
+    try:
+        stock = yf.Ticker(ticker)
+        expirations = list(stock.options or [])
+        if not expirations:
+            raise HTTPException(status_code=404, detail="No options data")
+        chosen = expiry if expiry in expirations else expirations[0]
+        chain = stock.option_chain(chosen)
+        keep = [
+            "contractSymbol",
+            "strike",
+            "lastPrice",
+            "bid",
+            "ask",
+            "volume",
+            "openInterest",
+            "impliedVolatility",
+            "inTheMoney",
+        ]
+
+        def df_to_contracts(df):
+            df = df[[c for c in keep if c in df.columns]].copy()
+            df = df.where(pd.notna(df), None)
+            return df.to_dict(orient="records")
+
+        result = OptionsChain(
+            expiry=chosen,
+            expirations=expirations,
+            calls=df_to_contracts(chain.calls),
+            puts=df_to_contracts(chain.puts),
+        )
+        redis.set(cache_key, result.model_dump_json(), ex=600)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Options error for %s: %s", ticker, e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/earnings/{ticker}", response_model=list[EarningsEvent])
+@limiter.limit("20/minute")
+async def get_ticker_earnings(request: Request, ticker: str):
+    cache_key = f"earnings:ticker:{ticker}"
+    cached = redis.get(cache_key)
+    if cached:
+        return json.loads(cached)
+    try:
+        t = yf.Ticker(ticker)
+        hist = t.earnings_dates
+        if hist is None or hist.empty:
+            return []
+        results = []
+        for idx, row in hist.iterrows():
+            est = row.get("EPS Estimate")
+            act = row.get("Reported EPS")
+            est_f = float(est) if pd.notna(est) else None
+            act_f = float(act) if pd.notna(act) else None
+            surp = (
+                round((act_f - est_f) / abs(est_f) * 100, 2)
+                if est_f and act_f and est_f != 0
+                else None
+            )
+            results.append(
+                EarningsEvent(
+                    ticker=ticker,
+                    earnings_date=str(pd.Timestamp(idx).date()),
+                    eps_estimate=est_f,
+                    eps_actual=act_f,
+                    surprise_pct=surp,
+                )
+            )
+        redis.set(cache_key, json.dumps([e.model_dump() for e in results]), ex=3600)
+        return results
+    except Exception as e:
+        logger.error("Earnings error for %s: %s", ticker, e)
+        return []
+
+
+@app.get("/earnings", response_model=list[EarningsEvent])
+@limiter.limit("5/minute")
+async def get_earnings_calendar(request: Request, days_ahead: int = Query(14, ge=1, le=60)):
+    cache_key = f"earnings:calendar:{days_ahead}"
+    cached = redis.get(cache_key)
+    if cached:
+        return json.loads(cached)
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        rows = conn.execute("SELECT Ticker, FullName FROM stock_information").fetchall()
+        conn.close()
+        today = datetime.date.today()
+        end_d = today + datetime.timedelta(days=days_ahead)
+        results = []
+        for ticker, name in rows:
+            try:
+                cal = yf.Ticker(ticker).calendar
+                if cal is None or cal.empty:
+                    continue
+                for col in cal.columns:
+                    if "Earnings Date" not in col:
+                        continue
+                    for ed in cal[col].dropna():
+                        d = pd.Timestamp(ed).date()
+                        if today <= d <= end_d:
+                            est = (
+                                cal.get("EPS Estimate", pd.Series([None])).iloc[0]
+                                if "EPS Estimate" in cal
+                                else None
+                            )
+                            results.append(
+                                EarningsEvent(
+                                    ticker=ticker,
+                                    company_name=name,
+                                    earnings_date=str(d),
+                                    eps_estimate=float(est)
+                                    if est is not None and pd.notna(est)
+                                    else None,
+                                )
+                            )
+            except Exception:
+                continue
+        results.sort(key=lambda x: x.earnings_date)
+        redis.set(cache_key, json.dumps([e.model_dump() for e in results]), ex=3600)
+        return results
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/peers/{ticker}", response_model=list[PeerRow])
+@limiter.limit("20/minute")
+async def get_peers(request: Request, ticker: str):
+    cache_key = f"peers:{ticker}"
+    cached = redis.get(cache_key)
+    if cached:
+        return json.loads(cached)
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        sub_row = conn.execute(
+            "SELECT Subsector FROM stock_information WHERE Ticker=?", (ticker.upper(),)
+        ).fetchone()
+        if not sub_row:
+            conn.close()
+            raise HTTPException(status_code=404, detail="Ticker not found")
+        subsector = sub_row[0]
+        rows = conn.execute(
+            """
+            WITH latest AS (
+                SELECT Ticker, FullName, Ticker_Close, Ticker_RSI, Ticker_Tech_Score,
+                       MarketCap, PE, EPS, Beta
+                FROM combined_stock_data
+                WHERE Date = (SELECT MAX(Date) FROM combined_stock_data)
+                  AND Subsector = ?
+            ),
+            year_ago AS (
+                SELECT Ticker, Ticker_Close AS prev_close
+                FROM combined_stock_data
+                WHERE Date = (
+                    SELECT MAX(Date) FROM combined_stock_data
+                    WHERE Date <= date(
+                        (SELECT MAX(Date) FROM combined_stock_data), '-1 year'
+                    )
+                )
+            )
+            SELECT l.Ticker, l.FullName,
+                CAST(NULLIF(l.MarketCap,'N/A') AS REAL) AS mc,
+                CAST(NULLIF(l.PE,'N/A') AS REAL) AS pe,
+                CAST(NULLIF(l.EPS,'N/A') AS REAL) AS eps,
+                CAST(NULLIF(l.Beta,'N/A') AS REAL) AS beta,
+                l.Ticker_RSI, l.Ticker_Tech_Score,
+                CASE WHEN y.prev_close > 0
+                     THEN ROUND((l.Ticker_Close - y.prev_close) / y.prev_close * 100, 2)
+                     ELSE NULL END AS ret52w
+            FROM latest l LEFT JOIN year_ago y ON y.Ticker = l.Ticker
+            ORDER BY mc DESC NULLS LAST
+            LIMIT 15
+        """,
+            (subsector,),
+        ).fetchall()
+        conn.close()
+        result = [
+            PeerRow(
+                ticker=r[0],
+                name=r[1],
+                market_cap=r[2],
+                pe=r[3],
+                eps=r[4],
+                beta=r[5],
+                rsi=r[6],
+                tech_score=r[7],
+                return_52w=r[8],
+            )
+            for r in rows
+        ]
+        redis.set(cache_key, json.dumps([p.model_dump() for p in result]), ex=1800)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/sector-rotation", response_model=list[SectorRotationRow])
+@limiter.limit("10/minute")
+async def get_sector_rotation(request: Request, days: int = Query(90, ge=30, le=730)):
+    cache_key = f"sector_rotation:{days}"
+    cached = redis.get(cache_key)
+    if cached:
+        return json.loads(cached)
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        rows = conn.execute(
+            f"""
+            WITH latest AS (
+                SELECT Sector, AVG(Ticker_Close) AS cn,
+                       AVG(Ticker_RSI) AS ar, AVG(Ticker_Tech_Score) AS at
+                FROM combined_stock_data
+                WHERE Date = (SELECT MAX(Date) FROM combined_stock_data)
+                GROUP BY Sector
+            ),
+            past AS (
+                SELECT Sector, AVG(Ticker_Close) AS cp
+                FROM combined_stock_data
+                WHERE Date = (
+                    SELECT MAX(Date) FROM combined_stock_data
+                    WHERE Date <= date((SELECT MAX(Date) FROM combined_stock_data), '-{days} days')
+                )
+                GROUP BY Sector
+            )
+            SELECT l.Sector,
+                   ROUND((l.cn - p.cp) / NULLIF(p.cp, 0) * 100, 2),
+                   l.ar, l.at
+            FROM latest l LEFT JOIN past p ON l.Sector = p.Sector
+            WHERE l.Sector IS NOT NULL AND l.Sector != ''
+            ORDER BY ROUND((l.cn - p.cp) / NULLIF(p.cp, 0) * 100, 2) DESC NULLS LAST
+        """
+        ).fetchall()
+        conn.close()
+        result = [
+            SectorRotationRow(sector=r[0], return_pct=r[1], avg_rsi=r[2], avg_tech_score=r[3])
+            for r in rows
+        ]
+        redis.set(cache_key, json.dumps([x.model_dump() for x in result]), ex=1800)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/market-breadth", response_model=MarketBreadth)
+@limiter.limit("20/minute")
+async def get_market_breadth(request: Request):
+    cache_key = "market_breadth"
+    cached = redis.get(cache_key)
+    if cached:
+        return json.loads(cached)
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        row = conn.execute("""
+            WITH latest AS (
+                SELECT Ticker, Ticker_Close, Ticker_RSI, Ticker_SMA_30, Ticker_Tech_Score
+                FROM combined_stock_data
+                WHERE Date = (SELECT MAX(Date) FROM combined_stock_data)
+            ),
+            prev AS (
+                SELECT Ticker, Ticker_Close AS pc
+                FROM combined_stock_data
+                WHERE Date = (
+                    SELECT MAX(Date) FROM combined_stock_data
+                    WHERE Date < (SELECT MAX(Date) FROM combined_stock_data)
+                )
+            ),
+            hi52 AS (
+                SELECT Ticker,
+                       MAX(Ticker_High) AS h52,
+                       MIN(Ticker_Low)  AS l52
+                FROM combined_stock_data
+                WHERE Date >= date((SELECT MAX(Date) FROM combined_stock_data), '-1 year')
+                GROUP BY Ticker
+            )
+            SELECT
+                COUNT(CASE WHEN l.Ticker_Close > p.pc THEN 1 END),
+                COUNT(CASE WHEN l.Ticker_Close < p.pc THEN 1 END),
+                COUNT(CASE WHEN l.Ticker_Close = p.pc THEN 1 END),
+                COUNT(CASE WHEN l.Ticker_Close >= h.h52 * 0.99 THEN 1 END),
+                COUNT(CASE WHEN l.Ticker_Close <= h.l52 * 1.01 THEN 1 END),
+                COUNT(CASE WHEN l.Ticker_Close > l.Ticker_SMA_30 THEN 1 END),
+                COUNT(CASE WHEN l.Ticker_Close <= l.Ticker_SMA_30 THEN 1 END),
+                ROUND(AVG(l.Ticker_RSI), 1),
+                ROUND(AVG(l.Ticker_Tech_Score), 1),
+                COUNT(*)
+            FROM latest l
+            JOIN prev p ON p.Ticker = l.Ticker
+            JOIN hi52 h ON h.Ticker = l.Ticker
+        """).fetchone()
+        conn.close()
+        adv, dec, unch, nh, nl, asma, bsma, avg_rsi, avg_ts, total = row
+        pct_adv = round(adv / total * 100, 1) if total else None
+        result = MarketBreadth(
+            date=datetime.date.today().isoformat(),
+            advancing=adv or 0,
+            declining=dec or 0,
+            unchanged=unch or 0,
+            new_highs_52w=nh or 0,
+            new_lows_52w=nl or 0,
+            above_sma50=asma or 0,
+            below_sma50=bsma or 0,
+            avg_rsi=avg_rsi,
+            avg_tech_score=avg_ts,
+            pct_advancing=pct_adv,
+            total=total or 0,
+        )
+        redis.set(cache_key, result.model_dump_json(), ex=600)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/correlations", response_model=CorrelationMatrix)
+@limiter.limit("10/minute")
+async def get_correlations(
+    request: Request,
+    tickers: list[str] = Query(...),
+    days: int = Query(90, ge=30, le=730),
+):
+    tickers = [t.upper() for t in tickers if t][:20]
+    if len(tickers) < 2:
+        raise HTTPException(status_code=400, detail="Need at least 2 tickers")
+    cache_key = f"correlations:{','.join(sorted(tickers))}:{days}"
+    cached = redis.get(cache_key)
+    if cached:
+        return json.loads(cached)
+    try:
+        placeholders = ",".join("?" * len(tickers))
+        conn = sqlite3.connect(DB_PATH)
+        rows = conn.execute(
+            f"SELECT Date, Ticker, Ticker_Close FROM combined_stock_data "
+            f"WHERE Ticker IN ({placeholders}) "
+            f"AND Date >= date((SELECT MAX(Date) FROM combined_stock_data), '-{days} days') "
+            f"ORDER BY Date",
+            tickers,
+        ).fetchall()
+        conn.close()
+        df = pd.DataFrame(rows, columns=["date", "ticker", "close"])
+        pivot = df.pivot(index="date", columns="ticker", values="close").sort_index()
+        returns = pivot.pct_change().dropna()
+        corr = returns.corr()
+        available = [t for t in tickers if t in corr.columns]
+        matrix = [
+            [
+                round(corr.loc[a, b], 4) if a in corr.index and b in corr.columns else None
+                for b in available
+            ]
+            for a in available
+        ]
+        result = CorrelationMatrix(tickers=available, matrix=matrix)
+        redis.set(cache_key, result.model_dump_json(), ex=1800)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/alerts", response_model=list[AlertOut])
+async def list_alerts(request: Request):
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute(
+        "SELECT id,ticker,metric,condition,threshold,triggered,triggered_at,created_at,notes FROM alerts ORDER BY created_at DESC"
+    ).fetchall()
+    conn.close()
+    keys = [
+        "id",
+        "ticker",
+        "metric",
+        "condition",
+        "threshold",
+        "triggered",
+        "triggered_at",
+        "created_at",
+        "notes",
+    ]
+    return [dict(zip(keys, r)) for r in rows]
+
+
+@app.post("/alerts", response_model=AlertOut)
+async def create_alert(request: Request, body: AlertCreate):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.execute(
+        "INSERT INTO alerts (ticker,metric,condition,threshold,notes) VALUES (?,?,?,?,?)",
+        (body.ticker.upper(), body.metric, body.condition, body.threshold, body.notes),
+    )
+    rid = cur.lastrowid
+    conn.commit()
+    row = conn.execute(
+        "SELECT id,ticker,metric,condition,threshold,triggered,triggered_at,created_at,notes FROM alerts WHERE id=?",
+        (rid,),
+    ).fetchone()
+    conn.close()
+    keys = [
+        "id",
+        "ticker",
+        "metric",
+        "condition",
+        "threshold",
+        "triggered",
+        "triggered_at",
+        "created_at",
+        "notes",
+    ]
+    return dict(zip(keys, row))
+
+
+@app.delete("/alerts/{alert_id}")
+async def delete_alert(request: Request, alert_id: int):
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("DELETE FROM alerts WHERE id=?", (alert_id,))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@app.get("/patterns/{ticker}", response_model=list[PatternSignal])
+@limiter.limit("20/minute")
+async def get_ticker_patterns(request: Request, ticker: str, days: int = Query(7, ge=1, le=30)):
+    cache_key = f"patterns:{ticker}:{days}"
+    cached = redis.get(cache_key)
+    if cached:
+        return json.loads(cached)
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute(
+        "SELECT id,ticker,detected_at,pattern_type,level,confidence,notes FROM pattern_signals "
+        "WHERE ticker=? AND detected_at >= date('now', ?) ORDER BY detected_at DESC, confidence DESC",
+        (ticker.upper(), f"-{days} days"),
+    ).fetchall()
+    conn.close()
+    keys = ["id", "ticker", "detected_at", "pattern_type", "level", "confidence", "notes"]
+    result = [dict(zip(keys, r)) for r in rows]
+    redis.set(cache_key, json.dumps(result), ex=3600)
+    return result
+
+
+@app.get("/patterns", response_model=list[PatternSignal])
+@limiter.limit("10/minute")
+async def get_recent_patterns(
+    request: Request,
+    pattern_type: str | None = None,
+    days: int = Query(1, ge=1, le=7),
+):
+    cache_key = f"patterns:all:{pattern_type}:{days}"
+    cached = redis.get(cache_key)
+    if cached:
+        return json.loads(cached)
+    conn = sqlite3.connect(DB_PATH)
+    if pattern_type:
+        rows = conn.execute(
+            "SELECT id,ticker,detected_at,pattern_type,level,confidence,notes FROM pattern_signals "
+            "WHERE pattern_type=? AND detected_at >= date('now', ?) ORDER BY confidence DESC LIMIT 100",
+            (pattern_type, f"-{days} days"),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT id,ticker,detected_at,pattern_type,level,confidence,notes FROM pattern_signals "
+            "WHERE detected_at >= date('now', ?) ORDER BY confidence DESC LIMIT 100",
+            (f"-{days} days",),
+        ).fetchall()
+    conn.close()
+    keys = ["id", "ticker", "detected_at", "pattern_type", "level", "confidence", "notes"]
+    result = [dict(zip(keys, r)) for r in rows]
+    redis.set(cache_key, json.dumps(result), ex=1800)
+    return result
+
+
 @app.get("/groupings", response_model=StockGroupings)
 @limiter.limit("20/minute")
 async def get_stock_groupings(request: Request):
@@ -1045,7 +1616,8 @@ async def get_screener(request: Request):
                     WHEN y.year_ago_close IS NOT NULL AND y.year_ago_close > 0
                     THEN ROUND((l.Ticker_Close - y.year_ago_close) / y.year_ago_close * 100, 2)
                     ELSE NULL
-                END AS return_52w
+                END AS return_52w,
+                l.Ticker_Tech_Score                       AS tech_score
             FROM latest l
             LEFT JOIN year_ago y ON y.Ticker = l.Ticker
             WHERE l.Ticker IS NOT NULL
@@ -1065,6 +1637,7 @@ async def get_screener(request: Request):
             "rsi",
             "latest_close",
             "return_52w",
+            "tech_score",
         ]
         result = [dict(zip(cols, r)) for r in rows]
         redis.set(cache_key, json.dumps(result), ex=1800)

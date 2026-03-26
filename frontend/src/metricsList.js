@@ -17,6 +17,7 @@ export const metricsList = [
   { name: 'Ticker_EMA_10', color: 'hsl(30, 100%, 50%)' },                // Orange
   { name: 'Ticker_SMA_30', color: 'hsl(120, 100%, 50%)' },                // Yellow
   { name: 'Ticker_EMA_30', color: 'hsl(90, 100%, 40%)' },                // Lime Green
+  { name: 'Ticker_VWAP', label: 'VWAP', color: 'hsl(45, 100%, 55%)' },  // Golden Yellow
 
   // Momentum Oscillators (Cool spectrum)
   { name: 'Ticker_MACD', color: 'hsl(280, 100%, 50%)' },                 // Purple
@@ -48,7 +49,7 @@ export const groupedMetrics = {
     ['Chaikin_MF', 'Force_Index', 'MFI'].some(indicator => metric.name.includes(indicator))
   ),
   'Moving Averages': metricsList.filter(
-    (metric) => metric.name.includes('SMA') || metric.name.includes('EMA')
+    (metric) => metric.name.includes('SMA') || metric.name.includes('EMA') || metric.name.includes('VWAP')
   ),
   'Momentum Oscillators': metricsList.filter(
     (metric) =>

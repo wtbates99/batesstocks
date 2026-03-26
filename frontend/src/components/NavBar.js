@@ -13,6 +13,12 @@ const NavBar = () => (
     <NavLink to="/screener" className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>
       SCREENER
     </NavLink>
+    <NavLink to="/calendar" className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>
+      CALENDAR
+    </NavLink>
+    <NavLink to="/market" className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>
+      MARKET
+    </NavLink>
     <NavLink to="/watchlist" className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}>
       WATCHLIST
     </NavLink>

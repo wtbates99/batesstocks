@@ -6,6 +6,7 @@ import AiPanel from '../components/AiPanel';
 import PresetManager from '../components/PresetManager';
 import KeyboardShortcutsHelp from '../components/KeyboardShortcutsHelp';
 import NavBar from '../components/NavBar';
+import CorrelationMatrix from '../components/CorrelationMatrix';
 import '../styles.css';
 import { metricsList, groupedMetrics } from '../metricsList';
 
@@ -59,6 +60,8 @@ const HomePage = () => {
   const [sortOrder, setSortOrder]   = useState('default'); // 'default'|'gainers'|'losers'|'alpha'
   const [numCols, setNumCols]       = useState(3);
   const [chartType, setChartType]   = useState('area'); // 'area'|'candle'
+  const [corrDays, setCorrDays]     = useState(90);
+  const [showCorr, setShowCorr]     = useState(false);
 
   // Dark/light mode — persisted to localStorage
   const [theme, setTheme] = useState(() => localStorage.getItem('batesstocks_theme') || 'dark');
@@ -477,6 +480,21 @@ const HomePage = () => {
             );
           })}
         </div>
+          <div className="corr-section">
+            <div className="page-header-row" style={{ padding: '0 0 8px 0' }}>
+              <button className="toolbar-btn" onClick={() => setShowCorr(p => !p)}>
+                {showCorr ? '▲' : '▼'} CORRELATION MATRIX
+              </button>
+              {showCorr && (
+                <div className="day-toggle">
+                  {[30, 90, 180].map(d => (
+                    <button key={d} className={`toolbar-btn ${corrDays===d?'active':''}`} onClick={() => setCorrDays(d)}>{d}D</button>
+                  ))}
+                </div>
+              )}
+            </div>
+            {showCorr && <CorrelationMatrix tickers={selectedTickers} days={corrDays} />}
+          </div>
         </div>
       </div>
 

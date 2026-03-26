@@ -19,6 +19,7 @@ const PRICE_LEVEL_METRICS = new Set([
   'Ticker_SMA_10', 'Ticker_EMA_10', 'Ticker_SMA_30', 'Ticker_EMA_30',
   'Ticker_Bollinger_High', 'Ticker_Bollinger_Low', 'Ticker_Bollinger_Mid',
   'Ticker_Open', 'Ticker_Close', 'Ticker_High', 'Ticker_Low',
+  'Ticker_VWAP',
 ]);
 
 function downloadCSV(data, ticker, metrics) {
@@ -163,6 +164,16 @@ const StockChart = memo(({ initialTicker, startDate, endDate, metrics, metricsLi
       });
   }, [allData, startDate, endDate, metrics]);
 
+  const relativeData = useMemo(() => {
+    if (chartType !== 'relative' || !filteredData.length) return [];
+    const base = parseFloat(filteredData[0]?.Ticker_Close);
+    if (!base || isNaN(base)) return filteredData;
+    return filteredData.map(item => ({
+      ...item,
+      Ticker_Relative: base > 0 ? ((parseFloat(item.Ticker_Close) / base) * 100) : null,
+    }));
+  }, [chartType, filteredData]);
+
   // For candlestick: overlay metrics that are price-level (MAs, Bollinger)
   const overlayMetrics = useMemo(() => {
     if (chartType !== 'candle') return [];
@@ -286,7 +297,37 @@ const StockChart = memo(({ initialTicker, startDate, endDate, metrics, metricsLi
         ↓ CSV
       </button>
 
-      {chartType === 'candle' ? (
+      {chartType === 'relative' ? (
+        <ResponsiveContainer width="100%" height={chartHeight}>
+          <AreaChart data={relativeData} margin={{ top: 2, right: 52, bottom: 18, left: 2 }} style={{ cursor: 'crosshair' }}>
+            {sharedAxisProps.xAxis}
+            <YAxis
+              orientation="right"
+              tick={{ fill: '#3e3e58', fontSize: 9, fontFamily: 'JetBrains Mono, Fira Code, monospace', dx: 2 }}
+              tickFormatter={v => `${(v - 100).toFixed(1)}%`}
+              axisLine={false} tickLine={false} width={54}
+            />
+            {sharedAxisProps.grid}
+            <Tooltip content={({ payload, label }) => {
+              if (!payload?.length) return null;
+              const v = payload[0]?.value;
+              return (
+                <div className="custom-tooltip">
+                  <p className="tooltip-label">{parseDateLocal(label).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: '2-digit' })}</p>
+                  <p><span className="metric-name" style={{ color: '#f97316' }}>Return: </span><span className="metric-value" style={{ color: v >= 100 ? '#22c55e' : '#ef4444' }}>{v != null ? `${(v - 100).toFixed(2)}%` : '—'}</span></p>
+                </div>
+              );
+            }} cursor={{ stroke: 'rgba(249,115,22,0.35)', strokeWidth: 1, strokeDasharray: '4 3' }} />
+            <defs>
+              <linearGradient id="g_relative" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#f97316" stopOpacity={0.15} />
+                <stop offset="100%" stopColor="#f97316" stopOpacity={0} />
+              </linearGradient>
+            </defs>
+            <Area type="monotone" dataKey="Ticker_Relative" stroke="#f97316" strokeWidth={1.5} dot={false} fill="url(#g_relative)" fillOpacity={1} activeDot={{ r: 3, strokeWidth: 0, fill: '#f97316' }} />
+          </AreaChart>
+        </ResponsiveContainer>
+      ) : chartType === 'candle' ? (
         <ResponsiveContainer width="100%" height={chartHeight}>
           <ComposedChart
             data={filteredData}
@@ -325,6 +366,7 @@ const StockChart = memo(({ initialTicker, startDate, endDate, metrics, metricsLi
       ) : (
         <ResponsiveContainer width="100%" height={chartHeight}>
           <AreaChart data={filteredData} margin={{ top: 2, right: 52, bottom: 18, left: 2 }} style={{ cursor: 'crosshair' }}>
+
             {sharedAxisProps.xAxis}
             {sharedAxisProps.yAxis}
             {sharedAxisProps.grid}
