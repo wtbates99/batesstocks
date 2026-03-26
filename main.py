@@ -114,7 +114,7 @@ def _enable_wal_and_indexes():
     conn = sqlite3.connect(DB_PATH)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
-    conn.execute("PRAGMA cache_size=-32000")   # 32 MB page cache
+    conn.execute("PRAGMA cache_size=-32000")  # 32 MB page cache
     # Stock data indexes (may already exist; IF NOT EXISTS is safe)
     conn.executescript("""
         CREATE INDEX IF NOT EXISTS idx_stock_data_ticker       ON stock_data  (Ticker);
@@ -508,8 +508,15 @@ def run_full_pipeline():
 def _flush_stock_cache():
     """Evict all stock/heatmap/screener entries from Redis so fresh data is served."""
     try:
-        for pattern in ("stock_data:*", "heatmap:*", "groupings:*", "screener:*",
-                        "market_pulse:*", "live_prices:*", "market_indices:*"):
+        for pattern in (
+            "stock_data:*",
+            "heatmap:*",
+            "groupings:*",
+            "screener:*",
+            "market_pulse:*",
+            "live_prices:*",
+            "market_indices:*",
+        ):
             keys = redis.keys(pattern)
             if keys:
                 redis.delete(*keys)
@@ -561,8 +568,20 @@ def _prewarm_screener_cache():
             ORDER BY market_cap DESC
         """).fetchall()
 
-        cols = ["ticker", "name", "sector", "subsector", "market_cap", "pe",
-                "eps", "beta", "rsi", "latest_close", "return_52w", "tech_score"]
+        cols = [
+            "ticker",
+            "name",
+            "sector",
+            "subsector",
+            "market_cap",
+            "pe",
+            "eps",
+            "beta",
+            "rsi",
+            "latest_close",
+            "return_52w",
+            "tech_score",
+        ]
         result = [dict(zip(cols, r)) for r in rows]
 
         tickers_in_page = [r["ticker"] for r in result]
@@ -627,7 +646,9 @@ def _prewarm_homepage_caches():
                     continue
                 p = prev_m.get(t)
                 chg_pct = round((latest_m[t] - p) / p * 100, 2) if p else None
-                indices_result.append({"ticker": t, "price": round(latest_m[t], 2), "change_pct": chg_pct})
+                indices_result.append(
+                    {"ticker": t, "price": round(latest_m[t], 2), "change_pct": chg_pct}
+                )
             redis.set("market_indices", json.dumps(indices_result), ex=300)
 
         # 3. Live prices for priority tickers
@@ -639,22 +660,50 @@ def _prewarm_homepage_caches():
             ).fetchall()
             prices_map = {r[0]: float(r[1]) for r in price_rows if r[1] is not None}
             live_key = f"live:{','.join(sorted(PRIORITY_TICKERS[:9]))}"
-            redis.set(live_key, json.dumps({
-                "prices": prices_map,
-                "timestamp": datetime.datetime.utcnow().isoformat(),
-            }), ex=60)
+            redis.set(
+                live_key,
+                json.dumps(
+                    {
+                        "prices": prices_map,
+                        "timestamp": datetime.datetime.utcnow().isoformat(),
+                    }
+                ),
+                ex=60,
+            )
 
         # 4. Stock data for priority tickers (30-day range, most common page load)
         cutoff_30 = (datetime.date.today() - datetime.timedelta(days=30)).isoformat()
         cols = [
-            "Date", "Ticker", "Ticker_Open", "Ticker_Close", "Ticker_High", "Ticker_Low",
-            "Ticker_Volume", "Ticker_SMA_10", "Ticker_EMA_10", "Ticker_SMA_30", "Ticker_EMA_30",
-            "Ticker_RSI", "Ticker_Stochastic_K", "Ticker_Stochastic_D",
-            "Ticker_MACD", "Ticker_MACD_Signal", "Ticker_MACD_Diff",
-            "Ticker_TSI", "Ticker_UO", "Ticker_ROC", "Ticker_Williams_R",
-            "Ticker_Bollinger_High", "Ticker_Bollinger_Low", "Ticker_Bollinger_Mid",
-            "Ticker_Bollinger_PBand", "Ticker_Bollinger_WBand",
-            "Ticker_On_Balance_Volume", "Ticker_Chaikin_MF", "Ticker_Force_Index", "Ticker_MFI",
+            "Date",
+            "Ticker",
+            "Ticker_Open",
+            "Ticker_Close",
+            "Ticker_High",
+            "Ticker_Low",
+            "Ticker_Volume",
+            "Ticker_SMA_10",
+            "Ticker_EMA_10",
+            "Ticker_SMA_30",
+            "Ticker_EMA_30",
+            "Ticker_RSI",
+            "Ticker_Stochastic_K",
+            "Ticker_Stochastic_D",
+            "Ticker_MACD",
+            "Ticker_MACD_Signal",
+            "Ticker_MACD_Diff",
+            "Ticker_TSI",
+            "Ticker_UO",
+            "Ticker_ROC",
+            "Ticker_Williams_R",
+            "Ticker_Bollinger_High",
+            "Ticker_Bollinger_Low",
+            "Ticker_Bollinger_Mid",
+            "Ticker_Bollinger_PBand",
+            "Ticker_Bollinger_WBand",
+            "Ticker_On_Balance_Volume",
+            "Ticker_Chaikin_MF",
+            "Ticker_Force_Index",
+            "Ticker_MFI",
         ]
         col_sel = ", ".join(cols)
         for ticker in PRIORITY_TICKERS[:20]:
@@ -678,8 +727,10 @@ def _prewarm_homepage_caches():
                 pass
 
         conn.close()
-        logger.info("Homepage caches pre-warmed (groupings, indices, live-prices, %d priority stocks)",
-                    len(PRIORITY_TICKERS[:20]))
+        logger.info(
+            "Homepage caches pre-warmed (groupings, indices, live-prices, %d priority stocks)",
+            len(PRIORITY_TICKERS[:20]),
+        )
     except Exception as e:
         logger.warning("Homepage pre-warm failed: %s", e)
 
@@ -773,6 +824,7 @@ def run_intraday_update():
         pipeline_status["phase"] = "complete"
         pipeline_status["running"] = False
         import threading
+
         threading.Thread(
             target=lambda: [_prewarm_homepage_caches(), _prewarm_screener_cache()],
             daemon=True,
@@ -819,6 +871,7 @@ def run_daily_update():
             pipeline_status["phase"] = "complete"
             pipeline_status["running"] = False
             import threading
+
             threading.Thread(
                 target=lambda: [_prewarm_homepage_caches(), _prewarm_screener_cache()],
                 daemon=True,
