@@ -778,11 +778,18 @@ async def build_search_index():
 
 @app.post("/refresh_data")
 @limiter.limit("2/minute")
-async def refresh_data(request: Request, background_tasks: BackgroundTasks):
+async def refresh_data(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    full: bool = Query(False),
+):
     if pipeline_status["running"]:
         return {"status": "already_running", "message": "Data refresh already in progress"}
-    background_tasks.add_task(run_full_pipeline)
-    return {"status": "started", "message": "Data refresh started in background"}
+    if full or not _db_has_data():
+        background_tasks.add_task(run_full_pipeline)
+        return {"status": "started", "message": "Full data refresh started in background"}
+    background_tasks.add_task(run_daily_update)
+    return {"status": "started", "message": "Incremental data refresh started in background"}
 
 
 @app.get("/refresh_status")
