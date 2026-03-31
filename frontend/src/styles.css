@@ -400,17 +400,14 @@ h1, h2, h3, h4, h5, h6 { font-weight: 600; }
 
 /* ── Chart Grid ──────────────────────────────────────────────── */
 .grid-container {
-  flex: 1;
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 6px;
   padding: 8px;
-  overflow-y: auto;
   align-content: start;
-  scrollbar-width: none;
 }
 
-.grid-container::-webkit-scrollbar { display: none; }
+.grid-area::-webkit-scrollbar { display: none; }
 
 /* ── Chart Card ──────────────────────────────────────────────── */
 .chart-wrapper {
@@ -1462,7 +1459,7 @@ h1, h2, h3, h4, h5, h6 { font-weight: 600; }
 .ai-send-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 
 /* ── Grid Toolbar ────────────────────────────────────────────── */
-.grid-area { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
+.grid-area { display: flex; flex-direction: column; flex: 1; overflow-y: auto; scrollbar-width: none; }
 
 .grid-toolbar {
   display: flex;
@@ -2319,19 +2316,36 @@ h1, h2, h3, h4, h5, h6 { font-weight: 600; }
 .news-date { font-size: 9px; color: var(--dim); }
 .news-title { font-size: 11px; color: var(--text); line-height: 1.4; }
 
+/* Full-width panels inside cp-info-body grid — must span all columns */
+.options-panel,
+.news-panel,
+.earnings-panel,
+.peers-panel,
+.patterns-panel { grid-column: 1 / -1; }
+
 /* Options Chain */
-.options-panel { display: flex; flex-direction: column; gap: 8px; padding: 4px 0; }
-.options-toolbar { display: flex; gap: 8px; align-items: center; padding: 0 4px; }
-.options-expiry-select { background: var(--surface-2); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px; font-family: inherit; font-size: 10px; }
+.options-panel { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; }
+.options-toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.options-expiry-select {
+  background: var(--surface-2); color: var(--text); border: 1px solid var(--border);
+  border-radius: 4px; padding: 5px 10px; font-family: var(--mono); font-size: 10px;
+  cursor: pointer; outline: none;
+}
+.options-expiry-select:focus { border-color: var(--accent); }
 .options-side-toggle { display: flex; gap: 4px; }
-.options-table-wrap { overflow-x: auto; }
-.options-table { width: 100%; border-collapse: collapse; font-size: 10px; }
-.options-table th { padding: 6px 8px; text-align: right; color: var(--dim); font-weight: 500; border-bottom: 1px solid var(--border); }
+.options-table-wrap { overflow-x: auto; border-radius: 4px; border: 1px solid var(--border); }
+.options-table { width: 100%; border-collapse: collapse; font-size: 11px; font-family: var(--mono); }
+.options-table th {
+  padding: 7px 12px; text-align: right; color: var(--dim); font-weight: 600;
+  font-size: 9px; letter-spacing: 0.08em;
+  border-bottom: 1px solid var(--border); background: var(--surface-2); white-space: nowrap;
+}
 .options-table th:first-child { text-align: left; }
-.options-table td { padding: 5px 8px; text-align: right; border-bottom: 1px solid var(--border); color: var(--text); }
-.options-table td:first-child { text-align: left; }
+.options-table td { padding: 6px 12px; text-align: right; border-bottom: 1px solid var(--border); color: var(--text); white-space: nowrap; }
+.options-table td:first-child { text-align: left; font-weight: 600; }
+.options-table tbody tr:last-child td { border-bottom: none; }
 .options-table .itm-row { background: rgba(34,197,94,0.06); }
-.options-table tr:hover { background: var(--surface-2); }
+.options-table tr:hover td { background: var(--surface-2); }
 
 /* Calendar / Page layout */
 .page-body { padding: 16px 20px; }
@@ -2377,13 +2391,30 @@ h1, h2, h3, h4, h5, h6 { font-weight: 600; }
 .rotation-chart-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 12px; }
 
 /* Correlation Matrix */
-.corr-matrix-wrap { overflow-x: auto; padding: 8px 0; }
-.corr-table { border-collapse: collapse; font-size: 10px; font-family: 'JetBrains Mono', monospace; }
-.corr-table th { padding: 4px 8px; color: var(--dim); font-weight: 600; text-align: center; border-bottom: 1px solid var(--border); }
-.corr-table td { padding: 5px 10px; text-align: center; border: 1px solid rgba(255,255,255,0.04); }
-.corr-row-label { color: var(--dim); font-weight: 600; text-align: right !important; padding-right: 12px !important; white-space: nowrap; background: var(--surface) !important; }
-.corr-loading { font-size: 10px; color: var(--dim); padding: 8px; }
-.corr-section { padding: 8px 0 16px 0; border-top: 1px solid var(--border); margin-top: 8px; }
+.corr-section {
+  padding: 12px 8px 20px 8px; border-top: 1px solid var(--border); margin-top: 4px;
+  flex-shrink: 0;
+}
+.corr-matrix-wrap { overflow-x: auto; padding: 0; }
+.corr-table {
+  border-collapse: collapse; font-size: 11px; font-family: 'JetBrains Mono', monospace;
+  min-width: max-content;
+}
+.corr-table th {
+  padding: 6px 14px; color: var(--dim); font-weight: 700; text-align: center;
+  border-bottom: 1px solid var(--border); font-size: 10px; letter-spacing: 0.06em;
+  background: var(--surface-2); white-space: nowrap;
+}
+.corr-table th:first-child { text-align: left; }
+.corr-table td { padding: 7px 14px; text-align: center; border: 1px solid rgba(255,255,255,0.04); font-size: 11px; }
+.corr-row-label {
+  color: var(--dim); font-weight: 700; text-align: right !important;
+  padding-right: 16px !important; white-space: nowrap;
+  background: var(--surface) !important; font-size: 10px; letter-spacing: 0.06em;
+}
+.corr-loading { font-size: 10px; color: var(--dim); padding: 12px; }
+/* Light theme corr borders */
+[data-theme="light"] .corr-table td { border-color: rgba(0,0,0,0.06); }
 
 /* ================================================================
    MAGIC FEATURES CSS
