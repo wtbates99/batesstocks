@@ -31,10 +31,11 @@ class CombinedStockData(Base):
     Ticker_Volume = Column(Float)
 
     # Trend
-    Ticker_SMA_10 = Column(Float)
-    Ticker_EMA_10 = Column(Float)
-    Ticker_SMA_30 = Column(Float)
-    Ticker_EMA_30 = Column(Float)
+    Ticker_SMA_10   = Column(Float)
+    Ticker_EMA_10   = Column(Float)
+    Ticker_SMA_30   = Column(Float)
+    Ticker_EMA_30   = Column(Float)
+    Ticker_SMA_250W = Column(Float)
 
     # Momentum
     Ticker_RSI = Column(Float)

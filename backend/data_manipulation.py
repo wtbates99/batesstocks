@@ -18,10 +18,11 @@ def _calc_indicators(df: pd.DataFrame, prefix: str) -> pd.DataFrame:
     volume = df["Volume"]
 
     indicators = {
-        f"{prefix}_SMA_10": ta.trend.sma_indicator(close, window=10),
-        f"{prefix}_EMA_10": ta.trend.ema_indicator(close, window=10),
-        f"{prefix}_SMA_30": ta.trend.sma_indicator(close, window=30),
-        f"{prefix}_EMA_30": ta.trend.ema_indicator(close, window=30),
+        f"{prefix}_SMA_10":   ta.trend.sma_indicator(close, window=10),
+        f"{prefix}_EMA_10":   ta.trend.ema_indicator(close, window=10),
+        f"{prefix}_SMA_30":   ta.trend.sma_indicator(close, window=30),
+        f"{prefix}_EMA_30":   ta.trend.ema_indicator(close, window=30),
+        f"{prefix}_SMA_250W": ta.trend.sma_indicator(close, window=1250),
         f"{prefix}_RSI": ta.momentum.rsi(close, window=14),
         f"{prefix}_Stochastic_K": ta.momentum.stoch(high, low, close, window=14, smooth_window=3),
         f"{prefix}_Stochastic_D": ta.momentum.stoch_signal(
@@ -84,7 +85,7 @@ def process_stock_data(conn: sqlite3.Connection):
             t.High  AS Ticker_High,
             t.Low   AS Ticker_Low,
             t.Volume AS Ticker_Volume,
-            t.Ticker_SMA_10, t.Ticker_EMA_10, t.Ticker_SMA_30, t.Ticker_EMA_30,
+            t.Ticker_SMA_10, t.Ticker_EMA_10, t.Ticker_SMA_30, t.Ticker_EMA_30, t.Ticker_SMA_250W,
             t.Ticker_RSI, t.Ticker_Stochastic_K, t.Ticker_Stochastic_D,
             t.Ticker_MACD, t.Ticker_MACD_Signal, t.Ticker_MACD_Diff,
             t.Ticker_TSI, t.Ticker_UO, t.Ticker_ROC, t.Ticker_Williams_R,
