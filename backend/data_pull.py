@@ -22,7 +22,7 @@ def fetch_write_financial_data(conn, table, tickers, append=False):
     filtered = table[table["Symbol"].isin(set(tickers))].copy()
 
     def quant_data():
-        start_date = (dt.date.today() - dt.timedelta(days=2 * 365)).isoformat()
+        start_date = (dt.date.today() - dt.timedelta(days=7 * 365)).isoformat()
         data = yf.download(
             tickers,
             start=start_date,

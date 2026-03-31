@@ -13,11 +13,12 @@ export const metricsList = [
   { name: 'Ticker_MFI', color: 'hsl(210, 100%, 70%)' },                  // Sky Blue
 
   // Moving Averages (Warm spectrum)
-  { name: 'Ticker_SMA_10', color: 'hsl(0, 100%, 50%)' },                 // Red
-  { name: 'Ticker_EMA_10', color: 'hsl(30, 100%, 50%)' },                // Orange
-  { name: 'Ticker_SMA_30', color: 'hsl(120, 100%, 50%)' },                // Yellow
-  { name: 'Ticker_EMA_30', color: 'hsl(90, 100%, 40%)' },                // Lime Green
-  { name: 'Ticker_VWAP', label: 'VWAP', color: 'hsl(45, 100%, 55%)' },  // Golden Yellow
+  { name: 'Ticker_SMA_10',   color: 'hsl(0, 100%, 50%)' },                  // Red
+  { name: 'Ticker_EMA_10',   color: 'hsl(30, 100%, 50%)' },                 // Orange
+  { name: 'Ticker_SMA_30',   color: 'hsl(120, 100%, 50%)' },                // Yellow
+  { name: 'Ticker_EMA_30',   color: 'hsl(90, 100%, 40%)' },                 // Lime Green
+  { name: 'Ticker_SMA_250W', color: 'hsl(270, 80%, 65%)' },                 // Purple (long-term)
+  { name: 'Ticker_VWAP',     label: 'VWAP', color: 'hsl(45, 100%, 55%)' }, // Golden Yellow
 
   // Momentum Oscillators (Cool spectrum)
   { name: 'Ticker_MACD', color: 'hsl(280, 100%, 50%)' },                 // Purple

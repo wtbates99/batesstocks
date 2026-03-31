@@ -1207,6 +1207,7 @@ async def get_stock_data(
         CombinedStockData.Ticker_EMA_10,
         CombinedStockData.Ticker_SMA_30,
         CombinedStockData.Ticker_EMA_30,
+        CombinedStockData.Ticker_SMA_250W,
         CombinedStockData.Ticker_RSI,
         CombinedStockData.Ticker_Stochastic_K,
         CombinedStockData.Ticker_Stochastic_D,
@@ -2399,12 +2400,17 @@ ALLOWED_BACKTEST_METRICS = {
     "Ticker_Close",
     "Ticker_SMA_10",
     "Ticker_SMA_30",
+    "Ticker_SMA_250W",
     "Ticker_EMA_10",
+    "Ticker_EMA_30",
     "Ticker_Bollinger_PBand",
     "Ticker_Bollinger_WBand",
     "Ticker_MFI",
     "Ticker_Tech_Score",
     "Ticker_Stochastic_K",
+    "Ticker_Stochastic_D",
+    "Ticker_Williams_R",
+    "Ticker_ROC",
 }
 
 
