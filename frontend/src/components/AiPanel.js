@@ -218,7 +218,7 @@ const AiPanel = ({ tickers, dateRange, selectedMetrics, isOpen, onToggle }) => {
     <div className="ai-panel">
       {/* Header row */}
       <div className="ai-panel-header">
-        <div className="ai-panel-title">⚡ AI TERMINAL</div>
+        <div className="ai-panel-title">🤖 AI TERMINAL</div>
         <div className="ai-panel-controls">
           {isProduction ? (
             <span className="ai-model-fixed" title="Powered by local Ollama in production">
