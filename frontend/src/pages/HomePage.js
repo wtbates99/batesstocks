@@ -157,6 +157,7 @@ const HomePage = () => {
   const [chartType, setChartType]   = useState('area'); // 'area'|'candle'
   const [corrDays, setCorrDays]     = useState(90);
   const [showCorr, setShowCorr]     = useState(false);
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
 
   // Dark/light mode — persisted to localStorage
   const [theme, setTheme] = useState(() => localStorage.getItem('batesstocks_theme') || 'dark');
@@ -354,6 +355,13 @@ const HomePage = () => {
             ))}
           </select>
           <SearchBar />
+          <button
+            className="mobile-search-btn"
+            onClick={() => setMobileSearchOpen((p) => !p)}
+            aria-label="Search stocks"
+          >
+            🔍
+          </button>
           <MarketClock />
           <button
             className="sidebar-toggle-button"
@@ -380,6 +388,14 @@ const HomePage = () => {
           </button>
         </div>
       </header>
+
+      {/* ── Mobile search overlay ── */}
+      {mobileSearchOpen && (
+        <div className="mobile-search-overlay">
+          <SearchBar autoFocus onNavigate={() => setMobileSearchOpen(false)} />
+          <button className="mobile-search-close" onClick={() => setMobileSearchOpen(false)} aria-label="Close search">✕</button>
+        </div>
+      )}
 
       {/* ── Pipeline loading banner ── */}
       {pipelineStatus?.running && (
