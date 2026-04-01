@@ -400,14 +400,17 @@ h1, h2, h3, h4, h5, h6 { font-weight: 600; }
 
 /* ── Chart Grid ──────────────────────────────────────────────── */
 .grid-container {
+  flex: 1;
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 6px;
   padding: 8px;
+  overflow-y: auto;
   align-content: start;
+  scrollbar-width: none;
 }
 
-.grid-area::-webkit-scrollbar { display: none; }
+.grid-container::-webkit-scrollbar { display: none; }
 
 /* ── Chart Card ──────────────────────────────────────────────── */
 .chart-wrapper {
@@ -1459,7 +1462,7 @@ h1, h2, h3, h4, h5, h6 { font-weight: 600; }
 .ai-send-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 
 /* ── Grid Toolbar ────────────────────────────────────────────── */
-.grid-area { display: flex; flex-direction: column; flex: 1; overflow-y: auto; scrollbar-width: none; }
+.grid-area { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
 
 .grid-toolbar {
   display: flex;
@@ -2395,8 +2398,8 @@ h1, h2, h3, h4, h5, h6 { font-weight: 600; }
 
 /* Correlation Matrix */
 .corr-section {
+  grid-column: 1 / -1;
   padding: 12px 8px 20px 8px; border-top: 1px solid var(--border); margin-top: 4px;
-  flex-shrink: 0;
 }
 .corr-matrix-wrap { overflow-x: auto; padding: 0; }
 .corr-table {
