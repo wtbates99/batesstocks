@@ -2727,6 +2727,21 @@ h1, h2, h3, h4, h5, h6 { font-weight: 600; }
   .corr-section { overflow-x: auto; }
   .corr-matrix-wrap { overflow-x: auto; }
 
+  /* AI panel: full-screen on mobile so keyboard doesn't cover input */
+  .ai-panel {
+    top: var(--header-h);
+    height: calc(100% - var(--header-h));
+    left: 0 !important;
+  }
+  .ai-panel-header { flex-wrap: wrap; gap: 4px; height: auto; padding: 6px 10px; }
+  .ai-panel-controls { flex-wrap: wrap; gap: 4px; }
+  .ai-select { width: 90px; }
+  .ai-model-input { width: 110px; }
+  .ai-key-input { width: 120px; }
+  .ai-input { font-size: 14px; padding: 8px 10px; }
+  .ai-send-btn { height: 38px; font-size: 12px; }
+  .ai-input-row { padding: 8px 10px; }
+
   /* Backtesting layout */
   .bt-layout { grid-template-columns: 1fr; }
   .bt-builder { position: static; max-height: none; overflow-y: visible; }
