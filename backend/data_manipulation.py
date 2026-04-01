@@ -18,10 +18,10 @@ def _calc_indicators(df: pd.DataFrame, prefix: str) -> pd.DataFrame:
     volume = df["Volume"]
 
     indicators = {
-        f"{prefix}_SMA_10":   ta.trend.sma_indicator(close, window=10),
-        f"{prefix}_EMA_10":   ta.trend.ema_indicator(close, window=10),
-        f"{prefix}_SMA_30":   ta.trend.sma_indicator(close, window=30),
-        f"{prefix}_EMA_30":   ta.trend.ema_indicator(close, window=30),
+        f"{prefix}_SMA_10": ta.trend.sma_indicator(close, window=10),
+        f"{prefix}_EMA_10": ta.trend.ema_indicator(close, window=10),
+        f"{prefix}_SMA_30": ta.trend.sma_indicator(close, window=30),
+        f"{prefix}_EMA_30": ta.trend.ema_indicator(close, window=30),
         f"{prefix}_SMA_250W": ta.trend.sma_indicator(close, window=1250),
         f"{prefix}_RSI": ta.momentum.rsi(close, window=14),
         f"{prefix}_Stochastic_K": ta.momentum.stoch(high, low, close, window=14, smooth_window=3),
