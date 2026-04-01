@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import debounce from 'lodash/debounce';
 
-const SearchBar = () => {
+const SearchBar = ({ autoFocus, onNavigate }) => {
   const [searchTerm, setSearchTerm]       = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [activeIndex, setActiveIndex]     = useState(-1);
@@ -10,6 +10,11 @@ const SearchBar = () => {
   const navigate   = useNavigate();
   const cacheRef   = useRef({});
   const containerRef = useRef(null);
+  const inputRef   = useRef(null);
+
+  useEffect(() => {
+    if (autoFocus && inputRef.current) inputRef.current.focus();
+  }, [autoFocus]);
 
   // Stable debounced fetch — uses a ref for the cache so it never changes identity
   const debouncedSearch = useRef(
@@ -38,8 +43,9 @@ const SearchBar = () => {
     setSearchTerm('');
     setSearchResults([]);
     setActiveIndex(-1);
+    if (onNavigate) onNavigate();
     navigate(`/spotlight/${ticker}`);
-  }, [navigate]);
+  }, [navigate, onNavigate]);
 
   const handleKeyDown = useCallback((e) => {
     if (!searchResults.length) return;
@@ -73,6 +79,7 @@ const SearchBar = () => {
   return (
     <div className="search-container" ref={containerRef}>
       <input
+        ref={inputRef}
         type="text"
         placeholder="Search companies..."
         value={searchTerm}
