@@ -582,21 +582,21 @@ const HomePage = () => {
               </div>
             );
           })}
-        </div>
-          <div className="corr-section">
-            <div className="page-header-row" style={{ padding: '0 0 8px 0' }}>
-              <button className="toolbar-btn" onClick={() => setShowCorr(p => !p)}>
-                {showCorr ? '▲' : '▼'} CORRELATION MATRIX
-              </button>
-              {showCorr && (
-                <div className="day-toggle">
-                  {[30, 90, 180].map(d => (
-                    <button key={d} className={`toolbar-btn ${corrDays===d?'active':''}`} onClick={() => setCorrDays(d)}>{d}D</button>
-                  ))}
-                </div>
-              )}
+            <div className="corr-section">
+              <div className="page-header-row" style={{ padding: '0 0 8px 0' }}>
+                <button className="toolbar-btn" onClick={() => setShowCorr(p => !p)}>
+                  {showCorr ? '▲' : '▼'} CORRELATION MATRIX
+                </button>
+                {showCorr && (
+                  <div className="day-toggle">
+                    {[30, 90, 180].map(d => (
+                      <button key={d} className={`toolbar-btn ${corrDays===d?'active':''}`} onClick={() => setCorrDays(d)}>{d}D</button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              {showCorr && <CorrelationMatrix tickers={selectedTickers} days={corrDays} />}
             </div>
-            {showCorr && <CorrelationMatrix tickers={selectedTickers} days={corrDays} />}
           </div>
         </div>
       </div>
