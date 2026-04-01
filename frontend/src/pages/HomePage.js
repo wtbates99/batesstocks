@@ -377,7 +377,7 @@ const HomePage = () => {
             title="AI Terminal  (\\)"
             aria-label="Toggle AI Terminal"
           >
-            ⚡
+            🤖
           </button>
           <button
             className="sidebar-toggle-button"
