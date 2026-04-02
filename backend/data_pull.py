@@ -159,6 +159,14 @@ def backfill_historical_data(
     if result.empty:
         return 0
 
+    # Keep only columns that exist in the current stock_data table
+    existing_cols = [
+        row[1]
+        for row in conn.execute("PRAGMA table_info(stock_data)").fetchall()
+    ]
+    keep = [c for c in existing_cols if c in result.columns]
+    result = result[keep]
+
     result.to_sql("stock_data", conn, if_exists="append", index=False)
     conn.commit()
     logger.info("backfill: appended %d historical rows", len(result))
