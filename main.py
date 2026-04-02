@@ -48,11 +48,11 @@ from backend.models import (
     BacktestRequest,
     BacktestResult,
     BacktestTrade,
-    LatestMetricsRequest,
     CompanyInfo,
     CorrelationMatrix,
     EarningsEvent,
     HeatmapNode,
+    LatestMetricsRequest,
     LivePrices,
     MarketBreadth,
     MarketPulse,
@@ -2507,8 +2507,6 @@ async def run_backtest(request: Request, body: BacktestRequest):
 
             entry_thresh = row["entry_thresh_val"] if body.entry_threshold_metric else body.entry_threshold
             exit_thresh = row["exit_thresh_val"] if body.exit_threshold_metric else body.exit_threshold
-            prev_entry_thresh = (prev_row["entry_thresh_val"] if body.entry_threshold_metric else body.entry_threshold) if prev_row is not None else None
-            prev_exit_thresh = (prev_row["exit_thresh_val"] if body.exit_threshold_metric else body.exit_threshold) if prev_row is not None else None
 
             if not in_position:
                 if check_condition(row["entry_val"], prev_entry, body.entry_condition, entry_thresh):
