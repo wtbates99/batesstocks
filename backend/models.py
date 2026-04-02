@@ -271,13 +271,20 @@ class BacktestRequest(BaseModel):
     ticker: str
     entry_metric: str
     entry_condition: str
-    entry_threshold: float
+    entry_threshold: float = 0.0
+    entry_threshold_metric: str | None = None
     exit_metric: str
     exit_condition: str
-    exit_threshold: float
+    exit_threshold: float = 0.0
+    exit_threshold_metric: str | None = None
     start_date: str | None = None
     end_date: str | None = None
     initial_capital: float = 10000.0
+
+
+class LatestMetricsRequest(BaseModel):
+    tickers: list[str]
+    metrics: list[str]
 
 
 class BacktestTrade(BaseModel):

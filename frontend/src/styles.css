@@ -2258,6 +2258,36 @@ h1, h2, h3, h4, h5, h6 { font-weight: 600; }
   letter-spacing: 0.06em;
 }
 
+/* Watchlist metric filter */
+.wl-filter-section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+.wl-filter-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 10px 14px; cursor: pointer; transition: var(--t);
+}
+.wl-filter-header:hover { background: var(--surface-2); }
+.wl-filter-body { padding: 10px 14px 14px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; }
+.wl-filter-rule { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.wl-filter-actions { display: flex; gap: 8px; }
+.wl-filter-results { border-top: 1px solid var(--border); padding-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+.wl-filter-results-header { display: flex; justify-content: space-between; align-items: center; }
+
+/* Backtest threshold toggle */
+.bt-thresh-row { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.bt-thresh-input { flex: 1; min-width: 80px; }
+.bt-thresh-toggle {
+  background: var(--surface-2); color: var(--muted); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 4px 7px; font-size: 9px; font-family: var(--mono);
+  letter-spacing: 0.08em; cursor: pointer; transition: var(--t);
+}
+.bt-thresh-toggle:hover { border-color: var(--accent); color: var(--text); }
+.bt-thresh-toggle.active { background: var(--accent-bg); border-color: var(--accent); color: var(--accent); }
+
 /* Portfolio specific */
 .port-header-row {
   display: flex;

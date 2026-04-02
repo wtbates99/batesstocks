@@ -48,6 +48,7 @@ from backend.models import (
     BacktestRequest,
     BacktestResult,
     BacktestTrade,
+    LatestMetricsRequest,
     CompanyInfo,
     CorrelationMatrix,
     EarningsEvent,
@@ -2411,6 +2412,7 @@ ALLOWED_BACKTEST_METRICS = {
     "Ticker_Stochastic_D",
     "Ticker_Williams_R",
     "Ticker_ROC",
+    "Ticker_VWAP",
 }
 
 
@@ -2421,11 +2423,15 @@ async def run_backtest(request: Request, body: BacktestRequest):
         raise HTTPException(status_code=400, detail=f"Invalid entry_metric: {body.entry_metric}")
     if body.exit_metric not in ALLOWED_BACKTEST_METRICS:
         raise HTTPException(status_code=400, detail=f"Invalid exit_metric: {body.exit_metric}")
+    if body.entry_threshold_metric and body.entry_threshold_metric not in ALLOWED_BACKTEST_METRICS:
+        raise HTTPException(status_code=400, detail=f"Invalid entry_threshold_metric: {body.entry_threshold_metric}")
+    if body.exit_threshold_metric and body.exit_threshold_metric not in ALLOWED_BACKTEST_METRICS:
+        raise HTTPException(status_code=400, detail=f"Invalid exit_threshold_metric: {body.exit_threshold_metric}")
 
     cache_key = (
         f"backtest:{body.ticker}:{body.entry_metric}:{body.entry_condition}:"
-        f"{body.entry_threshold}:{body.exit_metric}:{body.exit_condition}:"
-        f"{body.exit_threshold}:{body.start_date}:{body.end_date}"
+        f"{body.entry_threshold_metric or body.entry_threshold}:{body.exit_metric}:{body.exit_condition}:"
+        f"{body.exit_threshold_metric or body.exit_threshold}:{body.start_date}:{body.end_date}"
     )
     cached = redis.get(cache_key)
     if cached:
@@ -2442,8 +2448,11 @@ async def run_backtest(request: Request, body: BacktestRequest):
             date_filter += " AND Date <= ?"
             params.append(body.end_date)
 
+        etm = body.entry_threshold_metric or "NULL"
+        xtm = body.exit_threshold_metric or "NULL"
         query = (
-            f"SELECT Date, Ticker_Close, {body.entry_metric}, {body.exit_metric} "
+            f"SELECT Date, Ticker_Close, {body.entry_metric}, {body.exit_metric}, "
+            f"{etm} AS entry_thresh_val, {xtm} AS exit_thresh_val "
             f"FROM combined_stock_data WHERE Ticker = ? {date_filter} ORDER BY Date ASC"
         )
         rows = conn.execute(query, params).fetchall()
@@ -2452,13 +2461,26 @@ async def run_backtest(request: Request, body: BacktestRequest):
         if not rows:
             raise HTTPException(status_code=404, detail="No data found for ticker")
 
-        df = pd.DataFrame(rows, columns=["date", "close", "entry_val", "exit_val"])
+        df = pd.DataFrame(rows, columns=["date", "close", "entry_val", "exit_val", "entry_thresh_val", "exit_thresh_val"])
         df["close"] = df["close"].astype(float)
         df["entry_val"] = pd.to_numeric(df["entry_val"], errors="coerce")
         df["exit_val"] = pd.to_numeric(df["exit_val"], errors="coerce")
-        df = df.dropna().reset_index(drop=True)
+        if body.entry_threshold_metric:
+            df["entry_thresh_val"] = pd.to_numeric(df["entry_thresh_val"], errors="coerce")
+        if body.exit_threshold_metric:
+            df["exit_thresh_val"] = pd.to_numeric(df["exit_thresh_val"], errors="coerce")
+
+        drop_cols = ["date", "close", "entry_val", "exit_val"]
+        if body.entry_threshold_metric:
+            drop_cols.append("entry_thresh_val")
+        if body.exit_threshold_metric:
+            drop_cols.append("exit_thresh_val")
+        df = df.dropna(subset=drop_cols).reset_index(drop=True)
 
         def check_condition(val, prev_val, cond, threshold):
+            if threshold is None or (hasattr(threshold, '__float__') and pd.isna(threshold)):
+                return False
+            threshold = float(threshold)
             if cond == "above":
                 return val > threshold
             if cond == "below":
@@ -2479,21 +2501,23 @@ async def run_backtest(request: Request, body: BacktestRequest):
 
         for i in range(len(df)):
             row = df.iloc[i]
-            prev_entry = df.iloc[i - 1]["entry_val"] if i > 0 else None
-            prev_exit = df.iloc[i - 1]["exit_val"] if i > 0 else None
+            prev_row = df.iloc[i - 1] if i > 0 else None
+            prev_entry = prev_row["entry_val"] if prev_row is not None else None
+            prev_exit = prev_row["exit_val"] if prev_row is not None else None
+
+            entry_thresh = row["entry_thresh_val"] if body.entry_threshold_metric else body.entry_threshold
+            exit_thresh = row["exit_thresh_val"] if body.exit_threshold_metric else body.exit_threshold
+            prev_entry_thresh = (prev_row["entry_thresh_val"] if body.entry_threshold_metric else body.entry_threshold) if prev_row is not None else None
+            prev_exit_thresh = (prev_row["exit_thresh_val"] if body.exit_threshold_metric else body.exit_threshold) if prev_row is not None else None
 
             if not in_position:
-                if check_condition(
-                    row["entry_val"], prev_entry, body.entry_condition, body.entry_threshold
-                ):
+                if check_condition(row["entry_val"], prev_entry, body.entry_condition, entry_thresh):
                     in_position = True
                     entry_price = float(row["close"])
                     entry_date = str(row["date"])[:10]
                     shares = capital / entry_price
             else:
-                if check_condition(
-                    row["exit_val"], prev_exit, body.exit_condition, body.exit_threshold
-                ):
+                if check_condition(row["exit_val"], prev_exit, body.exit_condition, exit_thresh):
                     exit_price = float(row["close"])
                     ret = (exit_price - entry_price) / entry_price * 100
                     pnl = (exit_price - entry_price) * shares
@@ -2551,8 +2575,10 @@ async def run_backtest(request: Request, body: BacktestRequest):
             equity_curve=equity_curve,
             trades=trades,
             strategy=(
-                f"{body.entry_metric} {body.entry_condition} {body.entry_threshold} "
-                f"→ {body.exit_metric} {body.exit_condition} {body.exit_threshold}"
+                f"{body.entry_metric} {body.entry_condition} "
+                f"{body.entry_threshold_metric or body.entry_threshold} "
+                f"→ {body.exit_metric} {body.exit_condition} "
+                f"{body.exit_threshold_metric or body.exit_threshold}"
             ),
         )
         redis.set(cache_key, result.model_dump_json(), ex=3600)
@@ -2561,6 +2587,48 @@ async def run_backtest(request: Request, body: BacktestRequest):
         raise
     except Exception as e:
         logger.error("Backtest error: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/metrics/latest")
+@limiter.limit("30/minute")
+async def get_latest_metrics(request: Request, body: LatestMetricsRequest):
+    if not body.tickers or not body.metrics:
+        return []
+    for m in body.metrics:
+        if m not in ALLOWED_BACKTEST_METRICS:
+            raise HTTPException(status_code=400, detail=f"Invalid metric: {m}")
+    if len(body.tickers) > 200:
+        raise HTTPException(status_code=400, detail="Too many tickers (max 200)")
+
+    cols_sql = ", ".join(body.metrics)
+    tickers_ph = ",".join("?" * len(body.tickers))
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        rows = conn.execute(
+            f"""
+            WITH latest_dates AS (
+                SELECT Ticker, MAX(Date) AS max_date
+                FROM combined_stock_data
+                WHERE Ticker IN ({tickers_ph})
+                GROUP BY Ticker
+            )
+            SELECT c.Ticker, {cols_sql}
+            FROM combined_stock_data c
+            JOIN latest_dates l ON c.Ticker = l.Ticker AND c.Date = l.max_date
+            """,
+            body.tickers,
+        ).fetchall()
+        conn.close()
+        result = []
+        for row in rows:
+            d = {"ticker": row[0]}
+            for i, m in enumerate(body.metrics):
+                d[m] = row[i + 1]
+            result.append(d)
+        return result
+    except Exception as e:
+        logger.error("Latest metrics error: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 

@@ -13,12 +13,14 @@ import { metricsList, groupedMetrics } from '../metricsList';
 import '../styles.css';
 
 const DATE_RANGES = [
-  { days: 7,   label: '7D' },
-  { days: 30,  label: '1M' },
-  { days: 90,  label: '3M' },
-  { days: 180, label: '6M' },
-  { days: 365, label: '1Y' },
-  { days: 730, label: '2Y' },
+  { days: 7,    label: '7D' },
+  { days: 30,   label: '1M' },
+  { days: 90,   label: '3M' },
+  { days: 180,  label: '6M' },
+  { days: 365,  label: '1Y' },
+  { days: 730,  label: '2Y' },
+  { days: 1825, label: '5Y' },
+  { days: 2555, label: '7Y' },
 ];
 
 const EXCHANGE_LABELS = {

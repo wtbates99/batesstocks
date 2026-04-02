@@ -18,6 +18,7 @@ const METRICS = [
   { value: 'Ticker_SMA_250W',        label: '250W MA' },
   { value: 'Ticker_EMA_10',          label: 'EMA 10' },
   { value: 'Ticker_EMA_30',          label: 'EMA 30' },
+  { value: 'Ticker_VWAP',            label: 'VWAP' },
   { value: 'Ticker_Bollinger_PBand', label: 'Bollinger %B' },
   { value: 'Ticker_Bollinger_WBand', label: 'Bollinger Width' },
   { value: 'Ticker_MFI',             label: 'MFI' },
@@ -78,6 +79,23 @@ const PRESET_GROUPS = [
       { label: 'Stoch + MACD',        entry_metric: 'Ticker_Stochastic_K',    entry_condition: 'crosses_below', entry_threshold: 20,   exit_metric: 'Ticker_MACD_Diff',       exit_condition: 'crosses_below', exit_threshold: 0 },
     ],
   },
+  {
+    label: '250W MA',
+    presets: [
+      { label: 'Buy Below 250W MA',   entry_metric: 'Ticker_Close', entry_condition: 'crosses_below', entry_threshold: 0, entry_threshold_metric: 'Ticker_SMA_250W', exit_metric: 'Ticker_Close', exit_condition: 'crosses_above', exit_threshold: 0, exit_threshold_metric: 'Ticker_SMA_250W' },
+      { label: '250W + RSI Exit',     entry_metric: 'Ticker_Close', entry_condition: 'crosses_below', entry_threshold: 0, entry_threshold_metric: 'Ticker_SMA_250W', exit_metric: 'Ticker_RSI',   exit_condition: 'crosses_above', exit_threshold: 60, exit_threshold_metric: null },
+      { label: '250W + MACD Exit',    entry_metric: 'Ticker_Close', entry_condition: 'crosses_below', entry_threshold: 0, entry_threshold_metric: 'Ticker_SMA_250W', exit_metric: 'Ticker_MACD_Diff', exit_condition: 'crosses_above', exit_threshold: 0, exit_threshold_metric: null },
+      { label: 'Above 250W Momentum', entry_metric: 'Ticker_Close', entry_condition: 'crosses_above', entry_threshold: 0, entry_threshold_metric: 'Ticker_SMA_250W', exit_metric: 'Ticker_RSI',   exit_condition: 'crosses_above', exit_threshold: 75, exit_threshold_metric: null },
+    ],
+  },
+  {
+    label: 'VWAP',
+    presets: [
+      { label: 'Buy Below VWAP',      entry_metric: 'Ticker_Close', entry_condition: 'crosses_below', entry_threshold: 0, entry_threshold_metric: 'Ticker_VWAP', exit_metric: 'Ticker_Close', exit_condition: 'crosses_above', exit_threshold: 0, exit_threshold_metric: 'Ticker_VWAP' },
+      { label: 'VWAP Breakout',       entry_metric: 'Ticker_Close', entry_condition: 'crosses_above', entry_threshold: 0, entry_threshold_metric: 'Ticker_VWAP', exit_metric: 'Ticker_RSI',   exit_condition: 'crosses_above', exit_threshold: 70, exit_threshold_metric: null },
+      { label: 'VWAP + RSI Exit',     entry_metric: 'Ticker_Close', entry_condition: 'crosses_below', entry_threshold: 0, entry_threshold_metric: 'Ticker_VWAP', exit_metric: 'Ticker_RSI',   exit_condition: 'crosses_above', exit_threshold: 60, exit_threshold_metric: null },
+    ],
+  },
 ];
 
 const TIME_HORIZONS = [
@@ -97,20 +115,32 @@ const toDateStr = (days) => {
 
 const BacktestPage = () => {
   const [form, setForm] = useState({
-    ticker:          'AAPL',
-    entry_metric:    'Ticker_RSI', entry_condition: 'crosses_below', entry_threshold: 35,
-    exit_metric:     'Ticker_RSI', exit_condition:  'crosses_above',  exit_threshold:  65,
-    initial_capital: 10000,
-    start_date:      toDateStr(365),
-    end_date:        '',
+    ticker:                  'AAPL',
+    entry_metric:            'Ticker_RSI', entry_condition: 'crosses_below', entry_threshold: 35,
+    entry_threshold_metric:  null,
+    exit_metric:             'Ticker_RSI', exit_condition:  'crosses_above',  exit_threshold:  65,
+    exit_threshold_metric:   null,
+    initial_capital:         10000,
+    start_date:              toDateStr(365),
+    end_date:                '',
   });
+  const [entryThreshMode, setEntryThreshMode] = useState('value'); // 'value' | 'metric'
+  const [exitThreshMode,  setExitThreshMode]  = useState('value');
   const [selectedHorizon, setSelectedHorizon] = useState('1Y');
   const [result,  setResult]  = useState(null);
   const [loading, setLoading] = useState(false);
   const [error,   setError]   = useState(null);
   const [openGroup, setOpenGroup] = useState('MEAN REVERSION');
 
-  const applyPreset = (p) => setForm(f => ({ ...f, ...p }));
+  const applyPreset = (p) => {
+    setForm(f => ({
+      ...f, ...p,
+      entry_threshold_metric: p.entry_threshold_metric ?? null,
+      exit_threshold_metric:  p.exit_threshold_metric  ?? null,
+    }));
+    setEntryThreshMode(p.entry_threshold_metric ? 'metric' : 'value');
+    setExitThreshMode(p.exit_threshold_metric   ? 'metric' : 'value');
+  };
 
   const applyHorizon = (hz) => {
     setSelectedHorizon(hz.label);
@@ -122,9 +152,11 @@ const BacktestPage = () => {
     try {
       const payload = {
         ...form,
-        entry_threshold: Number(form.entry_threshold),
-        exit_threshold:  Number(form.exit_threshold),
-        initial_capital: Number(form.initial_capital),
+        entry_threshold:        Number(form.entry_threshold),
+        entry_threshold_metric: entryThreshMode === 'metric' ? form.entry_threshold_metric : null,
+        exit_threshold:         Number(form.exit_threshold),
+        exit_threshold_metric:  exitThreshMode  === 'metric' ? form.exit_threshold_metric  : null,
+        initial_capital:        Number(form.initial_capital),
         start_date: form.start_date || null,
         end_date:   form.end_date   || null,
       };
@@ -207,8 +239,25 @@ const BacktestPage = () => {
                 onChange={e => setForm(f => ({ ...f, entry_condition: e.target.value }))}>
                 {CONDITIONS.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
               </select>
-              <input className="bt-input" type="number" step="any" value={form.entry_threshold}
-                onChange={e => setForm(f => ({ ...f, entry_threshold: e.target.value }))} />
+              <div className="bt-thresh-row">
+                <button
+                  className={`bt-thresh-toggle ${entryThreshMode === 'value' ? 'active' : ''}`}
+                  onClick={() => setEntryThreshMode('value')}
+                >VALUE</button>
+                <button
+                  className={`bt-thresh-toggle ${entryThreshMode === 'metric' ? 'active' : ''}`}
+                  onClick={() => setEntryThreshMode('metric')}
+                >METRIC</button>
+                {entryThreshMode === 'value' ? (
+                  <input className="bt-input bt-thresh-input" type="number" step="any" value={form.entry_threshold}
+                    onChange={e => setForm(f => ({ ...f, entry_threshold: e.target.value }))} />
+                ) : (
+                  <select className="bt-select bt-thresh-input" value={form.entry_threshold_metric || METRICS[0].value}
+                    onChange={e => setForm(f => ({ ...f, entry_threshold_metric: e.target.value }))}>
+                    {METRICS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+                  </select>
+                )}
+              </div>
             </div>
 
             <div className="bt-rule-card">
@@ -221,8 +270,25 @@ const BacktestPage = () => {
                 onChange={e => setForm(f => ({ ...f, exit_condition: e.target.value }))}>
                 {CONDITIONS.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
               </select>
-              <input className="bt-input" type="number" step="any" value={form.exit_threshold}
-                onChange={e => setForm(f => ({ ...f, exit_threshold: e.target.value }))} />
+              <div className="bt-thresh-row">
+                <button
+                  className={`bt-thresh-toggle ${exitThreshMode === 'value' ? 'active' : ''}`}
+                  onClick={() => setExitThreshMode('value')}
+                >VALUE</button>
+                <button
+                  className={`bt-thresh-toggle ${exitThreshMode === 'metric' ? 'active' : ''}`}
+                  onClick={() => setExitThreshMode('metric')}
+                >METRIC</button>
+                {exitThreshMode === 'value' ? (
+                  <input className="bt-input bt-thresh-input" type="number" step="any" value={form.exit_threshold}
+                    onChange={e => setForm(f => ({ ...f, exit_threshold: e.target.value }))} />
+                ) : (
+                  <select className="bt-select bt-thresh-input" value={form.exit_threshold_metric || METRICS[0].value}
+                    onChange={e => setForm(f => ({ ...f, exit_threshold_metric: e.target.value }))}>
+                    {METRICS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+                  </select>
+                )}
+              </div>
             </div>
 
             {/* Presets */}

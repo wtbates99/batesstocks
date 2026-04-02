@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis,
@@ -8,6 +8,25 @@ import NavBar from '../components/NavBar';
 import { metricsList } from '../metricsList';
 import { sessionFetch } from '../hooks/useSessionId';
 import '../styles.css';
+
+const FILTER_METRICS = [
+  { value: 'Ticker_Close',    label: 'Price' },
+  { value: 'Ticker_SMA_250W', label: '250W MA' },
+  { value: 'Ticker_SMA_10',   label: 'SMA 10' },
+  { value: 'Ticker_SMA_30',   label: 'SMA 30' },
+  { value: 'Ticker_EMA_10',   label: 'EMA 10' },
+  { value: 'Ticker_EMA_30',   label: 'EMA 30' },
+  { value: 'Ticker_VWAP',     label: 'VWAP' },
+  { value: 'Ticker_RSI',      label: 'RSI' },
+  { value: 'Ticker_MFI',      label: 'MFI' },
+  { value: 'Ticker_MACD',     label: 'MACD' },
+  { value: 'Ticker_MACD_Diff',label: 'MACD Diff' },
+  { value: 'Ticker_Tech_Score',label: 'Tech Score' },
+  { value: 'Ticker_Stochastic_K', label: 'Stoch K' },
+  { value: 'Ticker_Williams_R',   label: 'Williams %R' },
+  { value: 'Ticker_ROC',          label: 'ROC' },
+  { value: 'Ticker_Bollinger_PBand', label: 'BB %B' },
+];
 
 // ── Watchlist tab ──────────────────────────────────────────────────────────────
 
@@ -19,6 +38,65 @@ function WatchlistTab() {
   const [editId, setEditId]       = useState(null);
   const [editName, setEditName]   = useState('');
   const [editTickers, setEditTickers] = useState('');
+
+  // Filter state
+  const [filterRules, setFilterRules] = useState([
+    { metric: 'Ticker_Close', condition: 'below', threshMode: 'metric', threshValue: '100', threshMetric: 'Ticker_SMA_250W' },
+  ]);
+  const [filterResults, setFilterResults] = useState(null); // null = not run yet
+  const [filterLoading, setFilterLoading] = useState(false);
+  const [filterOpen, setFilterOpen] = useState(false);
+
+  // All tickers across all watchlists (deduplicated)
+  const allTickers = useMemo(() => [...new Set(lists.flatMap(wl => wl.tickers))], [lists]);
+
+  const addFilterRule = () => setFilterRules(r => [...r, { metric: 'Ticker_RSI', condition: 'below', threshMode: 'value', threshValue: '30', threshMetric: 'Ticker_SMA_250W' }]);
+  const removeFilterRule = (i) => setFilterRules(r => r.filter((_, idx) => idx !== i));
+  const updateFilterRule = (i, patch) => setFilterRules(r => r.map((rule, idx) => idx === i ? { ...rule, ...patch } : rule));
+
+  const runFilter = async () => {
+    if (!allTickers.length || !filterRules.length) return;
+    setFilterLoading(true);
+    try {
+      // Collect all metrics needed
+      const needed = new Set();
+      filterRules.forEach(rule => {
+        needed.add(rule.metric);
+        if (rule.threshMode === 'metric') needed.add(rule.threshMetric);
+      });
+      const resp = await fetch('/metrics/latest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tickers: allTickers, metrics: [...needed] }),
+      });
+      if (!resp.ok) throw new Error('Failed to fetch metrics');
+      const data = await resp.json(); // [{ticker, Ticker_Close, ...}]
+
+      // Apply filter rules
+      const matching = data.filter(row => {
+        return filterRules.every(rule => {
+          const val = row[rule.metric];
+          const thresh = rule.threshMode === 'metric' ? row[rule.threshMetric] : parseFloat(rule.threshValue);
+          if (val == null || thresh == null) return false;
+          if (rule.condition === 'above') return val > thresh;
+          if (rule.condition === 'below') return val < thresh;
+          return false;
+        });
+      });
+
+      // Include metric values in results for display
+      setFilterResults(matching.map(row => ({
+        ticker: row.ticker,
+        values: Object.fromEntries(filterRules.map(rule => [rule.metric, row[rule.metric]])),
+        threshValues: Object.fromEntries(
+          filterRules.filter(r => r.threshMode === 'metric').map(r => [r.threshMetric, row[r.threshMetric]])
+        ),
+      })));
+    } catch (e) {
+      console.error(e);
+    }
+    setFilterLoading(false);
+  };
 
   const load = useCallback(() => {
     sessionFetch('/watchlists').then((r) => r.json()).then(setLists).catch(console.error);
@@ -67,6 +145,72 @@ function WatchlistTab() {
 
   return (
     <div className="wl-tab-content">
+      {/* Metric Filter */}
+      <div className="wl-filter-section">
+        <div className="wl-filter-header" onClick={() => setFilterOpen(o => !o)}>
+          <span className="wl-section-title">FILTER BY METRICS</span>
+          <span className="bt-preset-arrow">{filterOpen ? '▲' : '▼'}</span>
+        </div>
+        {filterOpen && (
+          <div className="wl-filter-body">
+            {filterRules.map((rule, i) => (
+              <div key={i} className="wl-filter-rule">
+                <select className="filter-select" value={rule.metric} onChange={e => updateFilterRule(i, { metric: e.target.value })}>
+                  {FILTER_METRICS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+                </select>
+                <select className="filter-select" value={rule.condition} onChange={e => updateFilterRule(i, { condition: e.target.value })}>
+                  <option value="below">is below</option>
+                  <option value="above">is above</option>
+                </select>
+                <button
+                  className={`bt-thresh-toggle ${rule.threshMode === 'value' ? 'active' : ''}`}
+                  onClick={() => updateFilterRule(i, { threshMode: 'value' })}
+                >VALUE</button>
+                <button
+                  className={`bt-thresh-toggle ${rule.threshMode === 'metric' ? 'active' : ''}`}
+                  onClick={() => updateFilterRule(i, { threshMode: 'metric' })}
+                >METRIC</button>
+                {rule.threshMode === 'value' ? (
+                  <input className="wl-input wl-input-sm" type="number" step="any" value={rule.threshValue}
+                    onChange={e => updateFilterRule(i, { threshValue: e.target.value })} />
+                ) : (
+                  <select className="filter-select" value={rule.threshMetric} onChange={e => updateFilterRule(i, { threshMetric: e.target.value })}>
+                    {FILTER_METRICS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+                  </select>
+                )}
+                <button className="wl-btn-danger wl-btn-sm" onClick={() => removeFilterRule(i)}>✕</button>
+              </div>
+            ))}
+            <div className="wl-filter-actions">
+              <button className="wl-btn-muted" onClick={addFilterRule}>+ ADD RULE</button>
+              <button className="wl-btn-accent" onClick={runFilter} disabled={filterLoading || !allTickers.length}>
+                {filterLoading ? 'FILTERING…' : `FILTER ${allTickers.length} TICKERS`}
+              </button>
+            </div>
+            {filterResults !== null && (
+              <div className="wl-filter-results">
+                <div className="wl-filter-results-header">
+                  <span className="wl-section-title">{filterResults.length} MATCHES</span>
+                  {filterResults.length > 0 && (
+                    <button className="wl-btn-accent" onClick={() => navigate(`/?tickers=${filterResults.map(r => r.ticker).join(',')}`)}>
+                      LOAD IN CHARTS
+                    </button>
+                  )}
+                </div>
+                {filterResults.length === 0 && <div className="wl-empty">No tickers match the filter.</div>}
+                <div className="wl-ticker-chips">
+                  {filterResults.map(r => (
+                    <span key={r.ticker} className="wl-chip" onClick={() => navigate(`/spotlight/${r.ticker}`)}>
+                      {r.ticker}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
       {/* Create new */}
       <div className="wl-create-section">
         <h3 className="wl-section-title">NEW WATCHLIST</h3>
