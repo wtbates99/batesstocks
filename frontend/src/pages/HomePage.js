@@ -117,7 +117,7 @@ const defaultMetrics = {
   trend_strength: ['Ticker_MACD', 'Ticker_MACD_Signal', 'Ticker_MACD_Diff'],
 };
 
-const DATE_RANGES = [7, 30, 90, 180, 365, 730];
+const DATE_RANGES = [7, 30, 90, 180, 365, 730, 1825, 2555];
 
 function isMarketOpen() {
   const now = new Date();
