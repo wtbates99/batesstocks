@@ -108,6 +108,62 @@ def fetch_write_financial_data(conn, table, tickers, append=False):
     quant_data()
 
 
+def backfill_historical_data(conn: sqlite3.Connection, tickers: list[str], target_years: int = 7) -> int:
+    """Fetch OHLCV history older than what's currently in stock_data.
+
+    Detects the earliest date already stored and downloads everything from
+    ``target_years`` ago up to (but not including) that date.  Returns the
+    number of rows appended, or 0 if no backfill was needed.
+    """
+    try:
+        min_date_str = conn.execute("SELECT MIN(Date) FROM stock_data").fetchone()[0]
+    except Exception as e:
+        logger.warning("backfill: could not query min date: %s", e)
+        return 0
+
+    if not min_date_str:
+        return 0
+
+    min_date = dt.date.fromisoformat(str(min_date_str)[:10])
+    target_start = dt.date.today() - dt.timedelta(days=target_years * 365)
+
+    if min_date <= target_start:
+        logger.info(
+            "backfill: data already starts at %s (target %s) — nothing to do",
+            min_date, target_start,
+        )
+        return 0
+
+    start = target_start.isoformat()
+    end   = (min_date - dt.timedelta(days=1)).isoformat()
+
+    logger.info(
+        "backfill: fetching %s → %s for %d tickers", start, end, len(tickers)
+    )
+    data = yf.download(
+        tickers,
+        start=start,
+        end=end,
+        interval="1d",
+        group_by="ticker",
+        auto_adjust=True,
+        progress=False,
+    )
+
+    if data is None or data.empty:
+        logger.info("backfill: no data returned for %s → %s", start, end)
+        return 0
+
+    result = data.stack(level=0, future_stack=True).reset_index()
+    if result.empty:
+        return 0
+
+    result.to_sql("stock_data", conn, if_exists="append", index=False)
+    conn.commit()
+    logger.info("backfill: appended %d historical rows", len(result))
+    return len(result)
+
+
 def fetch_incremental_ohlcv(conn: sqlite3.Connection, tickers: list[str]) -> int:
     """Download only new OHLCV rows since the latest date already in stock_data.
 

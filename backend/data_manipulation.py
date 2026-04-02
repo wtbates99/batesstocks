@@ -6,8 +6,10 @@ import numpy as np
 import pandas as pd
 import ta
 
-# Lookback needed so rolling indicators (TSI=38, SMA30=30, BB20=20) are stable
-_INDICATOR_LOOKBACK_DAYS = 90
+# Lookback needed so rolling indicators are stable.
+# SMA_250W has the longest window at 1250 trading days (~5 years).
+# We add a small buffer so the first computed value is fully warmed up.
+_INDICATOR_LOOKBACK_DAYS = 1300
 
 
 def _calc_indicators(df: pd.DataFrame, prefix: str) -> pd.DataFrame:
