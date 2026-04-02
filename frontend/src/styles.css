@@ -532,6 +532,7 @@ h6 {
   padding: 8px;
   overflow-y: auto;
   align-content: start;
+  align-items: start;
   scrollbar-width: none;
 }
 
