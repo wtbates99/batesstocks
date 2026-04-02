@@ -1529,40 +1529,45 @@ async def get_earnings_calendar(request: Request, days_ahead: int = Query(14, ge
     if cached:
         return json.loads(cached)
     try:
+        import concurrent.futures
+
         conn = sqlite3.connect(DB_PATH)
         rows = conn.execute("SELECT Ticker, FullName FROM stock_information").fetchall()
         conn.close()
         today = datetime.date.today()
         end_d = today + datetime.timedelta(days=days_ahead)
-        results = []
-        for ticker, name in rows:
+
+        def _fetch(ticker_name):
+            ticker, name = ticker_name
             try:
                 cal = yf.Ticker(ticker).calendar
-                if cal is None or cal.empty:
-                    continue
-                for col in cal.columns:
-                    if "Earnings Date" not in col:
-                        continue
-                    for ed in cal[col].dropna():
-                        d = pd.Timestamp(ed).date()
-                        if today <= d <= end_d:
-                            est = (
-                                cal.get("EPS Estimate", pd.Series([None])).iloc[0]
-                                if "EPS Estimate" in cal
-                                else None
+                if not cal or not isinstance(cal, dict):
+                    return []
+                dates = cal.get("Earnings Date", [])
+                if not dates:
+                    return []
+                est_raw = cal.get("Earnings Average")
+                est = float(est_raw) if est_raw is not None and pd.notna(est_raw) else None
+                out = []
+                for d in dates:
+                    if isinstance(d, datetime.date) and today <= d <= end_d:
+                        out.append(
+                            EarningsEvent(
+                                ticker=ticker,
+                                company_name=name,
+                                earnings_date=str(d),
+                                eps_estimate=est,
                             )
-                            results.append(
-                                EarningsEvent(
-                                    ticker=ticker,
-                                    company_name=name,
-                                    earnings_date=str(d),
-                                    eps_estimate=float(est)
-                                    if est is not None and pd.notna(est)
-                                    else None,
-                                )
-                            )
+                        )
+                return out
             except Exception:
-                continue
+                return []
+
+        results = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=20) as pool:
+            for batch in pool.map(_fetch, rows):
+                results.extend(batch)
+
         results.sort(key=lambda x: x.earnings_date)
         redis.set(cache_key, json.dumps([e.model_dump() for e in results]), ex=3600)
         return results
