@@ -358,7 +358,7 @@ const StockChart = memo(
     };
 
     return (
-      <div className="chart-container">
+      <div className="chart-container" style={{ height: chartHeight, flexShrink: 0 }}>
         <button
           className="chart-download-btn"
           onClick={() => downloadCSV(filteredData, initialTicker, metrics)}
@@ -369,7 +369,7 @@ const StockChart = memo(
         </button>
 
         {chartType === 'relative' ? (
-          <ResponsiveContainer width="100%" height={chartHeight}>
+          <ResponsiveContainer width="100%" height="100%">
             <AreaChart
               data={relativeData}
               margin={{ top: 2, right: 52, bottom: 18, left: 2 }}
@@ -438,7 +438,7 @@ const StockChart = memo(
             </AreaChart>
           </ResponsiveContainer>
         ) : chartType === 'candle' ? (
-          <ResponsiveContainer width="100%" height={chartHeight}>
+          <ResponsiveContainer width="100%" height="100%">
             <ComposedChart
               data={filteredData}
               margin={{ top: 2, right: 52, bottom: 18, left: 2 }}
@@ -474,7 +474,7 @@ const StockChart = memo(
             </ComposedChart>
           </ResponsiveContainer>
         ) : (
-          <ResponsiveContainer width="100%" height={chartHeight}>
+          <ResponsiveContainer width="100%" height="100%">
             <AreaChart
               data={filteredData}
               margin={{ top: 2, right: 52, bottom: 18, left: 2 }}
