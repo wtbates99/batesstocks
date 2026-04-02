@@ -267,6 +267,13 @@ class PatternSignal(BaseModel):
     notes: str | None = None
 
 
+class StrategyScreenRequest(BaseModel):
+    entry_metric: str
+    entry_condition: str
+    entry_threshold: float = 0.0
+    entry_threshold_metric: str | None = None
+
+
 class BacktestRequest(BaseModel):
     ticker: str
     entry_metric: str
