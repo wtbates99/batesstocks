@@ -108,7 +108,9 @@ def fetch_write_financial_data(conn, table, tickers, append=False):
     quant_data()
 
 
-def backfill_historical_data(conn: sqlite3.Connection, tickers: list[str], target_years: int = 7) -> int:
+def backfill_historical_data(
+    conn: sqlite3.Connection, tickers: list[str], target_years: int = 7
+) -> int:
     """Fetch OHLCV history older than what's currently in stock_data.
 
     Detects the earliest date already stored and downloads everything from
@@ -130,16 +132,15 @@ def backfill_historical_data(conn: sqlite3.Connection, tickers: list[str], targe
     if min_date <= target_start:
         logger.info(
             "backfill: data already starts at %s (target %s) — nothing to do",
-            min_date, target_start,
+            min_date,
+            target_start,
         )
         return 0
 
     start = target_start.isoformat()
-    end   = (min_date - dt.timedelta(days=1)).isoformat()
+    end = (min_date - dt.timedelta(days=1)).isoformat()
 
-    logger.info(
-        "backfill: fetching %s → %s for %d tickers", start, end, len(tickers)
-    )
+    logger.info("backfill: fetching %s → %s for %d tickers", start, end, len(tickers))
     data = yf.download(
         tickers,
         start=start,
