@@ -40,7 +40,12 @@ from backend.data_manipulation import (
     update_today_indicators,
     update_today_sector_subsector,
 )
-from backend.data_pull import fetch_incremental_ohlcv, fetch_write_financial_data, get_sp500_table
+from backend.data_pull import (
+    backfill_historical_data,
+    fetch_incremental_ohlcv,
+    fetch_write_financial_data,
+    get_sp500_table,
+)
 from backend.database import CombinedStockData, database
 from backend.models import (
     AlertCreate,
@@ -245,6 +250,10 @@ async def lifespan(app: FastAPI):
             target=lambda: [_prewarm_homepage_caches(), _prewarm_screener_cache()],
             daemon=True,
         ).start()
+        # Backfill historical data if the DB doesn't go back far enough for 250W MA
+        if not _db_history_sufficient():
+            logger.info("DB history < 6 years — launching historical backfill in background")
+            threading.Thread(target=run_backfill_and_reprocess, daemon=True).start()
 
     # Every 15 min during market hours (9:30–16:00 ET, Mon–Fri)
     # Every hour off-hours for catch-up / after-hours data
@@ -888,6 +897,67 @@ def run_daily_update():
         pipeline_status["running"] = False
 
 
+def _db_history_sufficient(min_years: int = 6) -> bool:
+    """Return True if stock_data goes back at least ``min_years`` years.
+
+    SMA_250W needs 1250 trading days (~5 years).  We require 6 to be safe.
+    """
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        min_date_str = conn.execute("SELECT MIN(Date) FROM stock_data").fetchone()[0]
+        conn.close()
+        if not min_date_str:
+            return True  # No data at all — let _db_has_data handle it
+        import datetime as _dt
+        min_date = _dt.date.fromisoformat(str(min_date_str)[:10])
+        target = _dt.date.today() - _dt.timedelta(days=min_years * 365)
+        return min_date <= target
+    except Exception:
+        return True  # Don't block startup on unexpected errors
+
+
+def run_backfill_and_reprocess():
+    """Fetch missing historical OHLCV data (years 3-7) then recompute all indicators.
+
+    Called automatically on startup when the DB exists but has < 6 years of history.
+    Also exposed via POST /admin/backfill for manual triggering.
+    """
+    if pipeline_status["running"]:
+        logger.info("Backfill skipped: pipeline already running")
+        return
+
+    pipeline_status.update({"running": True, "phase": "backfill", "loaded": 0, "total": 0})
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        tickers = [r[0] for r in conn.execute("SELECT DISTINCT Ticker FROM stock_information").fetchall()]
+        if not tickers:
+            conn.close()
+            pipeline_status["phase"] = "complete"
+            return
+
+        backfilled = backfill_historical_data(conn, tickers)
+        if backfilled > 0:
+            logger.info("Backfilled %d rows — recomputing all indicators...", backfilled)
+            pipeline_status["phase"] = "reprocessing"
+            process_stock_data(conn)
+            create_signal_views(conn)
+            detect_patterns(conn)
+            conn.close()
+            _flush_stock_cache()
+            _build_search_index_sync()
+            logger.info("Backfill + reprocess complete")
+        else:
+            conn.close()
+            logger.info("Backfill check complete — data already sufficient")
+
+        pipeline_status["phase"] = "complete"
+    except Exception as e:
+        logger.error("Backfill error: %s", e)
+        pipeline_status["phase"] = "error"
+    finally:
+        pipeline_status["running"] = False
+
+
 def _db_has_data() -> bool:
     try:
         conn = sqlite3.connect(DB_PATH)
@@ -1171,6 +1241,19 @@ async def refresh_data(
         return {"status": "started", "message": "Full data refresh started in background"}
     background_tasks.add_task(run_daily_update)
     return {"status": "started", "message": "Incremental data refresh started in background"}
+
+
+@app.post("/admin/backfill")
+@limiter.limit("2/minute")
+async def admin_backfill(request: Request, background_tasks: BackgroundTasks):
+    """Manually trigger a historical OHLCV backfill + full indicator recompute.
+
+    Use this once to seed the 250W MA data on an existing database that only has 2 years of history.
+    """
+    if pipeline_status["running"]:
+        return {"status": "already_running", "message": "Pipeline already running"}
+    background_tasks.add_task(run_backfill_and_reprocess)
+    return {"status": "started", "message": "Historical backfill started in background — check /refresh_status"}
 
 
 @app.get("/refresh_status")
