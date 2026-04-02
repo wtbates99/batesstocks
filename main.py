@@ -909,6 +909,7 @@ def _db_history_sufficient(min_years: int = 6) -> bool:
         if not min_date_str:
             return True  # No data at all — let _db_has_data handle it
         import datetime as _dt
+
         min_date = _dt.date.fromisoformat(str(min_date_str)[:10])
         target = _dt.date.today() - _dt.timedelta(days=min_years * 365)
         return min_date <= target
@@ -929,7 +930,9 @@ def run_backfill_and_reprocess():
     pipeline_status.update({"running": True, "phase": "backfill", "loaded": 0, "total": 0})
     try:
         conn = sqlite3.connect(DB_PATH)
-        tickers = [r[0] for r in conn.execute("SELECT DISTINCT Ticker FROM stock_information").fetchall()]
+        tickers = [
+            r[0] for r in conn.execute("SELECT DISTINCT Ticker FROM stock_information").fetchall()
+        ]
         if not tickers:
             conn.close()
             pipeline_status["phase"] = "complete"
@@ -1253,7 +1256,10 @@ async def admin_backfill(request: Request, background_tasks: BackgroundTasks):
     if pipeline_status["running"]:
         return {"status": "already_running", "message": "Pipeline already running"}
     background_tasks.add_task(run_backfill_and_reprocess)
-    return {"status": "started", "message": "Historical backfill started in background — check /refresh_status"}
+    return {
+        "status": "started",
+        "message": "Historical backfill started in background — check /refresh_status",
+    }
 
 
 @app.get("/refresh_status")
@@ -2507,9 +2513,13 @@ async def run_backtest(request: Request, body: BacktestRequest):
     if body.exit_metric not in ALLOWED_BACKTEST_METRICS:
         raise HTTPException(status_code=400, detail=f"Invalid exit_metric: {body.exit_metric}")
     if body.entry_threshold_metric and body.entry_threshold_metric not in ALLOWED_BACKTEST_METRICS:
-        raise HTTPException(status_code=400, detail=f"Invalid entry_threshold_metric: {body.entry_threshold_metric}")
+        raise HTTPException(
+            status_code=400, detail=f"Invalid entry_threshold_metric: {body.entry_threshold_metric}"
+        )
     if body.exit_threshold_metric and body.exit_threshold_metric not in ALLOWED_BACKTEST_METRICS:
-        raise HTTPException(status_code=400, detail=f"Invalid exit_threshold_metric: {body.exit_threshold_metric}")
+        raise HTTPException(
+            status_code=400, detail=f"Invalid exit_threshold_metric: {body.exit_threshold_metric}"
+        )
 
     cache_key = (
         f"backtest:{body.ticker}:{body.entry_metric}:{body.entry_condition}:"
@@ -2544,7 +2554,17 @@ async def run_backtest(request: Request, body: BacktestRequest):
         if not rows:
             raise HTTPException(status_code=404, detail="No data found for ticker")
 
-        df = pd.DataFrame(rows, columns=["date", "close", "entry_val", "exit_val", "entry_thresh_val", "exit_thresh_val"])
+        df = pd.DataFrame(
+            rows,
+            columns=[
+                "date",
+                "close",
+                "entry_val",
+                "exit_val",
+                "entry_thresh_val",
+                "exit_thresh_val",
+            ],
+        )
         df["close"] = df["close"].astype(float)
         df["entry_val"] = pd.to_numeric(df["entry_val"], errors="coerce")
         df["exit_val"] = pd.to_numeric(df["exit_val"], errors="coerce")
@@ -2561,7 +2581,7 @@ async def run_backtest(request: Request, body: BacktestRequest):
         df = df.dropna(subset=drop_cols).reset_index(drop=True)
 
         def check_condition(val, prev_val, cond, threshold):
-            if threshold is None or (hasattr(threshold, '__float__') and pd.isna(threshold)):
+            if threshold is None or (hasattr(threshold, "__float__") and pd.isna(threshold)):
                 return False
             threshold = float(threshold)
             if cond == "above":
@@ -2588,11 +2608,17 @@ async def run_backtest(request: Request, body: BacktestRequest):
             prev_entry = prev_row["entry_val"] if prev_row is not None else None
             prev_exit = prev_row["exit_val"] if prev_row is not None else None
 
-            entry_thresh = row["entry_thresh_val"] if body.entry_threshold_metric else body.entry_threshold
-            exit_thresh = row["exit_thresh_val"] if body.exit_threshold_metric else body.exit_threshold
+            entry_thresh = (
+                row["entry_thresh_val"] if body.entry_threshold_metric else body.entry_threshold
+            )
+            exit_thresh = (
+                row["exit_thresh_val"] if body.exit_threshold_metric else body.exit_threshold
+            )
 
             if not in_position:
-                if check_condition(row["entry_val"], prev_entry, body.entry_condition, entry_thresh):
+                if check_condition(
+                    row["entry_val"], prev_entry, body.entry_condition, entry_thresh
+                ):
                     in_position = True
                     entry_price = float(row["close"])
                     entry_date = str(row["date"])[:10]
