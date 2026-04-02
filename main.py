@@ -76,6 +76,7 @@ from backend.models import (
     SectorRotationRow,
     StockData,
     StockGroupings,
+    StrategyScreenRequest,
     TechnicalSignal,
     TechnicalSummary,
     WatchlistCreate,
@@ -2694,6 +2695,70 @@ async def run_backtest(request: Request, body: BacktestRequest):
         raise
     except Exception as e:
         logger.error("Backtest error: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/strategy-screen", response_model=list[str])
+@limiter.limit("10/minute")
+async def strategy_screen(request: Request, body: StrategyScreenRequest):
+    """Return tickers where the entry condition is met on the most recent trading day."""
+    if body.entry_metric not in ALLOWED_BACKTEST_METRICS:
+        raise HTTPException(status_code=400, detail=f"Invalid entry_metric: {body.entry_metric}")
+    if body.entry_threshold_metric and body.entry_threshold_metric not in ALLOWED_BACKTEST_METRICS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid entry_threshold_metric: {body.entry_threshold_metric}",
+        )
+
+    etm = body.entry_threshold_metric or "NULL"
+    cond = body.entry_condition
+
+    # Build the SQL WHERE clause for the condition
+    if cond == "above":
+        where_clause = "cur_val > thresh_val"
+    elif cond == "below":
+        where_clause = "cur_val < thresh_val"
+    elif cond == "crosses_above":
+        where_clause = "prev_val IS NOT NULL AND prev_val <= thresh_val AND cur_val > thresh_val"
+    elif cond == "crosses_below":
+        where_clause = "prev_val IS NOT NULL AND prev_val >= thresh_val AND cur_val < thresh_val"
+    else:
+        raise HTTPException(status_code=400, detail=f"Invalid entry_condition: {cond}")
+
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        # Get the two most recent dates in the DB
+        rows = conn.execute(
+            f"""
+            WITH ranked AS (
+                SELECT
+                    Ticker,
+                    Date,
+                    CAST({body.entry_metric} AS REAL) AS cur_val,
+                    LAG(CAST({body.entry_metric} AS REAL)) OVER (
+                        PARTITION BY Ticker ORDER BY Date
+                    ) AS prev_val,
+                    CAST(COALESCE({etm}, ?) AS REAL) AS thresh_val
+                FROM combined_stock_data
+                WHERE Date >= date(
+                    (SELECT MAX(Date) FROM combined_stock_data), '-10 days'
+                )
+            ),
+            latest AS (
+                SELECT * FROM ranked
+                WHERE Date = (SELECT MAX(Date) FROM combined_stock_data)
+            )
+            SELECT Ticker FROM latest
+            WHERE cur_val IS NOT NULL AND thresh_val IS NOT NULL
+              AND {where_clause}
+            ORDER BY Ticker
+            """,
+            (body.entry_threshold,),
+        ).fetchall()
+        conn.close()
+        return [r[0] for r in rows]
+    except Exception as e:
+        logger.error("Strategy screen error: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 

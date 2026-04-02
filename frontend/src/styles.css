@@ -3816,6 +3816,58 @@ h6 {
   opacity: 0.5;
   cursor: not-allowed;
 }
+.bt-screen-btn {
+  width: 100%;
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  transition: var(--t);
+  font-family: var(--mono);
+  margin-top: 6px;
+}
+.bt-screen-btn:hover {
+  background: var(--accent);
+  color: #fff;
+}
+.strategy-filter-group {
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.strategy-match-count {
+  margin-left: 6px;
+  color: var(--accent);
+  font-size: 9px;
+  font-weight: 700;
+}
+.strategy-thresh-row {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+.strategy-thresh-input {
+  flex: 1;
+  min-width: 0;
+}
+.strategy-btn-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-top: 2px;
+}
+.strategy-scan-btn {
+  flex: 1;
+  padding: 7px 10px;
+}
 .bt-error {
   font-size: 10px;
   color: var(--red);
