@@ -2305,6 +2305,7 @@ h6 {
   }
   .grid-container {
     grid-template-columns: 1fr;
+    grid-auto-rows: auto;
     overflow-y: visible;
   }
   .grid-area {
