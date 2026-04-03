@@ -532,7 +532,6 @@ h6 {
   padding: 8px;
   overflow-y: auto;
   align-content: start;
-  align-items: start;
   scrollbar-width: none;
 }
 
@@ -4244,12 +4243,6 @@ h6 {
 /* ── Chart card: Bloomberg-grade polish ─────────────────────────── */
 .chart-wrapper {
   min-height: 200px;
-  display: flex;
-  flex-direction: column;
-}
-
-.chart-card-header {
-  flex-shrink: 0;
 }
 
 /* Larger hit targets for mobile */
