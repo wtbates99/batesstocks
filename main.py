@@ -85,7 +85,7 @@ from backend.models import (
 
 DB_PATH = os.getenv("DB_PATH", "stock_data.db")
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3.5:cloud")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "gemini-3-flash-preview")
 OLLAMA_API_KEY = os.getenv("OLLAMA_API_KEY", "")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
@@ -1133,7 +1133,10 @@ async def ai_chat(request: Request, body: AiChatRequest):
                 ollama_headers = {}
                 if OLLAMA_API_KEY:
                     ollama_headers["Authorization"] = f"Bearer {OLLAMA_API_KEY}"
-                resp = await client.post(
+                # Ollama cloud requires stream:True — stream:False returns empty body
+                content = ""
+                async with client.stream(
+                    "POST",
                     f"{OLLAMA_HOST}/api/chat",
                     headers=ollama_headers,
                     json={
@@ -1142,14 +1145,27 @@ async def ai_chat(request: Request, body: AiChatRequest):
                             {"role": "system", "content": system_prompt},
                             {"role": "user", "content": body.message},
                         ],
-                        "stream": False,
+                        "stream": True,
                         "think": False,
                     },
-                )
-                resp.raise_for_status()
+                ) as stream_resp:
+                    stream_resp.raise_for_status()
+                    async for line in stream_resp.aiter_lines():
+                        if not line.strip():
+                            continue
+                        try:
+                            chunk = json.loads(line)
+                            content += chunk.get("message", {}).get("content", "")
+                            if chunk.get("done"):
+                                break
+                        except Exception:
+                            pass
                 if IS_PRODUCTION:
                     ip_record_request(client_ip)
-                return {"response": resp.json()["message"]["content"]}
+                # Strip <think> blocks from reasoning models
+                import re as _re
+                content = _re.sub(r"<think>.*?</think>", "", content, flags=_re.DOTALL).strip()
+                return {"response": content}
 
             elif provider == "anthropic":
                 if not body.api_key:
