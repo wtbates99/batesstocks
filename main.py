@@ -1318,6 +1318,7 @@ async def get_stock_data(
         CombinedStockData.Ticker_Chaikin_MF,
         CombinedStockData.Ticker_Force_Index,
         CombinedStockData.Ticker_MFI,
+        CombinedStockData.Ticker_VWAP,
     ]
 
     query = select(*selected_metrics).where(CombinedStockData.Ticker == ticker)
