@@ -33,6 +33,7 @@ class StockData(BaseModel):
     Ticker_Force_Index: float | None = None
     Ticker_MFI: float | None = None
     Ticker_VWAP: float | None = None
+    Ticker_SMA_250W: float | None = None
     Ticker_Tech_Score: float | None = None
 
 
