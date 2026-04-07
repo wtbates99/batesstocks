@@ -1128,7 +1128,7 @@ async def ai_chat(request: Request, body: AiChatRequest):
         model = body.model
 
     try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=20.0) as client:
             if provider == "ollama":
                 ollama_headers = {}
                 if OLLAMA_API_KEY:
@@ -1147,6 +1147,7 @@ async def ai_chat(request: Request, body: AiChatRequest):
                         ],
                         "stream": True,
                         "think": False,
+                        "options": {"num_predict": 400},
                     },
                 ) as stream_resp:
                     stream_resp.raise_for_status()
@@ -1162,9 +1163,7 @@ async def ai_chat(request: Request, body: AiChatRequest):
                             pass
                 if IS_PRODUCTION:
                     ip_record_request(client_ip)
-                # Strip <think> blocks from reasoning models
-                import re as _re
-                content = _re.sub(r"<think>.*?</think>", "", content, flags=_re.DOTALL).strip()
+                content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
                 return {"response": content}
 
             elif provider == "anthropic":
@@ -1179,7 +1178,7 @@ async def ai_chat(request: Request, body: AiChatRequest):
                     },
                     json={
                         "model": model,
-                        "max_tokens": 1024,
+                        "max_tokens": 400,
                         "system": system_prompt,
                         "messages": [{"role": "user", "content": body.message}],
                     },
@@ -1199,6 +1198,7 @@ async def ai_chat(request: Request, body: AiChatRequest):
                     },
                     json={
                         "model": model,
+                        "max_tokens": 400,
                         "messages": [
                             {"role": "system", "content": system_prompt},
                             {"role": "user", "content": body.message},
