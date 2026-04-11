@@ -1,10 +1,10 @@
 """Tests for backend/data_pull.py — data fetching and writing."""
 
 import os
-import sqlite3
 import sys
 from unittest.mock import MagicMock, patch
 
+import duckdb
 import pandas as pd
 import pytest
 
@@ -56,7 +56,7 @@ def make_mock_ticker():
     getattr(MagicMock(), 'x', None) returns a MagicMock because MagicMock
     has every attribute — the fallback default is never used. Setting each
     attribute to None explicitly avoids inserting un-serialisable objects
-    into the SQLite-bound DataFrame.
+    into the DuckDB-bound DataFrame.
     """
     fi = MagicMock()
     fi.market_cap = None
@@ -74,7 +74,7 @@ def make_mock_ticker():
 
 @pytest.fixture
 def conn():
-    c = sqlite3.connect(":memory:")
+    c = duckdb.connect(":memory:")
     yield c
     c.close()
 
@@ -118,10 +118,7 @@ def test_fetch_write_creates_tables(conn):
     ):
         fetch_write_financial_data(conn, table, tickers, append=False)
 
-    cursor = conn.cursor()
-    tables = {
-        r[0] for r in cursor.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
-    }
+    tables = {r[0] for r in conn.execute("SHOW TABLES").fetchall()}
     assert "stock_data" in tables, "stock_data table not created"
     assert "stock_information" in tables, "stock_information table not created"
 
@@ -137,7 +134,7 @@ def test_stock_data_has_expected_columns(conn):
     ):
         fetch_write_financial_data(conn, table, tickers, append=False)
 
-    df = pd.read_sql("SELECT * FROM stock_data LIMIT 1", conn)
+    df = conn.execute("SELECT * FROM stock_data LIMIT 1").df()
     for col in ["Date", "Ticker", "Open", "Close", "High", "Low", "Volume"]:
         assert col in df.columns, f"Missing column in stock_data: {col}"
 
@@ -153,6 +150,6 @@ def test_stock_information_has_ticker_column(conn):
     ):
         fetch_write_financial_data(conn, table, tickers, append=False)
 
-    df = pd.read_sql("SELECT * FROM stock_information LIMIT 5", conn)
+    df = conn.execute("SELECT * FROM stock_information LIMIT 5").df()
     assert "Ticker" in df.columns
     assert "TSLA" in df["Ticker"].values

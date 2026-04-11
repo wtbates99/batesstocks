@@ -11,7 +11,7 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./stock_data.db:/app/stock_data.db
+      - ./stock_data.duckdb:/app/stock_data.duckdb
     environment:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
