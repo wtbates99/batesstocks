@@ -1,4 +1,5 @@
-stock_data.db
+stock_data.duckdb
+*.duckdb
 *.db
 frontend/node_modules/
 frontend/build/

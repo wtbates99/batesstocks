@@ -1,9 +1,10 @@
 """Tests for signal SQL views created by create_signal_views()."""
 
 import os
-import sqlite3
 import sys
+from datetime import date, timedelta
 
+import duckdb
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -14,24 +15,24 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS combined_stock_data (
     Date TEXT,
     Ticker TEXT,
-    Ticker_Close REAL,
-    Ticker_MACD REAL,
-    Ticker_MACD_Signal REAL,
-    Ticker_MACD_Diff REAL,
-    Ticker_RSI REAL,
-    Ticker_Stochastic_K REAL,
-    Ticker_Stochastic_D REAL,
-    Ticker_Bollinger_High REAL,
-    Ticker_Bollinger_Low REAL,
-    Ticker_SMA_10 REAL,
-    Ticker_EMA_10 REAL,
-    Ticker_SMA_30 REAL,
-    Ticker_Volume REAL,
-    Ticker_TSI REAL,
-    Ticker_UO REAL,
-    Ticker_MFI REAL,
-    Ticker_Chaikin_MF REAL,
-    Ticker_Williams_R REAL,
+    Ticker_Close DOUBLE,
+    Ticker_MACD DOUBLE,
+    Ticker_MACD_Signal DOUBLE,
+    Ticker_MACD_Diff DOUBLE,
+    Ticker_RSI DOUBLE,
+    Ticker_Stochastic_K DOUBLE,
+    Ticker_Stochastic_D DOUBLE,
+    Ticker_Bollinger_High DOUBLE,
+    Ticker_Bollinger_Low DOUBLE,
+    Ticker_SMA_10 DOUBLE,
+    Ticker_EMA_10 DOUBLE,
+    Ticker_SMA_30 DOUBLE,
+    Ticker_Volume DOUBLE,
+    Ticker_TSI DOUBLE,
+    Ticker_UO DOUBLE,
+    Ticker_MFI DOUBLE,
+    Ticker_Chaikin_MF DOUBLE,
+    Ticker_Williams_R DOUBLE,
     FullName TEXT
 );
 """
@@ -39,8 +40,8 @@ CREATE TABLE IF NOT EXISTS combined_stock_data (
 
 @pytest.fixture
 def conn():
-    c = sqlite3.connect(":memory:")
-    c.executescript(SCHEMA)
+    c = duckdb.connect(":memory:")
+    c.execute(SCHEMA)
     create_signal_views(c)
     yield c
     c.close()
@@ -59,7 +60,7 @@ def insert_row(
          Ticker_TSI, Ticker_UO, Ticker_MFI, Ticker_Chaikin_MF, Ticker_Williams_R, FullName)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """,
-        (
+        [
             date,
             ticker,
             close,
@@ -81,9 +82,8 @@ def insert_row(
             0.1,
             -30,
             f"{ticker} Corp",
-        ),
+        ],
     )
-    conn.commit()
 
 
 def test_bullish_signal_detected(conn):
@@ -189,7 +189,6 @@ def test_golden_cross_detected(conn):
          Ticker_TSI, Ticker_UO, Ticker_MFI, Ticker_Chaikin_MF, Ticker_Williams_R, FullName)
         VALUES ('2024-02-02','GOLD',102,0,0,0,50,50,50,110,90, 102,100,96,1000000,0.5,55,55,0.1,-30,'Gold Corp')
     """)
-    conn.commit()
     rows = conn.execute(
         "SELECT CrossSignal FROM golden_death_cross_view WHERE Ticker='GOLD'"
     ).fetchall()
@@ -200,7 +199,9 @@ def test_golden_cross_detected(conn):
 def test_volume_breakout_detected(conn):
     """Volume 3× the ticker average should appear in volume_breakout_view."""
     # Insert 30 low-volume rows to establish a baseline
+    base_date = date(2024, 3, 1)
     for i in range(30):
+        date_str = (base_date + timedelta(days=i)).isoformat()
         conn.execute(
             """
             INSERT INTO combined_stock_data
@@ -209,10 +210,10 @@ def test_volume_breakout_detected(conn):
              Ticker_Bollinger_High, Ticker_Bollinger_Low,
              Ticker_SMA_10, Ticker_EMA_10, Ticker_SMA_30, Ticker_Volume,
              Ticker_TSI, Ticker_UO, Ticker_MFI, Ticker_Chaikin_MF, Ticker_Williams_R, FullName)
-            VALUES (date('2024-03-01', '+' || ? || ' days'),'VOLBK',100,0,0,0,50,50,50,
-                    110,90,98,99,95,500000,0.5,55,55,0.1,-30,'VolBk Corp')
+            VALUES (?, 'VOLBK', 100, 0, 0, 0, 50, 50, 50,
+                    110, 90, 98, 99, 95, 500000, 0.5, 55, 55, 0.1, -30, 'VolBk Corp')
         """,
-            (i,),
+            [date_str],
         )
     # Insert high-volume spike row
     conn.execute("""
@@ -224,6 +225,5 @@ def test_volume_breakout_detected(conn):
          Ticker_TSI, Ticker_UO, Ticker_MFI, Ticker_Chaikin_MF, Ticker_Williams_R, FullName)
         VALUES ('2024-05-01','VOLBK',105,0,0,0,50,50,50,110,90,103,102,98,5000000,0.5,55,55,0.1,-30,'VolBk Corp')
     """)
-    conn.commit()
     rows = conn.execute("SELECT Ticker FROM volume_breakout_view WHERE Ticker='VOLBK'").fetchall()
     assert len(rows) > 0, "Expected a volume breakout row for VOLBK"

@@ -4,6 +4,7 @@ import math
 import os
 import sys
 
+import duckdb
 import numpy as np
 import pandas as pd
 import pytest
@@ -35,15 +36,13 @@ def make_ohlcv(n=60, seed=42):
 
 def get_indicators_df(n=60):
     """Run process_stock_data on an in-memory DB and return the result."""
-    import sqlite3
-
-    conn = sqlite3.connect(":memory:")
+    conn = duckdb.connect(":memory:")
 
     ohlcv = make_ohlcv(n)
-    # Write stock_data and stock_information tables expected by process_stock_data
-    ohlcv.rename(columns={"Date": "Date", "Ticker": "Ticker"}).to_sql(
-        "stock_data", conn, if_exists="replace", index=False
-    )
+    conn.register("_ohlcv_tmp", ohlcv)
+    conn.execute("CREATE TABLE stock_data AS SELECT * FROM _ohlcv_tmp")
+    conn.unregister("_ohlcv_tmp")
+
     info = pd.DataFrame(
         [
             {
@@ -81,11 +80,13 @@ def get_indicators_df(n=60):
             }
         ]
     )
-    info.to_sql("stock_information", conn, if_exists="replace", index=False)
+    conn.register("_info_tmp", info)
+    conn.execute("CREATE TABLE stock_information AS SELECT * FROM _info_tmp")
+    conn.unregister("_info_tmp")
 
     process_stock_data(conn)
 
-    result = pd.read_sql("SELECT * FROM combined_stock_data WHERE Ticker = 'TEST'", conn)
+    result = conn.execute("SELECT * FROM combined_stock_data WHERE Ticker = 'TEST'").df()
     conn.close()
     return result
 

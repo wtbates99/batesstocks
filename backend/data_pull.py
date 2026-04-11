@@ -1,15 +1,15 @@
 import concurrent.futures
 import datetime as dt
 import logging
-import sqlite3
 
+import duckdb
 import pandas as pd
 import yfinance as yf
 
 logger = logging.getLogger("batesstocks.data_pull")
 
 
-def get_sp500_table():
+def get_sp500_table() -> pd.DataFrame:
     table = pd.read_html(
         "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies",
         storage_options={"User-Agent": "Mozilla/5.0"},
@@ -17,11 +17,29 @@ def get_sp500_table():
     return table[~table["Symbol"].str.contains(r"\.")].copy()
 
 
-def fetch_write_financial_data(conn, table, tickers, append=False):
-    if_exists = "append" if append else "replace"
+def fetch_write_financial_data(
+    conn: duckdb.DuckDBPyConnection, table: pd.DataFrame, tickers: list[str], append: bool = False
+) -> None:
+    """Fetch OHLCV + fundamental data and write to DuckDB.
+
+    Args:
+        conn: Open DuckDB connection.
+        table: S&P 500 Wikipedia table (Symbol, Security, GICS Sector, …).
+        tickers: Subset of tickers to fetch.
+        append: If True, append to existing tables; otherwise replace.
+    """
+    mode = "append" if append else "replace"
     filtered = table[table["Symbol"].isin(set(tickers))].copy()
 
-    def quant_data():
+    def _write(df: pd.DataFrame, tbl: str) -> None:
+        conn.register("_fw_tmp", df)
+        if mode == "replace":
+            conn.execute(f"CREATE OR REPLACE TABLE {tbl} AS SELECT * FROM _fw_tmp")
+        else:
+            conn.execute(f"INSERT INTO {tbl} SELECT * FROM _fw_tmp")
+        conn.unregister("_fw_tmp")
+
+    def quant_data() -> None:
         start_date = (dt.date.today() - dt.timedelta(days=7 * 365)).isoformat()
         data = yf.download(
             tickers,
@@ -32,28 +50,31 @@ def fetch_write_financial_data(conn, table, tickers, append=False):
             progress=False,
         )
         result = data.stack(level=0, future_stack=True).reset_index()
-        result.to_sql("stock_data", conn, if_exists=if_exists, index=False)
+        _write(result, "stock_data")
 
-    def qual_data():
-        wiki = filtered[
-            ["Symbol", "Security", "GICS Sector", "GICS Sub-Industry", "Headquarters Location"]
-        ].rename(
-            columns={
-                "Symbol": "Ticker",
-                "Security": "FullName",
-                "GICS Sector": "Sector",
-                "GICS Sub-Industry": "Subsector",
-                "Headquarters Location": "_HQ",
-            }
+    def qual_data() -> None:
+        wiki = (
+            filtered[
+                ["Symbol", "Security", "GICS Sector", "GICS Sub-Industry", "Headquarters Location"]
+            ]
+            .rename(
+                columns={
+                    "Symbol": "Ticker",
+                    "Security": "FullName",
+                    "GICS Sector": "Sector",
+                    "GICS Sub-Industry": "Subsector",
+                    "Headquarters Location": "_HQ",
+                }
+            )
+            .copy()
         )
-        wiki = wiki.copy()
         wiki["City"] = wiki["_HQ"].str.split(",").str[0].str.strip()
         wiki["State"] = wiki["_HQ"].str.split(",").str[-1].str.strip()
         wiki["Country"] = "United States"
         wiki = wiki.drop(columns=["_HQ"])
 
-        def fetch_financials(ticker):
-            row = {"Ticker": ticker}
+        def fetch_financials(ticker: str) -> dict:
+            row: dict = {"Ticker": ticker}
             t = yf.Ticker(ticker)
             try:
                 fi = t.fast_info
@@ -97,25 +118,24 @@ def fetch_write_financial_data(conn, table, tickers, append=False):
                 logger.warning("Failed to fetch info for %s: %s", ticker, e)
             return row
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        # Raised from 5 → 20: yfinance is IO-bound, not CPU-bound
+        with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
             results = list(executor.map(fetch_financials, tickers))
 
         financials = pd.DataFrame(results)
         qual = wiki.merge(financials, on="Ticker", how="left")
-        qual.to_sql("stock_information", conn, if_exists=if_exists, index=False)
+        _write(qual, "stock_information")
 
     qual_data()
     quant_data()
 
 
 def backfill_historical_data(
-    conn: sqlite3.Connection, tickers: list[str], target_years: int = 7
+    conn: duckdb.DuckDBPyConnection, tickers: list[str], target_years: int = 7
 ) -> int:
     """Fetch OHLCV history older than what's currently in stock_data.
 
-    Detects the earliest date already stored and downloads everything from
-    ``target_years`` ago up to (but not including) that date.  Returns the
-    number of rows appended, or 0 if no backfill was needed.
+    Returns the number of rows appended, or 0 if no backfill was needed.
     """
     try:
         min_date_str = conn.execute("SELECT MIN(Date) FROM stock_data").fetchone()[0]
@@ -159,26 +179,25 @@ def backfill_historical_data(
     if result.empty:
         return 0
 
-    # Keep only columns that exist in the current stock_data table
-    existing_cols = [row[1] for row in conn.execute("PRAGMA table_info(stock_data)").fetchall()]
+    # Keep only columns that already exist in stock_data
+    existing_cols = [r[0] for r in conn.execute("DESCRIBE stock_data").fetchall()]
     keep = [c for c in existing_cols if c in result.columns]
     result = result[keep]
 
-    result.to_sql("stock_data", conn, if_exists="append", index=False)
-    conn.commit()
+    conn.register("_backfill_tmp", result)
+    conn.execute("INSERT INTO stock_data SELECT * FROM _backfill_tmp")
+    conn.unregister("_backfill_tmp")
     logger.info("backfill: appended %d historical rows", len(result))
     return len(result)
 
 
-def fetch_incremental_ohlcv(conn: sqlite3.Connection, tickers: list[str]) -> int:
+def fetch_incremental_ohlcv(conn: duckdb.DuckDBPyConnection, tickers: list[str]) -> int:
     """Download only new OHLCV rows since the latest date already in stock_data.
 
     Returns the number of new rows appended (0 if already up-to-date).
     """
     try:
-        cursor = conn.cursor()
-        cursor.execute("SELECT MAX(Date) FROM stock_data")
-        latest_str = cursor.fetchone()[0]
+        latest_str = conn.execute("SELECT MAX(Date) FROM stock_data").fetchone()[0]
     except Exception as e:
         logger.warning("Could not query latest date from stock_data: %s", e)
         return 0
@@ -214,6 +233,8 @@ def fetch_incremental_ohlcv(conn: sqlite3.Connection, tickers: list[str]) -> int
     if result.empty:
         return 0
 
-    result.to_sql("stock_data", conn, if_exists="append", index=False)
+    conn.register("_incr_tmp", result)
+    conn.execute("INSERT INTO stock_data SELECT * FROM _incr_tmp")
+    conn.unregister("_incr_tmp")
     logger.info("Appended %d new rows to stock_data", len(result))
     return len(result)

@@ -16,9 +16,9 @@ logger = logging.getLogger("batesstocks.main")
 import datetime
 import json
 import re
-import sqlite3
 from collections import defaultdict
 
+import duckdb
 import fakeredis
 import httpx
 import pandas as pd
@@ -31,7 +31,6 @@ from pydantic import BaseModel
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
-from sqlalchemy import select
 
 from backend.data_manipulation import (
     _add_ticker_data_indexes,
@@ -46,7 +45,7 @@ from backend.data_pull import (
     fetch_write_financial_data,
     get_sp500_table,
 )
-from backend.database import CombinedStockData, database
+from backend.database import get_conn
 from backend.models import (
     AlertCreate,
     AlertOut,
@@ -57,6 +56,7 @@ from backend.models import (
     CorrelationMatrix,
     EarningsEvent,
     HeatmapNode,
+    InsiderTransaction,
     LatestMetricsRequest,
     LivePrices,
     MarketBreadth,
@@ -74,6 +74,7 @@ from backend.models import (
     ScreenerRow,
     SearchResult,
     SectorRotationRow,
+    ShortInterest,
     StockData,
     StockGroupings,
     StrategyScreenRequest,
@@ -83,7 +84,6 @@ from backend.models import (
     WatchlistOut,
 )
 
-DB_PATH = os.getenv("DB_PATH", "stock_data.db")
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "gemini-3-flash-preview")
 OLLAMA_API_KEY = os.getenv("OLLAMA_API_KEY", "")
@@ -116,95 +116,101 @@ def safe_convert(value: str | int | float, target_type: type):
         return None
 
 
-def _enable_wal_and_indexes():
-    """Enable WAL mode for concurrent reads during writes, and ensure all indexes exist."""
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA synchronous=NORMAL")
-    conn.execute("PRAGMA cache_size=-32000")  # 32 MB page cache
-    # Stock data indexes (may already exist; IF NOT EXISTS is safe)
-    conn.executescript("""
-        CREATE INDEX IF NOT EXISTS idx_stock_data_ticker       ON stock_data  (Ticker);
-        CREATE INDEX IF NOT EXISTS idx_stock_data_ticker_date  ON stock_data  (Ticker, Date);
-        CREATE INDEX IF NOT EXISTS idx_stock_data_date         ON stock_data  (Date);
+def _setup_schema():
+    """Create all DuckDB user tables and stock-data indexes idempotently on startup."""
+    conn = get_conn()
+    # Sequences for auto-increment PKs
+    for seq in (
+        "seq_watchlist_id",
+        "seq_portfolio_id",
+        "seq_position_id",
+        "seq_alert_id",
+        "seq_pattern_id",
+    ):
+        conn.execute(f"CREATE SEQUENCE IF NOT EXISTS {seq}")
+    # User tables
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS watchlists (
+            id         INTEGER DEFAULT nextval('seq_watchlist_id') PRIMARY KEY,
+            session_id TEXT    NOT NULL DEFAULT 'default',
+            name       TEXT    NOT NULL,
+            tickers    TEXT    NOT NULL DEFAULT '[]',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
     """)
-    # ticker_data indexes (dropped each full rebuild — recreated here on startup)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS portfolios (
+            id         INTEGER DEFAULT nextval('seq_portfolio_id') PRIMARY KEY,
+            session_id TEXT    NOT NULL DEFAULT 'default',
+            name       TEXT    NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS positions (
+            id           INTEGER DEFAULT nextval('seq_position_id') PRIMARY KEY,
+            portfolio_id INTEGER NOT NULL,
+            ticker       TEXT    NOT NULL,
+            shares       DOUBLE  NOT NULL,
+            cost_basis   DOUBLE  NOT NULL,
+            purchased_at TEXT,
+            notes        TEXT
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS alerts (
+            id           INTEGER DEFAULT nextval('seq_alert_id') PRIMARY KEY,
+            session_id   TEXT    NOT NULL DEFAULT 'default',
+            ticker       TEXT    NOT NULL,
+            metric       TEXT    NOT NULL,
+            condition    TEXT    NOT NULL,
+            threshold    DOUBLE  NOT NULL,
+            triggered    INTEGER DEFAULT 0,
+            triggered_at TEXT    DEFAULT NULL,
+            created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            notes        TEXT
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS pattern_signals (
+            id           INTEGER DEFAULT nextval('seq_pattern_id') PRIMARY KEY,
+            ticker       TEXT NOT NULL,
+            detected_at  TEXT NOT NULL,
+            pattern_type TEXT NOT NULL,
+            level        DOUBLE,
+            confidence   DOUBLE,
+            notes        TEXT,
+            created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS ip_requests (
+            ip            TEXT PRIMARY KEY,
+            requests_used INTEGER DEFAULT 0
+        )
+    """)
+    # Indexes (safe to re-run; stock/ticker tables may not exist on first run)
+    for stmt in [
+        "CREATE INDEX IF NOT EXISTS idx_watchlists_session ON watchlists (session_id)",
+        "CREATE INDEX IF NOT EXISTS idx_portfolios_session ON portfolios (session_id)",
+        "CREATE INDEX IF NOT EXISTS idx_alerts_session     ON alerts     (session_id)",
+        "CREATE INDEX IF NOT EXISTS idx_pattern_ticker_date ON pattern_signals (ticker, detected_at)",
+    ]:
+        conn.execute(stmt)
+    for stmt in [
+        "CREATE INDEX IF NOT EXISTS idx_stock_data_ticker      ON stock_data (Ticker)",
+        "CREATE INDEX IF NOT EXISTS idx_stock_data_ticker_date ON stock_data (Ticker, Date)",
+        "CREATE INDEX IF NOT EXISTS idx_stock_data_date        ON stock_data (Date)",
+    ]:
+        try:
+            conn.execute(stmt)
+        except Exception:
+            pass  # stock_data may not exist yet on first run
     try:
         _add_ticker_data_indexes(conn)
     except Exception:
         pass  # ticker_data may not exist yet on first run
-    conn.commit()
-    conn.close()
-
-
-def _create_user_tables():
-    """Create watchlist/portfolio tables idempotently on startup."""
-    conn = sqlite3.connect(DB_PATH)
-    conn.executescript("""
-        CREATE TABLE IF NOT EXISTS watchlists (
-            id         INTEGER PRIMARY KEY AUTOINCREMENT,
-            name       TEXT    NOT NULL,
-            tickers    TEXT    NOT NULL DEFAULT '[]',
-            created_at TEXT    DEFAULT (datetime('now')),
-            updated_at TEXT    DEFAULT (datetime('now'))
-        );
-        CREATE TABLE IF NOT EXISTS portfolios (
-            id         INTEGER PRIMARY KEY AUTOINCREMENT,
-            name       TEXT    NOT NULL,
-            created_at TEXT    DEFAULT (datetime('now'))
-        );
-        CREATE TABLE IF NOT EXISTS positions (
-            id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            portfolio_id INTEGER NOT NULL,
-            ticker       TEXT    NOT NULL,
-            shares       REAL    NOT NULL,
-            cost_basis   REAL    NOT NULL,
-            purchased_at TEXT,
-            notes        TEXT
-        );
-        CREATE TABLE IF NOT EXISTS alerts (
-            id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            ticker       TEXT NOT NULL,
-            metric       TEXT NOT NULL,
-            condition    TEXT NOT NULL,
-            threshold    REAL NOT NULL,
-            triggered    INTEGER DEFAULT 0,
-            triggered_at TEXT DEFAULT NULL,
-            created_at   TEXT DEFAULT (datetime('now')),
-            notes        TEXT
-        );
-        CREATE TABLE IF NOT EXISTS pattern_signals (
-            id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            ticker       TEXT NOT NULL,
-            detected_at  TEXT NOT NULL,
-            pattern_type TEXT NOT NULL,
-            level        REAL,
-            confidence   REAL,
-            notes        TEXT,
-            created_at   TEXT DEFAULT (datetime('now'))
-        );
-        CREATE INDEX IF NOT EXISTS idx_ticker_data_ticker_date ON ticker_data (Ticker, Date);
-        CREATE INDEX IF NOT EXISTS idx_stock_data_ticker_date  ON stock_data  (Ticker, Date);
-        CREATE INDEX IF NOT EXISTS idx_stock_data_date         ON stock_data  (Date);
-        CREATE INDEX IF NOT EXISTS idx_pattern_ticker_date ON pattern_signals (ticker, detected_at);
-    """)
-    # Migrate existing tables that may be missing session_id column
-    for table in ("watchlists", "portfolios", "alerts"):
-        try:
-            conn.execute(
-                f"ALTER TABLE {table} ADD COLUMN session_id TEXT NOT NULL DEFAULT 'default'"
-            )
-            conn.commit()
-            logger.info("Migrated %s: added session_id column", table)
-        except Exception:
-            pass  # Column already exists
-    # Create session indexes after migration ensures column exists
-    conn.executescript("""
-        CREATE INDEX IF NOT EXISTS idx_watchlists_session ON watchlists (session_id);
-        CREATE INDEX IF NOT EXISTS idx_portfolios_session ON portfolios (session_id);
-        CREATE INDEX IF NOT EXISTS idx_alerts_session ON alerts (session_id);
-    """)
-    conn.commit()
     conn.close()
 
 
@@ -214,9 +220,7 @@ async def lifespan(app: FastAPI):
     from apscheduler.schedulers.background import BackgroundScheduler
     from apscheduler.triggers.cron import CronTrigger
 
-    await database.connect()
-    _enable_wal_and_indexes()
-    _create_user_tables()
+    _setup_schema()
 
     # Try real Redis first, fall back to fakeredis
     try:
@@ -283,7 +287,6 @@ async def lifespan(app: FastAPI):
     yield
 
     scheduler.shutdown(wait=False)
-    await database.disconnect()
     redis.close()
 
 
@@ -292,7 +295,10 @@ app = FastAPI(lifespan=lifespan)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-if os.path.isdir("frontend/build/static"):
+# Vite outputs to assets/, CRA to static/ — support both
+if os.path.isdir("frontend/build/assets"):
+    app.mount("/assets", StaticFiles(directory="frontend/build/assets"), name="assets")
+elif os.path.isdir("frontend/build/static"):
     app.mount("/static", StaticFiles(directory="frontend/build/static"), name="static")
 
 redis = None
@@ -341,127 +347,127 @@ pipeline_status = {
 # ── Data pipeline ──────────────────────────────────────────────────────────────
 
 
-def create_signal_views(conn: sqlite3.Connection):
-    cursor = conn.cursor()
-    cursor.executescript("""
-DROP VIEW IF EXISTS signals_view;
-CREATE VIEW signals_view AS
-WITH signals AS (
-    SELECT Date, Ticker, 'Bullish' AS Signal,
-        Ticker_MACD, Ticker_MACD_Signal, Ticker_RSI,
-        Ticker_Stochastic_K, Ticker_Stochastic_D, Ticker_Close,
-        LEAD(Ticker_Close, 1) OVER (PARTITION BY Ticker ORDER BY Date) AS Next_Close
-    FROM combined_stock_data
-    WHERE Ticker_MACD > Ticker_MACD_Signal
-        AND Ticker_MACD - Ticker_MACD_Signal > 0.01
-        AND Ticker_RSI < 30
-        AND Ticker_Stochastic_K > Ticker_Stochastic_D
-    UNION ALL
-    SELECT Date, Ticker, 'Bearish' AS Signal,
-        Ticker_MACD, Ticker_MACD_Signal, Ticker_RSI,
-        Ticker_Stochastic_K, Ticker_Stochastic_D, Ticker_Close,
-        LEAD(Ticker_Close, 1) OVER (PARTITION BY Ticker ORDER BY Date) AS Next_Close
-    FROM combined_stock_data
-    WHERE Ticker_MACD < Ticker_MACD_Signal
-        AND Ticker_MACD_Signal - Ticker_MACD > 0.01
-        AND Ticker_RSI > 70
-        AND Ticker_Stochastic_K < Ticker_Stochastic_D
-)
-SELECT Date, Ticker, Signal, Ticker_MACD, Ticker_MACD_Signal, Ticker_RSI,
-    Ticker_Stochastic_K, Ticker_Stochastic_D, Ticker_Close, Next_Close,
-    CASE WHEN Next_Close IS NOT NULL
-        THEN ROUND(((Next_Close - Ticker_Close) / Ticker_Close) * 100, 2)
-        ELSE NULL END AS Performance
-FROM signals;
-
-DROP VIEW IF EXISTS golden_death_cross_view;
-CREATE VIEW golden_death_cross_view AS
-WITH cross_signals AS (
-    SELECT Date, Ticker, Ticker_SMA_10,
-        LAG(Ticker_SMA_10, 1) OVER (PARTITION BY Ticker ORDER BY Date) AS Prev_SMA_10,
-        Ticker_EMA_10,
-        LAG(Ticker_EMA_10, 1) OVER (PARTITION BY Ticker ORDER BY Date) AS Prev_EMA_10,
-        Ticker_Close,
-        LEAD(Ticker_Close, 1) OVER (PARTITION BY Ticker ORDER BY Date) AS Next_Close
-    FROM combined_stock_data
-)
-SELECT Date, Ticker,
-    CASE
-        WHEN Ticker_SMA_10 > Ticker_EMA_10 AND Prev_SMA_10 <= Prev_EMA_10 THEN 'Golden Cross (Buy)'
-        WHEN Ticker_SMA_10 < Ticker_EMA_10 AND Prev_SMA_10 >= Prev_EMA_10 THEN 'Death Cross (Sell)'
-    END AS CrossSignal,
-    Ticker_Close, Next_Close,
-    CASE WHEN Next_Close IS NOT NULL
-        THEN ROUND(((Next_Close - Ticker_Close) / Ticker_Close) * 100, 2)
-        ELSE NULL END AS Performance
-FROM cross_signals
-WHERE CrossSignal IS NOT NULL;
-
-DROP VIEW IF EXISTS bollinger_breakouts_view;
-CREATE VIEW bollinger_breakouts_view AS
-WITH bollinger_data AS (
-    SELECT Date, Ticker, Ticker_Close, Ticker_Bollinger_High, Ticker_Bollinger_Low,
-        LEAD(Ticker_Close, 1) OVER (PARTITION BY Ticker ORDER BY Date) AS Next_Close,
-        CASE
-            WHEN Ticker_Close > Ticker_Bollinger_High THEN 'Breakout Above (Potential Buy)'
-            WHEN Ticker_Close < Ticker_Bollinger_Low THEN 'Breakout Below (Potential Sell)'
-        END AS BollingerSignal
-    FROM combined_stock_data
-)
-SELECT Date, Ticker, Ticker_Close, Ticker_Bollinger_High, Ticker_Bollinger_Low,
-    BollingerSignal, Next_Close,
-    CASE WHEN Next_Close IS NOT NULL
-        THEN ROUND(((Next_Close - Ticker_Close) / Ticker_Close) * 100, 2)
-        ELSE NULL END AS Performance
-FROM bollinger_data WHERE BollingerSignal IS NOT NULL;
-
-DROP VIEW IF EXISTS volume_breakout_view;
-CREATE VIEW volume_breakout_view AS
-WITH volume_data AS (
-    SELECT Date, Ticker, Ticker_Volume,
-        AVG(Ticker_Volume) OVER (PARTITION BY Ticker ORDER BY Date ROWS BETWEEN 10 PRECEDING AND 1 PRECEDING) AS Avg_Volume,
-        Ticker_Close,
-        LEAD(Ticker_Close, 1) OVER (PARTITION BY Ticker ORDER BY Date) AS Next_Close
-    FROM combined_stock_data
-)
-SELECT Date, Ticker, Ticker_Volume, Avg_Volume,
-    'Volume Breakout (Potential Signal)' AS VolumeSignal,
-    Ticker_Close, Next_Close,
-    CASE WHEN Next_Close IS NOT NULL
-        THEN ROUND(((Next_Close - Ticker_Close) / Ticker_Close) * 100, 2)
-        ELSE NULL END AS Performance
-FROM volume_data WHERE Ticker_Volume > Avg_Volume * 2;
-
-DROP VIEW IF EXISTS macd_histogram_reversal_view;
-CREATE VIEW macd_histogram_reversal_view AS
-WITH macd_data AS (
-    SELECT Date, Ticker, Ticker_MACD_Diff,
-        LAG(Ticker_MACD_Diff, 1) OVER (PARTITION BY Ticker ORDER BY Date) AS Prev_MACD_Diff,
-        Ticker_Close,
-        LEAD(Ticker_Close, 1) OVER (PARTITION BY Ticker ORDER BY Date) AS Next_Close
-    FROM combined_stock_data
-)
-SELECT Date, Ticker, Ticker_MACD_Diff,
-    CASE
-        WHEN Ticker_MACD_Diff > 0 AND Prev_MACD_Diff <= 0 THEN 'MACD Histogram Reversal (Potential Buy)'
-        WHEN Ticker_MACD_Diff < 0 AND Prev_MACD_Diff >= 0 THEN 'MACD Histogram Reversal (Potential Sell)'
-    END AS MACDReversal,
-    Ticker_Close, Next_Close,
-    CASE WHEN Next_Close IS NOT NULL
-        THEN ROUND(((Next_Close - Ticker_Close) / Ticker_Close) * 100, 2)
-        ELSE NULL END AS Performance
-FROM macd_data WHERE MACDReversal IS NOT NULL;
-""")
-    conn.commit()
+def create_signal_views(conn: duckdb.DuckDBPyConnection) -> None:
+    conn.execute("""
+        CREATE OR REPLACE VIEW signals_view AS
+        WITH signals AS (
+            SELECT Date, Ticker, 'Bullish' AS Signal,
+                Ticker_MACD, Ticker_MACD_Signal, Ticker_RSI,
+                Ticker_Stochastic_K, Ticker_Stochastic_D, Ticker_Close,
+                LEAD(Ticker_Close, 1) OVER (PARTITION BY Ticker ORDER BY Date) AS Next_Close
+            FROM combined_stock_data
+            WHERE Ticker_MACD > Ticker_MACD_Signal
+                AND Ticker_MACD - Ticker_MACD_Signal > 0.01
+                AND Ticker_RSI < 30
+                AND Ticker_Stochastic_K > Ticker_Stochastic_D
+            UNION ALL
+            SELECT Date, Ticker, 'Bearish' AS Signal,
+                Ticker_MACD, Ticker_MACD_Signal, Ticker_RSI,
+                Ticker_Stochastic_K, Ticker_Stochastic_D, Ticker_Close,
+                LEAD(Ticker_Close, 1) OVER (PARTITION BY Ticker ORDER BY Date) AS Next_Close
+            FROM combined_stock_data
+            WHERE Ticker_MACD < Ticker_MACD_Signal
+                AND Ticker_MACD_Signal - Ticker_MACD > 0.01
+                AND Ticker_RSI > 70
+                AND Ticker_Stochastic_K < Ticker_Stochastic_D
+        )
+        SELECT Date, Ticker, Signal, Ticker_MACD, Ticker_MACD_Signal, Ticker_RSI,
+            Ticker_Stochastic_K, Ticker_Stochastic_D, Ticker_Close, Next_Close,
+            CASE WHEN Next_Close IS NOT NULL
+                THEN ROUND(((Next_Close - Ticker_Close) / Ticker_Close) * 100, 2)
+                ELSE NULL END AS Performance
+        FROM signals
+    """)
+    conn.execute("""
+        CREATE OR REPLACE VIEW golden_death_cross_view AS
+        WITH cross_signals AS (
+            SELECT Date, Ticker, Ticker_SMA_10,
+                LAG(Ticker_SMA_10, 1) OVER (PARTITION BY Ticker ORDER BY Date) AS Prev_SMA_10,
+                Ticker_EMA_10,
+                LAG(Ticker_EMA_10, 1) OVER (PARTITION BY Ticker ORDER BY Date) AS Prev_EMA_10,
+                Ticker_Close,
+                LEAD(Ticker_Close, 1) OVER (PARTITION BY Ticker ORDER BY Date) AS Next_Close
+            FROM combined_stock_data
+        )
+        SELECT Date, Ticker,
+            CASE
+                WHEN Ticker_SMA_10 > Ticker_EMA_10 AND Prev_SMA_10 <= Prev_EMA_10 THEN 'Golden Cross (Buy)'
+                WHEN Ticker_SMA_10 < Ticker_EMA_10 AND Prev_SMA_10 >= Prev_EMA_10 THEN 'Death Cross (Sell)'
+            END AS CrossSignal,
+            Ticker_Close, Next_Close,
+            CASE WHEN Next_Close IS NOT NULL
+                THEN ROUND(((Next_Close - Ticker_Close) / Ticker_Close) * 100, 2)
+                ELSE NULL END AS Performance
+        FROM cross_signals
+        WHERE CrossSignal IS NOT NULL
+    """)
+    conn.execute("""
+        CREATE OR REPLACE VIEW bollinger_breakouts_view AS
+        WITH bollinger_data AS (
+            SELECT Date, Ticker, Ticker_Close, Ticker_Bollinger_High, Ticker_Bollinger_Low,
+                LEAD(Ticker_Close, 1) OVER (PARTITION BY Ticker ORDER BY Date) AS Next_Close,
+                CASE
+                    WHEN Ticker_Close > Ticker_Bollinger_High THEN 'Breakout Above (Potential Buy)'
+                    WHEN Ticker_Close < Ticker_Bollinger_Low THEN 'Breakout Below (Potential Sell)'
+                END AS BollingerSignal
+            FROM combined_stock_data
+        )
+        SELECT Date, Ticker, Ticker_Close, Ticker_Bollinger_High, Ticker_Bollinger_Low,
+            BollingerSignal, Next_Close,
+            CASE WHEN Next_Close IS NOT NULL
+                THEN ROUND(((Next_Close - Ticker_Close) / Ticker_Close) * 100, 2)
+                ELSE NULL END AS Performance
+        FROM bollinger_data WHERE BollingerSignal IS NOT NULL
+    """)
+    conn.execute("""
+        CREATE OR REPLACE VIEW volume_breakout_view AS
+        WITH volume_data AS (
+            SELECT Date, Ticker, Ticker_Volume,
+                AVG(Ticker_Volume) OVER (
+                    PARTITION BY Ticker ORDER BY Date
+                    ROWS BETWEEN 10 PRECEDING AND 1 PRECEDING
+                ) AS Avg_Volume,
+                Ticker_Close,
+                LEAD(Ticker_Close, 1) OVER (PARTITION BY Ticker ORDER BY Date) AS Next_Close
+            FROM combined_stock_data
+        )
+        SELECT Date, Ticker, Ticker_Volume, Avg_Volume,
+            'Volume Breakout (Potential Signal)' AS VolumeSignal,
+            Ticker_Close, Next_Close,
+            CASE WHEN Next_Close IS NOT NULL
+                THEN ROUND(((Next_Close - Ticker_Close) / Ticker_Close) * 100, 2)
+                ELSE NULL END AS Performance
+        FROM volume_data WHERE Ticker_Volume > Avg_Volume * 2
+    """)
+    conn.execute("""
+        CREATE OR REPLACE VIEW macd_histogram_reversal_view AS
+        WITH macd_data AS (
+            SELECT Date, Ticker, Ticker_MACD_Diff,
+                LAG(Ticker_MACD_Diff, 1) OVER (PARTITION BY Ticker ORDER BY Date) AS Prev_MACD_Diff,
+                Ticker_Close,
+                LEAD(Ticker_Close, 1) OVER (PARTITION BY Ticker ORDER BY Date) AS Next_Close
+            FROM combined_stock_data
+        )
+        SELECT Date, Ticker, Ticker_MACD_Diff,
+            CASE
+                WHEN Ticker_MACD_Diff > 0 AND Prev_MACD_Diff <= 0
+                    THEN 'MACD Histogram Reversal (Potential Buy)'
+                WHEN Ticker_MACD_Diff < 0 AND Prev_MACD_Diff >= 0
+                    THEN 'MACD Histogram Reversal (Potential Sell)'
+            END AS MACDReversal,
+            Ticker_Close, Next_Close,
+            CASE WHEN Next_Close IS NOT NULL
+                THEN ROUND(((Next_Close - Ticker_Close) / Ticker_Close) * 100, 2)
+                ELSE NULL END AS Performance
+        FROM macd_data WHERE MACDReversal IS NOT NULL
+    """)
 
 
 def _build_search_index_sync():
     """Populate prefix_index from the database synchronously (safe to call from any thread)."""
     try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("SELECT DISTINCT Ticker, FullName FROM combined_stock_data")
-        rows = cursor.fetchall()
+        conn = get_conn()
+        rows = conn.execute("SELECT DISTINCT Ticker, FullName FROM combined_stock_data").fetchall()
         conn.close()
         prefix_index.clear()
         for ticker, full_name in rows:
@@ -495,14 +501,14 @@ def run_full_pipeline():
             {"running": True, "phase": "fast_load", "loaded": 0, "total": len(all_tickers)}
         )
 
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_conn()
         _run_phase(conn, table, priority, append=False)
         conn.close()
         pipeline_status["loaded"] = len(priority)
         logger.info("Phase 1 complete: %d priority tickers loaded", len(priority))
 
         pipeline_status["phase"] = "full_load"
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_conn()
         _run_phase(conn, table, remaining, append=True)
         conn.close()
         pipeline_status["loaded"] = len(all_tickers)
@@ -539,9 +545,8 @@ def _flush_stock_cache():
 def _prewarm_screener_cache():
     """Build screener data synchronously and populate Redis so the first user request is instant."""
     try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        rows = cursor.execute("""
+        conn = get_conn()
+        rows = conn.execute("""
             WITH latest AS (
                 SELECT * FROM combined_stock_data
                 WHERE Date = (SELECT MAX(Date) FROM combined_stock_data)
@@ -551,9 +556,7 @@ def _prewarm_screener_cache():
                 FROM combined_stock_data
                 WHERE Date = (
                     SELECT MAX(Date) FROM combined_stock_data
-                    WHERE Date <= date(
-                        (SELECT MAX(Date) FROM combined_stock_data), '-1 year'
-                    )
+                    WHERE Date <= (SELECT MAX(Date) FROM combined_stock_data)::DATE - INTERVAL '1 year'
                 )
             )
             SELECT
@@ -561,22 +564,22 @@ def _prewarm_screener_cache():
                 l.FullName,
                 l.Sector,
                 l.Subsector,
-                CAST(NULLIF(l.MarketCap, 'N/A') AS REAL)  AS market_cap,
-                CAST(NULLIF(l.PE,        'N/A') AS REAL)  AS pe,
-                CAST(NULLIF(l.EPS,       'N/A') AS REAL)  AS eps,
-                CAST(NULLIF(l.Beta,      'N/A') AS REAL)  AS beta,
-                l.Ticker_RSI                              AS rsi,
-                l.Ticker_Close                            AS latest_close,
+                l.MarketCap   AS market_cap,
+                l.PE          AS pe,
+                l.EPS         AS eps,
+                l.Beta        AS beta,
+                l.Ticker_RSI  AS rsi,
+                l.Ticker_Close AS latest_close,
                 CASE
                     WHEN y.year_ago_close IS NOT NULL AND y.year_ago_close > 0
                     THEN ROUND((l.Ticker_Close - y.year_ago_close) / y.year_ago_close * 100, 2)
                     ELSE NULL
                 END AS return_52w,
-                l.Ticker_Tech_Score                       AS tech_score
+                l.Ticker_Tech_Score AS tech_score
             FROM latest l
             LEFT JOIN year_ago y ON y.Ticker = l.Ticker
             WHERE l.Ticker IS NOT NULL
-            ORDER BY market_cap DESC
+            ORDER BY market_cap DESC NULLS LAST
         """).fetchall()
 
         cols = [
@@ -603,7 +606,7 @@ def _prewarm_screener_cache():
                 SELECT Ticker, Ticker_Close
                 FROM combined_stock_data
                 WHERE Ticker IN ({ph})
-                  AND Date >= date((SELECT MAX(Date) FROM combined_stock_data), '-30 days')
+                  AND Date >= (SELECT MAX(Date) FROM combined_stock_data)::DATE - INTERVAL '30 days'
                 ORDER BY Ticker, Date ASC
                 """,
                 tickers_in_page,
@@ -627,7 +630,7 @@ def _prewarm_screener_cache():
 def _prewarm_homepage_caches():
     """Pre-warm all caches hit on page load so the site is instant after a sync."""
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_conn()
 
         # 1. Groupings (homepage sidebar — no cache otherwise)
         groupings = _get_bullish_groupings_from_db()
@@ -637,7 +640,7 @@ def _prewarm_homepage_caches():
         INDEX_TICKERS = ["SPY", "QQQ", "DIA", "IWM", "GLD", "TLT"]
         latest_date = conn.execute("SELECT MAX(Date) FROM combined_stock_data").fetchone()[0]
         prev_date = conn.execute(
-            "SELECT MAX(Date) FROM combined_stock_data WHERE Date < ?", (latest_date,)
+            "SELECT MAX(Date) FROM combined_stock_data WHERE Date < ?", [latest_date]
         ).fetchone()[0]
         if latest_date and prev_date:
             ph = ",".join("?" * len(INDEX_TICKERS))
@@ -667,7 +670,7 @@ def _prewarm_homepage_caches():
             ph = ",".join("?" * len(PRIORITY_TICKERS))
             price_rows = conn.execute(
                 f"SELECT Ticker, Ticker_Close FROM combined_stock_data WHERE Ticker IN ({ph}) AND Date=?",
-                PRIORITY_TICKERS + [latest_date],
+                [*PRIORITY_TICKERS, latest_date],
             ).fetchall()
             prices_map = {r[0]: float(r[1]) for r in price_rows if r[1] is not None}
             live_key = f"live:{','.join(sorted(PRIORITY_TICKERS[:9]))}"
@@ -722,7 +725,7 @@ def _prewarm_homepage_caches():
                 rows_t = conn.execute(
                     f"SELECT {col_sel} FROM combined_stock_data "
                     f"WHERE Ticker=? AND Date>=? ORDER BY Date DESC",
-                    (ticker, cutoff_30),
+                    [ticker, cutoff_30],
                 ).fetchall()
                 if not rows_t:
                     continue
@@ -746,7 +749,7 @@ def _prewarm_homepage_caches():
         logger.warning("Homepage pre-warm failed: %s", e)
 
 
-def _evaluate_alerts(conn: sqlite3.Connection):
+def _evaluate_alerts(conn: duckdb.DuckDBPyConnection) -> None:
     pending = conn.execute(
         "SELECT id, ticker, metric, condition, threshold FROM alerts WHERE triggered=0"
     ).fetchall()
@@ -754,19 +757,18 @@ def _evaluate_alerts(conn: sqlite3.Connection):
         try:
             row = conn.execute(
                 f"SELECT {metric} FROM combined_stock_data WHERE Ticker=? ORDER BY Date DESC LIMIT 1",
-                (ticker,),
+                [ticker],
             ).fetchone()
             if not row or row[0] is None:
                 continue
             val = float(row[0])
             if (cond == "above" and val > threshold) or (cond == "below" and val < threshold):
                 conn.execute(
-                    "UPDATE alerts SET triggered=1, triggered_at=datetime('now') WHERE id=?",
-                    (aid,),
+                    "UPDATE alerts SET triggered=1, triggered_at=CURRENT_TIMESTAMP WHERE id=?",
+                    [aid],
                 )
         except Exception as e:
             logger.warning("Alert eval error id=%s: %s", aid, e)
-    conn.commit()
 
 
 def run_intraday_update():
@@ -781,7 +783,7 @@ def run_intraday_update():
 
     pipeline_status.update({"running": True, "phase": "intraday_update", "loaded": 0, "total": 0})
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_conn()
         tickers = [
             r[0] for r in conn.execute("SELECT DISTINCT Ticker FROM stock_information").fetchall()
         ]
@@ -790,21 +792,24 @@ def run_intraday_update():
             pipeline_status["phase"] = "complete"
             return
 
-        today = datetime.date.today().isoformat()
+        import pytz as _pytz
+
+        _et = _pytz.timezone("US/Eastern")
+        today = datetime.datetime.now(_et).date().isoformat()
+
         # Delete today's stale rows so we can re-insert fresh ones
-        conn.execute("DELETE FROM stock_data WHERE Date >= ?", (today,))
-        conn.commit()
+        conn.execute("DELETE FROM stock_data WHERE Date >= ?", [today])
 
         data = yf.download(
             tickers,
-            start=today,
+            period="5d",
             interval="1d",
             group_by="ticker",
             auto_adjust=True,
             progress=False,
         )
         if data is None or data.empty:
-            logger.info("Intraday update: no data returned for %s", today)
+            logger.info("Intraday update: no data returned")
             conn.close()
             pipeline_status["phase"] = "complete"
             return
@@ -815,7 +820,19 @@ def run_intraday_update():
             pipeline_status["phase"] = "complete"
             return
 
-        result.to_sql("stock_data", conn, if_exists="append", index=False)
+        result["Date"] = pd.to_datetime(result["Date"]).dt.tz_localize(None)
+        today_ts = pd.Timestamp(today)
+        result = result[result["Date"] >= today_ts]
+
+        if result.empty:
+            logger.info("Intraday update: no data for %s yet (pre-market or no session)", today)
+            conn.close()
+            pipeline_status["phase"] = "complete"
+            return
+
+        conn.register("_intraday_tmp", result)
+        conn.execute("INSERT INTO stock_data SELECT * FROM _intraday_tmp")
+        conn.unregister("_intraday_tmp")
         new_rows = len(result)
         logger.info("Intraday update: inserted %d rows for %s", new_rows, today)
 
@@ -855,10 +872,10 @@ def run_daily_update():
 
     pipeline_status.update({"running": True, "phase": "daily_update", "loaded": 0, "total": 0})
     try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("SELECT DISTINCT Ticker FROM stock_information")
-        tickers = [row[0] for row in cursor.fetchall()]
+        conn = get_conn()
+        tickers = [
+            r[0] for r in conn.execute("SELECT DISTINCT Ticker FROM stock_information").fetchall()
+        ]
 
         if not tickers:
             logger.info("No tickers in stock_information — daily update skipped")
@@ -904,7 +921,7 @@ def _db_history_sufficient(min_years: int = 6) -> bool:
     SMA_250W needs 1250 trading days (~5 years).  We require 6 to be safe.
     """
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_conn()
         min_date_str = conn.execute("SELECT MIN(Date) FROM stock_data").fetchone()[0]
         conn.close()
         if not min_date_str:
@@ -930,7 +947,7 @@ def run_backfill_and_reprocess():
 
     pipeline_status.update({"running": True, "phase": "backfill", "loaded": 0, "total": 0})
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_conn()
         tickers = [
             r[0] for r in conn.execute("SELECT DISTINCT Ticker FROM stock_information").fetchall()
         ]
@@ -964,10 +981,8 @@ def run_backfill_and_reprocess():
 
 def _db_has_data() -> bool:
     try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("SELECT COUNT(*) FROM combined_stock_data LIMIT 1")
-        count = cursor.fetchone()[0]
+        conn = get_conn()
+        count = conn.execute("SELECT COUNT(*) FROM stock_data LIMIT 1").fetchone()[0]
         conn.close()
         return count > 0
     except Exception:
@@ -976,43 +991,39 @@ def _db_has_data() -> bool:
 
 def _get_bullish_groupings_from_db() -> dict:
     try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-
+        conn = get_conn()
+        max_date_q = "(SELECT MAX(Date) FROM combined_stock_data)"
         momentum = [
             r[0]
-            for r in cursor.execute("""
+            for r in conn.execute(f"""
             SELECT Ticker FROM combined_stock_data
-            WHERE Date = (SELECT MAX(Date) FROM combined_stock_data)
-            AND Ticker_Close > Ticker_SMA_10 AND Ticker_SMA_10 > Ticker_SMA_30
-            AND Ticker_RSI > 50 AND Ticker_MACD > Ticker_MACD_Signal
+            WHERE Date = {max_date_q}
+              AND Ticker_Close > Ticker_SMA_10 AND Ticker_SMA_10 > Ticker_SMA_30
+              AND Ticker_RSI > 50 AND Ticker_MACD > Ticker_MACD_Signal
             ORDER BY (Ticker_Close / Ticker_SMA_10) DESC LIMIT 9
-        """).fetchall()
+            """).fetchall()
         ]
-
         breakout = [
             r[0]
-            for r in cursor.execute("""
+            for r in conn.execute(f"""
             SELECT Ticker FROM combined_stock_data
-            WHERE Date = (SELECT MAX(Date) FROM combined_stock_data)
-            AND Ticker_Close > Ticker_Bollinger_High
-            AND Ticker_Volume > Ticker_SMA_30 * 1.5
-            AND Ticker_Williams_R > -20
+            WHERE Date = {max_date_q}
+              AND Ticker_Close > Ticker_Bollinger_High
+              AND Ticker_Volume > Ticker_SMA_30 * 1.5
+              AND Ticker_Williams_R > -20
             ORDER BY (Ticker_Close / Ticker_Bollinger_High) DESC LIMIT 9
-        """).fetchall()
+            """).fetchall()
         ]
-
         trend_strength = [
             r[0]
-            for r in cursor.execute("""
+            for r in conn.execute(f"""
             SELECT Ticker FROM combined_stock_data
-            WHERE Date = (SELECT MAX(Date) FROM combined_stock_data)
-            AND Ticker_TSI > 0 AND Ticker_UO > 50
-            AND Ticker_MFI > 50 AND Ticker_Chaikin_MF > 0
+            WHERE Date = {max_date_q}
+              AND Ticker_TSI > 0 AND Ticker_UO > 50
+              AND Ticker_MFI > 50 AND Ticker_Chaikin_MF > 0
             ORDER BY (Ticker_TSI + Ticker_UO + Ticker_MFI) DESC LIMIT 9
-        """).fetchall()
+            """).fetchall()
         ]
-
         conn.close()
         return {"momentum": momentum, "breakout": breakout, "trend_strength": trend_strength}
     except Exception as e:
@@ -1024,48 +1035,60 @@ def _get_bullish_groupings_from_db() -> dict:
 
 IP_REQUEST_LIMIT = 100
 
-_ip_request_conn: sqlite3.Connection | None = None
-
-
-def _get_ip_conn() -> sqlite3.Connection:
-    global _ip_request_conn
-    if _ip_request_conn is None:
-        _ip_request_conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-        _ip_request_conn.execute(
-            "CREATE TABLE IF NOT EXISTS ip_requests "
-            "(ip TEXT PRIMARY KEY, requests_used INTEGER DEFAULT 0)"
-        )
-        _ip_request_conn.commit()
-    return _ip_request_conn
-
 
 def ip_has_requests(ip: str) -> bool:
-    conn = _get_ip_conn()
-    row = conn.execute("SELECT requests_used FROM ip_requests WHERE ip = ?", (ip,)).fetchone()
+    conn = get_conn()
+    row = conn.execute("SELECT requests_used FROM ip_requests WHERE ip = ?", [ip]).fetchone()
+    conn.close()
     if row is None:
         return True
     return row[0] < IP_REQUEST_LIMIT
 
 
 def ip_record_request(ip: str) -> None:
-    conn = _get_ip_conn()
+    conn = get_conn()
     conn.execute(
         "INSERT INTO ip_requests (ip, requests_used) VALUES (?, 1) "
-        "ON CONFLICT(ip) DO UPDATE SET requests_used = requests_used + 1",
-        (ip,),
+        "ON CONFLICT (ip) DO UPDATE SET requests_used = requests_used + 1",
+        [ip],
     )
-    conn.commit()
+    conn.close()
 
 
 # ── AI chat ────────────────────────────────────────────────────────────────────
 
 
 class AiChatRequest(BaseModel):
-    provider: str
-    model: str
+    provider: str = "ollama"
+    model: str = "gemini-3-flash-preview"
     api_key: str | None = None
-    message: str
+    # Accept either a full conversation history or a single message
+    messages: list[dict] | None = None
+    message: str | None = None
     context: dict | None = None
+
+    @property
+    def last_message(self) -> str:
+        if self.messages:
+            for m in reversed(self.messages):
+                if m.get("role") == "user":
+                    return m.get("content", "")
+        return self.message or ""
+
+    @property
+    def conversation_history(self) -> list[dict]:
+        if self.messages:
+            return [{"role": m["role"], "content": m["content"]} for m in self.messages]
+        return [{"role": "user", "content": self.message or ""}]
+
+
+class _LivePricesBody(BaseModel):
+    tickers: list[str]
+
+
+class _CorrelationsBody(BaseModel):
+    tickers: list[str]
+    days: int = 90
 
 
 def build_system_prompt(context: dict) -> str:
@@ -1127,13 +1150,16 @@ async def ai_chat(request: Request, body: AiChatRequest):
         provider = body.provider
         model = body.model
 
+    history = body.conversation_history
+
     try:
         async with httpx.AsyncClient(timeout=20.0) as client:
             if provider == "ollama":
                 ollama_headers = {}
                 if OLLAMA_API_KEY:
                     ollama_headers["Authorization"] = f"Bearer {OLLAMA_API_KEY}"
-                # Ollama cloud requires stream:True — stream:False returns empty body
+                # Build full conversation with system prompt prepended
+                full_messages = [{"role": "system", "content": system_prompt}] + history
                 content = ""
                 async with client.stream(
                     "POST",
@@ -1141,10 +1167,7 @@ async def ai_chat(request: Request, body: AiChatRequest):
                     headers=ollama_headers,
                     json={
                         "model": model,
-                        "messages": [
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": body.message},
-                        ],
+                        "messages": full_messages,
                         "stream": True,
                         "think": False,
                         "options": {"num_predict": 400},
@@ -1164,11 +1187,13 @@ async def ai_chat(request: Request, body: AiChatRequest):
                 if IS_PRODUCTION:
                     ip_record_request(client_ip)
                 content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
-                return {"response": content}
+                return {"content": content}
 
             elif provider == "anthropic":
                 if not body.api_key:
                     raise HTTPException(status_code=400, detail="API key required for Anthropic")
+                # Anthropic requires alternating user/assistant; collapse if needed
+                anthropic_msgs = [{"role": m["role"], "content": m["content"]} for m in history]
                 resp = await client.post(
                     "https://api.anthropic.com/v1/messages",
                     headers={
@@ -1180,12 +1205,12 @@ async def ai_chat(request: Request, body: AiChatRequest):
                         "model": model,
                         "max_tokens": 400,
                         "system": system_prompt,
-                        "messages": [{"role": "user", "content": body.message}],
+                        "messages": anthropic_msgs,
                     },
                 )
                 if resp.status_code != 200:
                     raise HTTPException(status_code=resp.status_code, detail=resp.text)
-                return {"response": resp.json()["content"][0]["text"]}
+                return {"content": resp.json()["content"][0]["text"]}
 
             elif provider == "openai":
                 if not body.api_key:
@@ -1199,15 +1224,12 @@ async def ai_chat(request: Request, body: AiChatRequest):
                     json={
                         "model": model,
                         "max_tokens": 400,
-                        "messages": [
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": body.message},
-                        ],
+                        "messages": [{"role": "system", "content": system_prompt}] + history,
                     },
                 )
                 if resp.status_code != 200:
                     raise HTTPException(status_code=resp.status_code, detail=resp.text)
-                return {"response": resp.json()["choices"][0]["message"]["content"]}
+                return {"content": resp.json()["choices"][0]["message"]["content"]}
 
             else:
                 raise HTTPException(status_code=400, detail=f"Unknown provider: {provider}")
@@ -1285,6 +1307,117 @@ async def refresh_status(request: Request):
     return pipeline_status
 
 
+# ── Pipeline aliases (new client-friendly names) ────────────────────────────────
+@app.get("/pipeline/status")
+@limiter.limit("20/minute")
+async def pipeline_status_endpoint(request: Request):
+    return pipeline_status
+
+
+@app.post("/pipeline/trigger")
+@limiter.limit("2/minute")
+async def pipeline_trigger(request: Request, background_tasks: BackgroundTasks):
+    if pipeline_status["running"]:
+        return {"status": "already_running", "message": "Data refresh already in progress"}
+    background_tasks.add_task(run_daily_update)
+    return {"status": "started", "message": "Data refresh started in background"}
+
+
+# ── Macro series (yfinance pull for TNX, DX, GC=F, CL=F, etc.) ─────────────────
+@app.get("/macro/{series}")
+@limiter.limit("10/minute")
+async def get_macro_series(request: Request, series: str, days: int = Query(180, ge=30, le=730)):
+    """Return historical close prices for any yfinance-valid symbol (indices, futures, bonds)."""
+    cache_key = f"macro:{series}:{days}"
+    cached = redis.get(cache_key)
+    if cached:
+        return json.loads(cached)
+    try:
+        import yfinance as yf_local
+
+        end = datetime.date.today()
+        start = end - datetime.timedelta(days=days)
+        hist = yf_local.Ticker(series).history(start=str(start), end=str(end), interval="1d")
+        if hist.empty:
+            raise HTTPException(status_code=404, detail=f"No data for {series}")
+        dates = [str(d.date()) for d in hist.index]
+        values = [float(v) if pd.notna(v) else None for v in hist["Close"]]
+        result = {"ticker": series, "name": series, "dates": dates, "values": values}
+        redis.set(cache_key, json.dumps(result), ex=3600)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Insider transactions (SEC Form 4 via yfinance) ───────────────────────────────
+@app.get("/insider/{ticker}", response_model=list[InsiderTransaction])
+@limiter.limit("10/minute")
+async def get_insider_transactions(request: Request, ticker: str):
+    cache_key = f"insider:{ticker.upper()}"
+    cached = redis.get(cache_key)
+    if cached:
+        return json.loads(cached)
+    try:
+        import yfinance as yf_local
+
+        t = yf_local.Ticker(ticker.upper())
+        tx = t.insider_transactions
+        if tx is None or (hasattr(tx, "empty") and tx.empty):
+            return []
+        results = []
+        for _, row in tx.iterrows():
+            results.append(
+                {
+                    "filer_name": row.get("Insider") or row.get("Name") or None,
+                    "ticker": ticker.upper(),
+                    "transaction_date": str(row.get("Start Date") or row.get("Date") or "")[:10]
+                    or None,
+                    "transaction_type": row.get("Transaction") or None,
+                    "shares": float(row["Shares"]) if pd.notna(row.get("Shares")) else None,
+                    "price_per_share": float(row["Value"]) / float(row["Shares"])
+                    if pd.notna(row.get("Value"))
+                    and pd.notna(row.get("Shares"))
+                    and float(row.get("Shares", 0)) != 0
+                    else None,
+                    "total_value": float(row["Value"]) if pd.notna(row.get("Value")) else None,
+                    "form_url": None,
+                }
+            )
+        redis.set(cache_key, json.dumps(results[:20]), ex=3600)
+        return results[:20]
+    except Exception as e:
+        logger.warning("Insider data error for %s: %s", ticker, e)
+        return []
+
+
+# ── Short interest ───────────────────────────────────────────────────────────────
+@app.get("/short-interest/{ticker}", response_model=ShortInterest)
+@limiter.limit("10/minute")
+async def get_short_interest(request: Request, ticker: str):
+    cache_key = f"short_interest:{ticker.upper()}"
+    cached = redis.get(cache_key)
+    if cached:
+        return json.loads(cached)
+    try:
+        import yfinance as yf_local
+
+        info = yf_local.Ticker(ticker.upper()).info
+        result = {
+            "ticker": ticker.upper(),
+            "settlement_date": None,
+            "short_interest": float(info.get("sharesShort", 0)) or None,
+            "avg_daily_volume": float(info.get("averageVolume", 0)) or None,
+            "days_to_cover": float(info.get("shortRatio", 0)) or None,
+        }
+        redis.set(cache_key, json.dumps(result), ex=3600)
+        return result
+    except Exception as e:
+        logger.warning("Short interest error for %s: %s", ticker, e)
+        return ShortInterest(ticker=ticker.upper())
+
+
 @app.get("/stock/{ticker}", response_model=list[StockData])
 @limiter.limit("60/minute")
 async def get_stock_data(
@@ -1292,73 +1425,91 @@ async def get_stock_data(
     ticker: str,
     start_date: str | None = None,
     end_date: str | None = None,
+    days: int | None = Query(None, ge=1, le=3650),
     metrics: list[str] | None = Query(None),
     page: int = Query(1, ge=1),
-    page_size: int = Query(100, ge=1, le=1000),
+    page_size: int = Query(500, ge=1, le=2000),
 ):
-    cache_key = f"stock_data:{ticker}:{start_date}:{end_date}:{page}:{page_size}"
+    # `days` is a convenience shortcut that computes start_date relative to the latest date
+    cache_key = f"stock_data:{ticker}:{start_date}:{end_date}:{days}:{page}:{page_size}"
     cached_data = redis.get(cache_key)
 
     if cached_data:
         return json.loads(cached_data)
 
-    selected_metrics = [
-        CombinedStockData.Date,
-        CombinedStockData.Ticker,
-        CombinedStockData.Ticker_Open,
-        CombinedStockData.Ticker_Close,
-        CombinedStockData.Ticker_High,
-        CombinedStockData.Ticker_Low,
-        CombinedStockData.Ticker_Volume,
-        CombinedStockData.Ticker_SMA_10,
-        CombinedStockData.Ticker_EMA_10,
-        CombinedStockData.Ticker_SMA_30,
-        CombinedStockData.Ticker_EMA_30,
-        CombinedStockData.Ticker_SMA_250W,
-        CombinedStockData.Ticker_RSI,
-        CombinedStockData.Ticker_Stochastic_K,
-        CombinedStockData.Ticker_Stochastic_D,
-        CombinedStockData.Ticker_MACD,
-        CombinedStockData.Ticker_MACD_Signal,
-        CombinedStockData.Ticker_MACD_Diff,
-        CombinedStockData.Ticker_TSI,
-        CombinedStockData.Ticker_UO,
-        CombinedStockData.Ticker_ROC,
-        CombinedStockData.Ticker_Williams_R,
-        CombinedStockData.Ticker_Bollinger_High,
-        CombinedStockData.Ticker_Bollinger_Low,
-        CombinedStockData.Ticker_Bollinger_Mid,
-        CombinedStockData.Ticker_Bollinger_PBand,
-        CombinedStockData.Ticker_Bollinger_WBand,
-        CombinedStockData.Ticker_On_Balance_Volume,
-        CombinedStockData.Ticker_Chaikin_MF,
-        CombinedStockData.Ticker_Force_Index,
-        CombinedStockData.Ticker_MFI,
-        CombinedStockData.Ticker_VWAP,
+    _STOCK_COLS = [
+        "Date",
+        "Ticker",
+        "Ticker_Open",
+        "Ticker_Close",
+        "Ticker_High",
+        "Ticker_Low",
+        "Ticker_Volume",
+        "Ticker_SMA_10",
+        "Ticker_EMA_10",
+        "Ticker_SMA_30",
+        "Ticker_EMA_30",
+        "Ticker_SMA_200W",
+        "Ticker_SMA_250W",
+        "Ticker_RSI",
+        "Ticker_Stochastic_K",
+        "Ticker_Stochastic_D",
+        "Ticker_MACD",
+        "Ticker_MACD_Signal",
+        "Ticker_MACD_Diff",
+        "Ticker_TSI",
+        "Ticker_UO",
+        "Ticker_ROC",
+        "Ticker_Williams_R",
+        "Ticker_Bollinger_High",
+        "Ticker_Bollinger_Low",
+        "Ticker_Bollinger_Mid",
+        "Ticker_Bollinger_PBand",
+        "Ticker_Bollinger_WBand",
+        "Ticker_On_Balance_Volume",
+        "Ticker_Chaikin_MF",
+        "Ticker_Force_Index",
+        "Ticker_MFI",
+        "Ticker_VWAP",
+        "Ticker_Tech_Score",
     ]
-
-    query = select(*selected_metrics).where(CombinedStockData.Ticker == ticker)
-
+    col_sel = ", ".join(_STOCK_COLS)
+    where = "WHERE Ticker = ?"
+    params: list = [ticker.upper()]
     if start_date:
-        start_date_obj = datetime.datetime.strptime(start_date, "%Y-%m-%d")
-        query = query.where(CombinedStockData.Date >= start_date_obj)
+        where += " AND Date >= ?"
+        params.append(start_date)
     if end_date:
-        end_date_obj = datetime.datetime.strptime(end_date, "%Y-%m-%d")
-        query = query.where(CombinedStockData.Date <= end_date_obj)
+        where += " AND Date <= ?"
+        params.append(end_date)
 
-    query = query.order_by(CombinedStockData.Date.desc())
-    result = await database.fetch_all(query)
+    conn = get_conn()
+    # If `days` given, resolve to an absolute start_date from the latest available date
+    if days and not start_date:
+        latest_row = conn.execute(
+            "SELECT MAX(Date) FROM combined_stock_data WHERE Ticker = ?", [ticker.upper()]
+        ).fetchone()
+        if latest_row and latest_row[0]:
+            start_date = conn.execute(
+                f"SELECT ('{latest_row[0]}'::DATE - INTERVAL '{days} days')::TEXT"
+            ).fetchone()[0]
+    rows = conn.execute(
+        f"SELECT {col_sel} FROM combined_stock_data {where} ORDER BY Date ASC",
+        params,
+    ).fetchall()
+    conn.close()
 
     stock_data = [
         StockData(
-            Date=record["Date"].strftime("%Y-%m-%d"),
-            **{k: record[k] for k in record.keys() if k != "Date"},
+            **{
+                k: (str(v)[:10] if k == "Date" and v is not None else v)
+                for k, v in zip(_STOCK_COLS, row)
+            }
         )
-        for record in result
+        for row in rows
     ]
 
     redis.set(cache_key, json.dumps([sd.model_dump() for sd in stock_data]), ex=3600)
-
     return stock_data
 
 
@@ -1371,51 +1522,54 @@ async def get_company_info(request: Request, ticker: str):
     if cached_data:
         return CompanyInfo(**json.loads(cached_data))
 
-    query = select(
-        CombinedStockData.Ticker,
-        CombinedStockData.FullName,
-        CombinedStockData.Sector,
-        CombinedStockData.Subsector,
-        CombinedStockData.MarketCap,
-        CombinedStockData.Country,
-        CombinedStockData.Website,
-        CombinedStockData.Description,
-        CombinedStockData.CEO,
-        CombinedStockData.Employees,
-        CombinedStockData.City,
-        CombinedStockData.State,
-        CombinedStockData.Zip,
-        CombinedStockData.Address,
-        CombinedStockData.Phone,
-        CombinedStockData.Exchange,
-        CombinedStockData.Currency,
-        CombinedStockData.QuoteType,
-        CombinedStockData.ShortName,
-        CombinedStockData.Price,
-        CombinedStockData.DividendRate,
-        CombinedStockData.DividendYield,
-        CombinedStockData.PayoutRatio,
-        CombinedStockData.Beta,
-        CombinedStockData.PE,
-        CombinedStockData.EPS,
-        CombinedStockData.Revenue,
-        CombinedStockData.GrossProfit,
-        CombinedStockData.FreeCashFlow,
-    ).where(CombinedStockData.Ticker == ticker)
-
-    result = await database.fetch_one(query)
-    if not result:
+    _INFO_COLS = [
+        "Ticker",
+        "FullName",
+        "Sector",
+        "Subsector",
+        "MarketCap",
+        "Country",
+        "Website",
+        "Description",
+        "CEO",
+        "Employees",
+        "City",
+        "State",
+        "Zip",
+        "Address",
+        "Phone",
+        "Exchange",
+        "Currency",
+        "QuoteType",
+        "ShortName",
+        "Price",
+        "DividendRate",
+        "DividendYield",
+        "PayoutRatio",
+        "Beta",
+        "PE",
+        "EPS",
+        "Revenue",
+        "GrossProfit",
+        "FreeCashFlow",
+    ]
+    col_sel = ", ".join(_INFO_COLS)
+    conn = get_conn()
+    row = conn.execute(
+        f"SELECT {col_sel} FROM combined_stock_data WHERE Ticker = ? ORDER BY Date DESC LIMIT 1",
+        [ticker.upper()],
+    ).fetchone()
+    conn.close()
+    if not row:
         raise HTTPException(status_code=404, detail="Company not found")
 
-    company_data = dict(result)
-    for key, value in company_data.items():
-        if key in ["MarketCap", "Employees", "Revenue", "GrossProfit", "FreeCashFlow"]:
-            company_data[key] = safe_convert(value, int)
-        elif key in ["Price", "DividendRate", "DividendYield", "PayoutRatio", "Beta", "PE", "EPS"]:
-            company_data[key] = safe_convert(value, float)
+    company_data = dict(zip(_INFO_COLS, row))
+    for key in ["MarketCap", "Employees", "Revenue", "GrossProfit", "FreeCashFlow"]:
+        company_data[key] = safe_convert(company_data[key], int)
+    for key in ["Price", "DividendRate", "DividendYield", "PayoutRatio", "Beta", "PE", "EPS"]:
+        company_data[key] = safe_convert(company_data[key], float)
 
     redis.set(cache_key, json.dumps(company_data), ex=600)
-
     return CompanyInfo(**company_data)
 
 
@@ -1548,7 +1702,7 @@ async def get_earnings_calendar(request: Request, days_ahead: int = Query(14, ge
     try:
         import concurrent.futures
 
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_conn()
         rows = conn.execute("SELECT Ticker, FullName FROM stock_information").fetchall()
         conn.close()
         today = datetime.date.today()
@@ -1600,9 +1754,9 @@ async def get_peers(request: Request, ticker: str):
     if cached:
         return json.loads(cached)
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_conn()
         sub_row = conn.execute(
-            "SELECT Subsector FROM stock_information WHERE Ticker=?", (ticker.upper(),)
+            "SELECT Subsector FROM stock_information WHERE Ticker=?", [ticker.upper()]
         ).fetchone()
         if not sub_row:
             conn.close()
@@ -1622,16 +1776,11 @@ async def get_peers(request: Request, ticker: str):
                 FROM combined_stock_data
                 WHERE Date = (
                     SELECT MAX(Date) FROM combined_stock_data
-                    WHERE Date <= date(
-                        (SELECT MAX(Date) FROM combined_stock_data), '-1 year'
-                    )
+                    WHERE Date <= (SELECT MAX(Date) FROM combined_stock_data)::DATE - INTERVAL '1 year'
                 )
             )
             SELECT l.Ticker, l.FullName,
-                CAST(NULLIF(l.MarketCap,'N/A') AS REAL) AS mc,
-                CAST(NULLIF(l.PE,'N/A') AS REAL) AS pe,
-                CAST(NULLIF(l.EPS,'N/A') AS REAL) AS eps,
-                CAST(NULLIF(l.Beta,'N/A') AS REAL) AS beta,
+                l.MarketCap AS mc, l.PE AS pe, l.EPS AS eps, l.Beta AS beta,
                 l.Ticker_RSI, l.Ticker_Tech_Score,
                 CASE WHEN y.prev_close > 0
                      THEN ROUND((l.Ticker_Close - y.prev_close) / y.prev_close * 100, 2)
@@ -1640,7 +1789,7 @@ async def get_peers(request: Request, ticker: str):
             ORDER BY mc DESC NULLS LAST
             LIMIT 15
         """,
-            (subsector,),
+            [subsector],
         ).fetchall()
         conn.close()
         result = [
@@ -1673,9 +1822,8 @@ async def get_sector_rotation(request: Request, days: int = Query(90, ge=30, le=
     if cached:
         return json.loads(cached)
     try:
-        conn = sqlite3.connect(DB_PATH)
-        rows = conn.execute(
-            f"""
+        conn = get_conn()
+        rows = conn.execute(f"""
             WITH latest AS (
                 SELECT Sector, AVG(Ticker_Close) AS cn,
                        AVG(Ticker_RSI) AS ar, AVG(Ticker_Tech_Score) AS at
@@ -1688,7 +1836,8 @@ async def get_sector_rotation(request: Request, days: int = Query(90, ge=30, le=
                 FROM combined_stock_data
                 WHERE Date = (
                     SELECT MAX(Date) FROM combined_stock_data
-                    WHERE Date <= date((SELECT MAX(Date) FROM combined_stock_data), '-{days} days')
+                    WHERE Date <= (SELECT MAX(Date) FROM combined_stock_data)::DATE
+                                  - INTERVAL '{days} days'
                 )
                 GROUP BY Sector
             )
@@ -1698,8 +1847,7 @@ async def get_sector_rotation(request: Request, days: int = Query(90, ge=30, le=
             FROM latest l LEFT JOIN past p ON l.Sector = p.Sector
             WHERE l.Sector IS NOT NULL AND l.Sector != ''
             ORDER BY ROUND((l.cn - p.cp) / NULLIF(p.cp, 0) * 100, 2) DESC NULLS LAST
-        """
-        ).fetchall()
+        """).fetchall()
         conn.close()
         result = [
             SectorRotationRow(sector=r[0], return_pct=r[1], avg_rsi=r[2], avg_tech_score=r[3])
@@ -1719,7 +1867,7 @@ async def get_market_breadth(request: Request):
     if cached:
         return json.loads(cached)
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_conn()
         row = conn.execute("""
             WITH latest AS (
                 SELECT Ticker, Ticker_Close, Ticker_RSI, Ticker_SMA_30, Ticker_Tech_Score
@@ -1739,7 +1887,7 @@ async def get_market_breadth(request: Request):
                        MAX(Ticker_High) AS h52,
                        MIN(Ticker_Low)  AS l52
                 FROM combined_stock_data
-                WHERE Date >= date((SELECT MAX(Date) FROM combined_stock_data), '-1 year')
+                WHERE Date >= (SELECT MAX(Date) FROM combined_stock_data)::DATE - INTERVAL '1 year'
                 GROUP BY Ticker
             )
             SELECT
@@ -1796,11 +1944,53 @@ async def get_correlations(
         return json.loads(cached)
     try:
         placeholders = ",".join("?" * len(tickers))
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_conn()
         rows = conn.execute(
             f"SELECT Date, Ticker, Ticker_Close FROM combined_stock_data "
             f"WHERE Ticker IN ({placeholders}) "
-            f"AND Date >= date((SELECT MAX(Date) FROM combined_stock_data), '-{days} days') "
+            f"AND Date >= ((SELECT MAX(Date) FROM combined_stock_data)::DATE - INTERVAL '{days} days')::TEXT "
+            f"ORDER BY Date",
+            tickers,
+        ).fetchall()
+        conn.close()
+        df = pd.DataFrame(rows, columns=["date", "ticker", "close"])
+        pivot = df.pivot(index="date", columns="ticker", values="close").sort_index()
+        returns = pivot.pct_change().dropna()
+        corr = returns.corr()
+        available = [t for t in tickers if t in corr.columns]
+        matrix = [
+            [
+                round(corr.loc[a, b], 4) if a in corr.index and b in corr.columns else None
+                for b in available
+            ]
+            for a in available
+        ]
+        result = CorrelationMatrix(tickers=available, matrix=matrix)
+        redis.set(cache_key, result.model_dump_json(), ex=1800)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/correlations", response_model=CorrelationMatrix)
+@limiter.limit("10/minute")
+async def post_correlations(request: Request, body: _CorrelationsBody):
+    """POST variant of /correlations — accepts tickers + days in body."""
+    tickers = [t.upper() for t in body.tickers if t][:20]
+    days = max(30, min(730, body.days))
+    if len(tickers) < 2:
+        raise HTTPException(status_code=400, detail="Need at least 2 tickers")
+    cache_key = f"correlations:{','.join(sorted(tickers))}:{days}"
+    cached = redis.get(cache_key)
+    if cached:
+        return json.loads(cached)
+    try:
+        placeholders = ",".join("?" * len(tickers))
+        conn = get_conn()
+        rows = conn.execute(
+            f"SELECT Date, Ticker, Ticker_Close FROM combined_stock_data "
+            f"WHERE Ticker IN ({placeholders}) "
+            f"AND Date >= ((SELECT MAX(Date) FROM combined_stock_data)::DATE - INTERVAL '{days} days')::TEXT "
             f"ORDER BY Date",
             tickers,
         ).fetchall()
@@ -1840,7 +2030,7 @@ _ALERT_KEYS = [
 @app.get("/alerts", response_model=list[AlertOut])
 async def list_alerts(request: Request):
     sid = _get_session_id(request)
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_conn()
     rows = conn.execute(
         "SELECT id,ticker,metric,condition,threshold,triggered,triggered_at,created_at,notes "
         "FROM alerts WHERE session_id=? ORDER BY created_at DESC",
@@ -1853,16 +2043,16 @@ async def list_alerts(request: Request):
 @app.post("/alerts", response_model=AlertOut)
 async def create_alert(request: Request, body: AlertCreate):
     sid = _get_session_id(request)
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.execute(
-        "INSERT INTO alerts (session_id,ticker,metric,condition,threshold,notes) VALUES (?,?,?,?,?,?)",
-        (sid, body.ticker.upper(), body.metric, body.condition, body.threshold, body.notes),
-    )
-    rid = cur.lastrowid
-    conn.commit()
+    conn = get_conn()
+    rid = conn.execute(
+        "INSERT INTO alerts (session_id,ticker,metric,condition,threshold,notes) "
+        "VALUES (?,?,?,?,?,?) RETURNING id",
+        [sid, body.ticker.upper(), body.metric, body.condition, body.threshold, body.notes],
+    ).fetchone()[0]
     row = conn.execute(
-        "SELECT id,ticker,metric,condition,threshold,triggered,triggered_at,created_at,notes FROM alerts WHERE id=?",
-        (rid,),
+        "SELECT id,ticker,metric,condition,threshold,triggered,triggered_at,created_at,notes "
+        "FROM alerts WHERE id=?",
+        [rid],
     ).fetchone()
     conn.close()
     return dict(zip(_ALERT_KEYS, row))
@@ -1871,9 +2061,8 @@ async def create_alert(request: Request, body: AlertCreate):
 @app.delete("/alerts/{alert_id}")
 async def delete_alert(request: Request, alert_id: int):
     sid = _get_session_id(request)
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("DELETE FROM alerts WHERE id=? AND session_id=?", (alert_id, sid))
-    conn.commit()
+    conn = get_conn()
+    conn.execute("DELETE FROM alerts WHERE id=? AND session_id=?", [alert_id, sid])
     conn.close()
     return {"ok": True}
 
@@ -1885,11 +2074,12 @@ async def get_ticker_patterns(request: Request, ticker: str, days: int = Query(7
     cached = redis.get(cache_key)
     if cached:
         return json.loads(cached)
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_conn()
     rows = conn.execute(
-        "SELECT id,ticker,detected_at,pattern_type,level,confidence,notes FROM pattern_signals "
-        "WHERE ticker=? AND detected_at >= date('now', ?) ORDER BY detected_at DESC, confidence DESC",
-        (ticker.upper(), f"-{days} days"),
+        f"SELECT id,ticker,detected_at,pattern_type,level,confidence,notes FROM pattern_signals "
+        f"WHERE ticker=? AND detected_at >= (CURRENT_DATE - INTERVAL '{days} days')::TEXT "
+        f"ORDER BY detected_at DESC, confidence DESC",
+        [ticker.upper()],
     ).fetchall()
     conn.close()
     keys = ["id", "ticker", "detected_at", "pattern_type", "level", "confidence", "notes"]
@@ -1909,18 +2099,19 @@ async def get_recent_patterns(
     cached = redis.get(cache_key)
     if cached:
         return json.loads(cached)
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_conn()
     if pattern_type:
         rows = conn.execute(
             "SELECT id,ticker,detected_at,pattern_type,level,confidence,notes FROM pattern_signals "
-            "WHERE pattern_type=? AND detected_at >= date('now', ?) ORDER BY confidence DESC LIMIT 100",
-            (pattern_type, f"-{days} days"),
+            f"WHERE pattern_type=? AND detected_at >= (CURRENT_DATE - INTERVAL '{days} days')::TEXT "
+            "ORDER BY confidence DESC LIMIT 100",
+            [pattern_type],
         ).fetchall()
     else:
         rows = conn.execute(
             "SELECT id,ticker,detected_at,pattern_type,level,confidence,notes FROM pattern_signals "
-            "WHERE detected_at >= date('now', ?) ORDER BY confidence DESC LIMIT 100",
-            (f"-{days} days",),
+            f"WHERE detected_at >= (CURRENT_DATE - INTERVAL '{days} days')::TEXT "
+            "ORDER BY confidence DESC LIMIT 100",
         ).fetchall()
     conn.close()
     keys = ["id", "ticker", "detected_at", "pattern_type", "level", "confidence", "notes"]
@@ -1994,14 +2185,13 @@ async def get_heatmap(
     latest_date_sql = "(SELECT MAX(Date) FROM combined_stock_data)"
 
     try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
+        conn = get_conn()
 
         if level == "sector":
-            rows = cursor.execute(f"""
+            rows = conn.execute(f"""
                 SELECT
                     t.Sector,
-                    SUM(CAST(NULLIF(t.MarketCap, 'N/A') AS REAL)) AS market_cap,
+                    SUM(t.MarketCap) AS market_cap,
                     AVG((t.Ticker_Close - p.Ticker_Close) / NULLIF(p.Ticker_Close, 0) * 100) AS pct_change
                 FROM combined_stock_data t
                 LEFT JOIN combined_stock_data p
@@ -2020,11 +2210,11 @@ async def get_heatmap(
         elif level == "subsector":
             if not sector:
                 raise HTTPException(status_code=400, detail="sector required for subsector level")
-            rows = cursor.execute(
+            rows = conn.execute(
                 f"""
                 SELECT
                     t.Subsector,
-                    SUM(CAST(NULLIF(t.MarketCap, 'N/A') AS REAL)) AS market_cap,
+                    SUM(t.MarketCap) AS market_cap,
                     AVG((t.Ticker_Close - p.Ticker_Close) / NULLIF(p.Ticker_Close, 0) * 100) AS pct_change
                 FROM combined_stock_data t
                 LEFT JOIN combined_stock_data p
@@ -2035,7 +2225,7 @@ async def get_heatmap(
                 GROUP BY t.Subsector
                 ORDER BY market_cap DESC
             """,
-                (sector,),
+                [sector],
             ).fetchall()
             result = [
                 {"name": r[0], "market_cap": r[1], "pct_change": r[2], "ticker": None}
@@ -2046,12 +2236,12 @@ async def get_heatmap(
         elif level == "stock":
             if not subsector:
                 raise HTTPException(status_code=400, detail="subsector required for stock level")
-            rows = cursor.execute(
+            rows = conn.execute(
                 f"""
                 SELECT
                     t.Ticker,
                     t.FullName,
-                    CAST(NULLIF(t.MarketCap, 'N/A') AS REAL) AS market_cap,
+                    t.MarketCap AS market_cap,
                     (t.Ticker_Close - p.Ticker_Close) / NULLIF(p.Ticker_Close, 0) * 100 AS pct_change
                 FROM combined_stock_data t
                 LEFT JOIN combined_stock_data p
@@ -2060,7 +2250,7 @@ async def get_heatmap(
                   AND t.Subsector = ?
                 ORDER BY market_cap DESC
             """,
-                (subsector,),
+                [subsector],
             ).fetchall()
             result = [
                 {"name": r[1] or r[0], "market_cap": r[2], "pct_change": r[3], "ticker": r[0]}
@@ -2093,9 +2283,8 @@ async def get_screener(request: Request):
         return json.loads(cached)
 
     try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        rows = cursor.execute("""
+        conn = get_conn()
+        rows = conn.execute("""
             WITH latest AS (
                 SELECT * FROM combined_stock_data
                 WHERE Date = (SELECT MAX(Date) FROM combined_stock_data)
@@ -2105,9 +2294,7 @@ async def get_screener(request: Request):
                 FROM combined_stock_data
                 WHERE Date = (
                     SELECT MAX(Date) FROM combined_stock_data
-                    WHERE Date <= date(
-                        (SELECT MAX(Date) FROM combined_stock_data), '-1 year'
-                    )
+                    WHERE Date <= ((SELECT MAX(Date) FROM combined_stock_data)::DATE - INTERVAL '1 year')::TEXT
                 )
             )
             SELECT
@@ -2115,18 +2302,18 @@ async def get_screener(request: Request):
                 l.FullName,
                 l.Sector,
                 l.Subsector,
-                CAST(NULLIF(l.MarketCap, 'N/A') AS REAL)  AS market_cap,
-                CAST(NULLIF(l.PE,        'N/A') AS REAL)  AS pe,
-                CAST(NULLIF(l.EPS,       'N/A') AS REAL)  AS eps,
-                CAST(NULLIF(l.Beta,      'N/A') AS REAL)  AS beta,
-                l.Ticker_RSI                              AS rsi,
-                l.Ticker_Close                            AS latest_close,
+                l.MarketCap  AS market_cap,
+                l.PE         AS pe,
+                l.EPS        AS eps,
+                l.Beta       AS beta,
+                l.Ticker_RSI AS rsi,
+                l.Ticker_Close AS latest_close,
                 CASE
                     WHEN y.year_ago_close IS NOT NULL AND y.year_ago_close > 0
                     THEN ROUND((l.Ticker_Close - y.year_ago_close) / y.year_ago_close * 100, 2)
                     ELSE NULL
                 END AS return_52w,
-                l.Ticker_Tech_Score                       AS tech_score
+                l.Ticker_Tech_Score AS tech_score
             FROM latest l
             LEFT JOIN year_ago y ON y.Ticker = l.Ticker
             WHERE l.Ticker IS NOT NULL
@@ -2158,7 +2345,7 @@ async def get_screener(request: Request):
                 SELECT Ticker, Ticker_Close
                 FROM combined_stock_data
                 WHERE Ticker IN ({ph})
-                  AND Date >= date((SELECT MAX(Date) FROM combined_stock_data), '-30 days')
+                  AND Date >= ((SELECT MAX(Date) FROM combined_stock_data)::DATE - INTERVAL '30 days')::TEXT
                 ORDER BY Ticker, Date ASC
             """,
                 tickers_in_page,
@@ -2198,11 +2385,11 @@ def _row_to_watchlist(row) -> dict:
 @limiter.limit("60/minute")
 async def list_watchlists(request: Request):
     sid = _get_session_id(request)
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_conn()
     rows = conn.execute(
         "SELECT id, name, tickers, created_at, updated_at FROM watchlists "
         "WHERE session_id=? ORDER BY updated_at DESC",
-        (sid,),
+        [sid],
     ).fetchall()
     conn.close()
     return [_row_to_watchlist(r) for r in rows]
@@ -2212,33 +2399,27 @@ async def list_watchlists(request: Request):
 @limiter.limit("30/minute")
 async def create_watchlist(request: Request, body: WatchlistCreate):
     sid = _get_session_id(request)
-    conn = sqlite3.connect(DB_PATH)
-    try:
-        cursor = conn.execute(
-            "INSERT INTO watchlists (session_id, name, tickers) VALUES (?, ?, ?)",
-            (sid, body.name, json.dumps(body.tickers)),
-        )
-        row_id = cursor.lastrowid
-        conn.commit()
-        row = conn.execute(
-            "SELECT id, name, tickers, created_at, updated_at FROM watchlists WHERE id = ?",
-            (row_id,),
-        ).fetchone()
-        conn.close()
-        return _row_to_watchlist(row)
-    except sqlite3.IntegrityError:
-        conn.close()
-        raise HTTPException(status_code=409, detail="Watchlist name already exists")
+    conn = get_conn()
+    row_id = conn.execute(
+        "INSERT INTO watchlists (session_id, name, tickers) VALUES (?, ?, ?) RETURNING id",
+        [sid, body.name, json.dumps(body.tickers)],
+    ).fetchone()[0]
+    row = conn.execute(
+        "SELECT id, name, tickers, created_at, updated_at FROM watchlists WHERE id = ?",
+        [row_id],
+    ).fetchone()
+    conn.close()
+    return _row_to_watchlist(row)
 
 
 @app.get("/watchlists/{wl_id}", response_model=WatchlistOut)
 @limiter.limit("60/minute")
 async def get_watchlist(request: Request, wl_id: int):
     sid = _get_session_id(request)
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_conn()
     row = conn.execute(
         "SELECT id, name, tickers, created_at, updated_at FROM watchlists WHERE id=? AND session_id=?",
-        (wl_id, sid),
+        [wl_id, sid],
     ).fetchone()
     conn.close()
     if not row:
@@ -2250,15 +2431,14 @@ async def get_watchlist(request: Request, wl_id: int):
 @limiter.limit("30/minute")
 async def update_watchlist(request: Request, wl_id: int, body: WatchlistCreate):
     sid = _get_session_id(request)
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_conn()
     conn.execute(
-        "UPDATE watchlists SET name=?, tickers=?, updated_at=datetime('now') WHERE id=? AND session_id=?",
-        (body.name, json.dumps(body.tickers), wl_id, sid),
+        "UPDATE watchlists SET name=?, tickers=?, updated_at=CURRENT_TIMESTAMP WHERE id=? AND session_id=?",
+        [body.name, json.dumps(body.tickers), wl_id, sid],
     )
-    conn.commit()
     row = conn.execute(
         "SELECT id, name, tickers, created_at, updated_at FROM watchlists WHERE id=? AND session_id=?",
-        (wl_id, sid),
+        [wl_id, sid],
     ).fetchone()
     conn.close()
     if not row:
@@ -2270,9 +2450,8 @@ async def update_watchlist(request: Request, wl_id: int, body: WatchlistCreate):
 @limiter.limit("30/minute")
 async def delete_watchlist(request: Request, wl_id: int):
     sid = _get_session_id(request)
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("DELETE FROM watchlists WHERE id=? AND session_id=?", (wl_id, sid))
-    conn.commit()
+    conn = get_conn()
+    conn.execute("DELETE FROM watchlists WHERE id=? AND session_id=?", [wl_id, sid])
     conn.close()
     return {"ok": True}
 
@@ -2281,10 +2460,10 @@ async def delete_watchlist(request: Request, wl_id: int):
 
 
 def _get_portfolio_with_positions(portfolio_id: int, session_id: str = "default") -> dict | None:
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_conn()
     port_row = conn.execute(
         "SELECT id, name, created_at FROM portfolios WHERE id=? AND session_id=?",
-        (portfolio_id, session_id),
+        [portfolio_id, session_id],
     ).fetchone()
     if not port_row:
         conn.close()
@@ -2302,7 +2481,7 @@ def _get_portfolio_with_positions(portfolio_id: int, session_id: str = "default"
         WHERE p.portfolio_id = ?
         ORDER BY p.id
     """,
-        (portfolio_id,),
+        [portfolio_id],
     ).fetchall()
     conn.close()
 
@@ -2345,9 +2524,9 @@ def _get_portfolio_with_positions(portfolio_id: int, session_id: str = "default"
 @limiter.limit("60/minute")
 async def list_portfolios(request: Request):
     sid = _get_session_id(request)
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_conn()
     rows = conn.execute(
-        "SELECT id, name, created_at FROM portfolios WHERE session_id=? ORDER BY id", (sid,)
+        "SELECT id, name, created_at FROM portfolios WHERE session_id=? ORDER BY id", [sid]
     ).fetchall()
     conn.close()
     return [{"id": r[0], "name": r[1], "created_at": r[2]} for r in rows]
@@ -2357,12 +2536,10 @@ async def list_portfolios(request: Request):
 @limiter.limit("30/minute")
 async def create_portfolio(request: Request, body: PortfolioCreate):
     sid = _get_session_id(request)
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.execute(
-        "INSERT INTO portfolios (session_id, name) VALUES (?, ?)", (sid, body.name)
-    )
-    row_id = cursor.lastrowid
-    conn.commit()
+    conn = get_conn()
+    row_id = conn.execute(
+        "INSERT INTO portfolios (session_id, name) VALUES (?, ?) RETURNING id", [sid, body.name]
+    ).fetchone()[0]
     conn.close()
     return _get_portfolio_with_positions(row_id, sid)
 
@@ -2381,27 +2558,25 @@ async def get_portfolio(request: Request, portfolio_id: int):
 @limiter.limit("30/minute")
 async def add_position(request: Request, portfolio_id: int, body: PositionCreate):
     sid = _get_session_id(request)
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_conn()
     port = conn.execute(
-        "SELECT id FROM portfolios WHERE id=? AND session_id=?", (portfolio_id, sid)
+        "SELECT id FROM portfolios WHERE id=? AND session_id=?", [portfolio_id, sid]
     ).fetchone()
     if not port:
         conn.close()
         raise HTTPException(status_code=404, detail="Portfolio not found")
-    cursor = conn.execute(
+    pos_id = conn.execute(
         "INSERT INTO positions (portfolio_id, ticker, shares, cost_basis, purchased_at, notes) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
-        (
+        "VALUES (?, ?, ?, ?, ?, ?) RETURNING id",
+        [
             portfolio_id,
             body.ticker.upper(),
             body.shares,
             body.cost_basis,
             body.purchased_at,
             body.notes,
-        ),
-    )
-    pos_id = cursor.lastrowid
-    conn.commit()
+        ],
+    ).fetchone()[0]
     conn.close()
     portfolio = _get_portfolio_with_positions(portfolio_id, sid)
     pos = next((p for p in portfolio["positions"] if p["id"] == pos_id), None)
@@ -2414,7 +2589,7 @@ async def add_position(request: Request, portfolio_id: int, body: PositionCreate
 @limiter.limit("30/minute")
 async def update_position(request: Request, portfolio_id: int, pos_id: int, body: PositionCreate):
     sid = _get_session_id(request)
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_conn()
     conn.execute(
         "UPDATE positions SET ticker=?, shares=?, cost_basis=?, purchased_at=?, notes=? "
         "WHERE id=? AND portfolio_id=? AND portfolio_id IN "
@@ -2430,7 +2605,6 @@ async def update_position(request: Request, portfolio_id: int, pos_id: int, body
             sid,
         ),
     )
-    conn.commit()
     conn.close()
     portfolio = _get_portfolio_with_positions(portfolio_id, sid)
     pos = next((p for p in portfolio["positions"] if p["id"] == pos_id), None)
@@ -2443,13 +2617,12 @@ async def update_position(request: Request, portfolio_id: int, pos_id: int, body
 @limiter.limit("30/minute")
 async def delete_position(request: Request, portfolio_id: int, pos_id: int):
     sid = _get_session_id(request)
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_conn()
     conn.execute(
         "DELETE FROM positions WHERE id=? AND portfolio_id=? AND portfolio_id IN "
         "(SELECT id FROM portfolios WHERE session_id=?)",
         (pos_id, portfolio_id, sid),
     )
-    conn.commit()
     conn.close()
     return {"ok": True}
 
@@ -2466,34 +2639,32 @@ async def get_portfolio_chart(
         return json.loads(cached)
 
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_conn()
         # Verify portfolio belongs to this session
         owns = conn.execute(
-            "SELECT id FROM portfolios WHERE id=? AND session_id=?", (portfolio_id, sid)
+            "SELECT id FROM portfolios WHERE id=? AND session_id=?", [portfolio_id, sid]
         ).fetchone()
         if not owns:
             conn.close()
             return []
         has_positions = conn.execute(
-            "SELECT COUNT(*) FROM positions WHERE portfolio_id = ?", (portfolio_id,)
+            "SELECT COUNT(*) FROM positions WHERE portfolio_id = ?", [portfolio_id]
         ).fetchone()[0]
         if not has_positions:
             conn.close()
             return []
 
         rows = conn.execute(
-            """
+            f"""
             SELECT csd.Date, SUM(p.shares * csd.Ticker_Close) AS portfolio_value
             FROM positions p
             JOIN combined_stock_data csd ON csd.Ticker = p.ticker
             WHERE p.portfolio_id = ?
-              AND csd.Date >= date(
-                  (SELECT MAX(Date) FROM combined_stock_data), ? || ' days'
-              )
+              AND csd.Date >= ((SELECT MAX(Date) FROM combined_stock_data)::DATE - INTERVAL '{days} days')::TEXT
             GROUP BY csd.Date
             ORDER BY csd.Date
         """,
-            (portfolio_id, f"-{days}"),
+            [portfolio_id],
         ).fetchall()
         conn.close()
 
@@ -2513,6 +2684,7 @@ ALLOWED_BACKTEST_METRICS = {
     "Ticker_Close",
     "Ticker_SMA_10",
     "Ticker_SMA_30",
+    "Ticker_SMA_200W",
     "Ticker_SMA_250W",
     "Ticker_EMA_10",
     "Ticker_EMA_30",
@@ -2554,7 +2726,7 @@ async def run_backtest(request: Request, body: BacktestRequest):
         return json.loads(cached)
 
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_conn()
         date_filter = ""
         params: list = [body.ticker.upper()]
         if body.start_date:
@@ -2748,7 +2920,7 @@ async def strategy_screen(request: Request, body: StrategyScreenRequest):
         raise HTTPException(status_code=400, detail=f"Invalid entry_condition: {cond}")
 
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_conn()
         # Get the two most recent dates in the DB
         rows = conn.execute(
             f"""
@@ -2762,9 +2934,7 @@ async def strategy_screen(request: Request, body: StrategyScreenRequest):
                     ) AS prev_val,
                     CAST(COALESCE({etm}, ?) AS REAL) AS thresh_val
                 FROM combined_stock_data
-                WHERE Date >= date(
-                    (SELECT MAX(Date) FROM combined_stock_data), '-10 days'
-                )
+                WHERE Date >= ((SELECT MAX(Date) FROM combined_stock_data)::DATE - INTERVAL '10 days')::TEXT
             ),
             latest AS (
                 SELECT * FROM ranked
@@ -2798,7 +2968,7 @@ async def get_latest_metrics(request: Request, body: LatestMetricsRequest):
     cols_sql = ", ".join(body.metrics)
     tickers_ph = ",".join("?" * len(body.tickers))
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_conn()
         rows = conn.execute(
             f"""
             WITH latest_dates AS (
@@ -2834,14 +3004,14 @@ async def get_radar(request: Request, ticker: str):
     if cached:
         return json.loads(cached)
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_conn()
         row = conn.execute(
             """
             SELECT t.Ticker_RSI, t.Ticker_MACD, t.Ticker_MACD_Signal,
                    t.Ticker_Close, t.Ticker_SMA_10, t.Ticker_SMA_30,
                    t.Ticker_MFI, t.Ticker_Chaikin_MF,
                    t.Ticker_Bollinger_WBand, t.Ticker_Bollinger_PBand,
-                   CAST(NULLIF(t.PE, 'N/A') AS REAL), t.Ticker_Tech_Score
+                   t.PE, t.Ticker_Tech_Score
             FROM combined_stock_data t
             WHERE t.Ticker = ?
             ORDER BY t.Date DESC LIMIT 1
@@ -2912,7 +3082,7 @@ async def get_live_prices(request: Request, tickers: list[str] = Query(...)):
     if cached:
         return json.loads(cached)
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_conn()
         placeholders = ",".join("?" * len(tickers))
         rows = conn.execute(
             f"SELECT Ticker, Ticker_Close FROM combined_stock_data "
@@ -2930,6 +3100,33 @@ async def get_live_prices(request: Request, tickers: list[str] = Query(...)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/live-prices", response_model=LivePrices)
+@limiter.limit("30/minute")
+async def post_live_prices(request: Request, body: _LivePricesBody):
+    """POST variant of /live-prices — accepts tickers in request body."""
+    tickers = [t.upper() for t in body.tickers if t][:20]
+    cache_key = f"live:{','.join(sorted(tickers))}"
+    cached = redis.get(cache_key)
+    if cached:
+        return json.loads(cached)
+    try:
+        conn = get_conn()
+        placeholders = ",".join("?" * len(tickers))
+        rows = conn.execute(
+            f"SELECT Ticker, Ticker_Close FROM combined_stock_data "
+            f"WHERE Ticker IN ({placeholders}) "
+            f"AND Date = (SELECT MAX(Date) FROM combined_stock_data)",
+            tickers,
+        ).fetchall()
+        conn.close()
+        prices = {r[0]: float(r[1]) if r[1] is not None else None for r in rows}
+        result = LivePrices(prices=prices, timestamp=datetime.datetime.utcnow().isoformat())
+        redis.set(cache_key, result.model_dump_json(), ex=60)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/market-indices")
 @limiter.limit("30/minute")
 async def get_market_indices(request: Request):
@@ -2939,7 +3136,7 @@ async def get_market_indices(request: Request):
         return json.loads(cached)
     try:
         INDEX_TICKERS = ["SPY", "QQQ", "DIA", "IWM", "GLD", "TLT"]
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_conn()
         latest_date = conn.execute("SELECT MAX(Date) FROM combined_stock_data").fetchone()[0]
         prev_date = conn.execute(
             "SELECT MAX(Date) FROM combined_stock_data WHERE Date < ?", (latest_date,)
@@ -2978,7 +3175,7 @@ async def get_technical_summary(request: Request, ticker: str):
     if cached:
         return json.loads(cached)
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_conn()
         row = conn.execute(
             """
             SELECT Ticker_RSI, Ticker_MACD, Ticker_MACD_Signal, Ticker_MACD_Diff,
@@ -3166,7 +3363,7 @@ async def get_market_pulse(request: Request):
     if cached:
         return json.loads(cached)
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_conn()
         items: list[MarketPulseItem] = []
 
         # Top movers (by absolute % change)

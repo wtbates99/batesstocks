@@ -33,6 +33,7 @@ class StockData(BaseModel):
     Ticker_Force_Index: float | None = None
     Ticker_MFI: float | None = None
     Ticker_VWAP: float | None = None
+    Ticker_SMA_200W: float | None = None
     Ticker_SMA_250W: float | None = None
     Ticker_Tech_Score: float | None = None
 
@@ -288,6 +289,9 @@ class BacktestRequest(BaseModel):
     start_date: str | None = None
     end_date: str | None = None
     initial_capital: float = 10000.0
+    position_size_pct: float = 100.0
+    stop_loss_pct: float | None = None
+    max_open_positions: int = 1
 
 
 class LatestMetricsRequest(BaseModel):
@@ -313,6 +317,12 @@ class BacktestResult(BaseModel):
     avg_return_pct: float
     max_drawdown_pct: float
     sharpe_ratio: float | None
+    sortino_ratio: float | None = None
+    calmar_ratio: float | None = None
+    profit_factor: float | None = None
+    max_consecutive_losses: int = 0
+    annualized_return_pct: float | None = None
+    avg_holding_days: float | None = None
     equity_curve: list[dict]
     trades: list[BacktestTrade]
     strategy: str
@@ -348,3 +358,29 @@ class MarketPulseItem(BaseModel):
 class MarketPulse(BaseModel):
     items: list[MarketPulseItem]
     generated_at: str
+
+
+class MacroSeries(BaseModel):
+    ticker: str
+    name: str
+    dates: list[str]
+    values: list[float | None]
+
+
+class InsiderTransaction(BaseModel):
+    filer_name: str | None = None
+    ticker: str
+    transaction_date: str | None = None
+    transaction_type: str | None = None
+    shares: float | None = None
+    price_per_share: float | None = None
+    total_value: float | None = None
+    form_url: str | None = None
+
+
+class ShortInterest(BaseModel):
+    ticker: str
+    settlement_date: str | None = None
+    short_interest: float | None = None
+    avg_daily_volume: float | None = None
+    days_to_cover: float | None = None
