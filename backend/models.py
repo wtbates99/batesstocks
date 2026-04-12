@@ -213,3 +213,19 @@ class SyncResponse(BaseModel):
     tickers: list[str]
     rows_written: int
     metadata_rows: int
+
+
+class SyncStatus(BaseModel):
+    state: str
+    source: str
+    phase: str
+    detail: str
+    started_at: str | None = None
+    updated_at: str | None = None
+    finished_at: str | None = None
+    target_tickers: int = 0
+    completed_tickers: int = 0
+    rows_written: int = 0
+    metadata_rows: int = 0
+    last_success_at: str | None = None
+    last_error: str | None = None

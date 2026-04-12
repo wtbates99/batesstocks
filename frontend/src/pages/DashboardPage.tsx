@@ -3,8 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import { Radar, RefreshCw, ScanSearch, TestTubeDiagonal } from 'lucide-react'
 import { api } from '../api/client'
 import { useAiContext } from '../contexts/AiContext'
-import type { TerminalMover } from '../api/types'
-import { useApi } from '../hooks/useApi'
+import type { SyncStatus, TerminalMover } from '../api/types'
+import { useApi, usePoll } from '../hooks/useApi'
 
 function fmtPct(value: number | null | undefined) {
   if (value == null) return '—'
@@ -28,6 +28,83 @@ function toneColor(tone: string) {
   if (tone === 'negative') return 'var(--red)'
   if (tone === 'warning') return 'var(--orange)'
   return 'var(--text-primary)'
+}
+
+function formatSyncTime(value: string | null | undefined) {
+  if (!value) return '—'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '—'
+  return date.toLocaleTimeString('en-US', {
+    timeZone: 'America/New_York',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  })
+}
+
+function formatSyncSource(source: string) {
+  return source.split('_').join(' ').toUpperCase()
+}
+
+function syncAccent(status: SyncStatus | null) {
+  if (!status) return 'var(--text-muted)'
+  if (status.state === 'error') return 'var(--red)'
+  if (status.state === 'running') return 'var(--orange)'
+  return 'var(--green)'
+}
+
+function SyncTelemetry({ status }: { status: SyncStatus | null }) {
+  const progress = status && status.target_tickers > 0
+    ? Math.min(100, Math.round((status.completed_tickers / status.target_tickers) * 100))
+    : 0
+
+  return (
+    <div className="sync-telemetry">
+      <div className="sync-telemetry-header">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span className={`status-dot ${status?.state === 'running' ? 'live' : status?.state === 'error' ? 'error' : ''}`} />
+          <span className="sync-telemetry-state" style={{ color: syncAccent(status) }}>
+            {status?.state === 'running' ? 'SYNC RUNNING' : status?.state === 'error' ? 'SYNC ERROR' : 'SYNC STANDBY'}
+          </span>
+        </div>
+        <span className="sync-telemetry-source">{formatSyncSource(status?.source ?? 'system')}</span>
+      </div>
+
+      <div className="sync-telemetry-detail">
+        {status?.detail ?? 'Waiting for the next refresh window.'}
+      </div>
+
+      <div className="sync-telemetry-grid">
+        <div className="sync-telemetry-cell">
+          <span className="sync-telemetry-label">Phase</span>
+          <span className="sync-telemetry-value">{(status?.phase ?? 'waiting').toUpperCase()}</span>
+        </div>
+        <div className="sync-telemetry-cell">
+          <span className="sync-telemetry-label">Coverage</span>
+          <span className="sync-telemetry-value">
+            {status ? `${status.completed_tickers}/${status.target_tickers || 0}` : '0/0'}
+          </span>
+        </div>
+        <div className="sync-telemetry-cell">
+          <span className="sync-telemetry-label">Rows</span>
+          <span className="sync-telemetry-value">{status?.rows_written.toLocaleString() ?? '0'}</span>
+        </div>
+        <div className="sync-telemetry-cell">
+          <span className="sync-telemetry-label">Last Good</span>
+          <span className="sync-telemetry-value">{formatSyncTime(status?.last_success_at)}</span>
+        </div>
+      </div>
+
+      <div className="sync-telemetry-progress" aria-hidden="true">
+        <div className="sync-telemetry-progress-bar" style={{ width: `${progress}%` }} />
+      </div>
+
+      {status?.last_error && (
+        <div className="sync-telemetry-error">{status.last_error}</div>
+      )}
+    </div>
+  )
 }
 
 function MoverTable({
@@ -84,6 +161,7 @@ export default function DashboardPage() {
   const [tickerInput, setTickerInput] = useState('SPY')
   const focusTicker = useDeferredValue(tickerInput.trim().toUpperCase() || 'SPY')
   const { data, loading, error, refetch } = useApi(() => api.terminal.workspace(focusTicker), [focusTicker])
+  const { data: syncStatus } = usePoll(() => api.system.syncStatus(), 5000, [])
   const [syncInfo, setSyncInfo] = useState<string | null>(null)
   const [syncing, setSyncing] = useState(false)
 
@@ -164,6 +242,7 @@ export default function DashboardPage() {
                 <span className="panel-title">Market Sync</span>
               </div>
               <div className="panel-body">
+                <SyncTelemetry status={syncStatus} />
                 <div className="metric-grid">
                   <div className="metric-card">
                     <div className="metric-label">Default Focus</div>
@@ -177,7 +256,7 @@ export default function DashboardPage() {
                   </div>
                 </div>
                 <div style={{ marginTop: 8, fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--text-muted)', lineHeight: 1.5 }}>
-                  Price history, breadth, and screener inputs are populated from the tracked S&amp;P 500 universe plus major index and sector ETFs. Use Sync to refresh the market set.
+                  Price history, breadth, and screener inputs are populated from the tracked S&amp;P 500 universe plus major index and sector ETFs. The tape above is informational only and follows startup, scheduled, and manual refresh activity.
                 </div>
                 {syncInfo && (
                   <div style={{ marginTop: 8, fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--blue)' }}>

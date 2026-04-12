@@ -17,6 +17,7 @@ from backend.models import (
     StrategyScreenResponse,
     SyncRequest,
     SyncResponse,
+    SyncStatus,
     TerminalOverview,
 )
 from backend.services.backup_service import create_backup, list_backups
@@ -25,6 +26,7 @@ from backend.services.data_sync_service import (
     ensure_market_data,
     sync_market_data,
 )
+from backend.services.sync_status import sync_status_tracker
 from backend.services.terminal_service import (
     get_security_overview,
     get_terminal_overview,
@@ -43,7 +45,7 @@ def _utc_now() -> str:
 def terminal_workspace(ticker: str = Query("SPY", min_length=1, max_length=10)) -> TerminalOverview:
     ensure_schema()
     ensure_default_universe_data()
-    ensure_market_data([ticker])
+    ensure_market_data([ticker], source="workspace")
     return get_terminal_overview(ticker)
 
 
@@ -53,7 +55,7 @@ def terminal_security(
     limit: int = Query(180, ge=30, le=365),
 ) -> SecurityOverview:
     ensure_schema()
-    ensure_market_data([ticker])
+    ensure_market_data([ticker], source="security")
     try:
         return get_security_overview(ticker, limit=limit)
     except ValueError as exc:
@@ -115,10 +117,16 @@ def backup_create(request: BackupCreateRequest) -> BackupCreateResponse:
     )
 
 
+@router.get("/system/sync/status", response_model=SyncStatus)
+def system_sync_status() -> SyncStatus:
+    snapshot = sync_status_tracker.get()
+    return SyncStatus(**snapshot.__dict__)
+
+
 @router.post("/system/sync", response_model=SyncResponse)
 def system_sync(request: SyncRequest) -> SyncResponse:
     ensure_schema()
     try:
-        return sync_market_data(request.tickers, years=request.years)
+        return sync_market_data(request.tickers, years=request.years, source="manual")
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Data sync failed: {exc}") from exc

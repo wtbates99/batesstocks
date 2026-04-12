@@ -12,6 +12,7 @@ import yfinance as yf
 from backend.core.duckdb import duckdb_connection
 from backend.models import SyncResponse
 from backend.services.market_universe import normalize_universe
+from backend.services.sync_status import sync_status_tracker
 
 LOOKBACK_BUFFER_DAYS = 60
 YFINANCE_CACHE_DIR = Path("/tmp/yfinance-cache")
@@ -67,17 +68,19 @@ def get_missing_tickers(tickers: list[str] | None = None) -> list[str]:
     return [ticker for ticker in universe if ticker not in present]
 
 
-def ensure_market_data(tickers: list[str] | None = None, years: int = 5) -> SyncResponse | None:
+def ensure_market_data(
+    tickers: list[str] | None = None, years: int = 5, source: str = "hydrate"
+) -> SyncResponse | None:
     missing = get_missing_tickers(tickers)
     if not missing:
         return None
-    return sync_market_data(missing, years=_normalize_years(years))
+    return sync_market_data(missing, years=_normalize_years(years), source=source)
 
 
 def ensure_default_universe_data(years: int = 5) -> SyncResponse | None:
     if get_tracked_ticker_count() >= DEFAULT_UNIVERSE_MIN_SIZE:
         return None
-    return ensure_market_data(None, years=_normalize_years(years))
+    return ensure_market_data(None, years=_normalize_years(years), source="bootstrap")
 
 
 def _download_ohlcv(tickers: list[str], years: int) -> pd.DataFrame:
@@ -262,114 +265,159 @@ def _fetch_company_metadata(tickers: list[str]) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def sync_market_data(tickers: list[str] | None = None, years: int = 5) -> SyncResponse:
+def sync_market_data(
+    tickers: list[str] | None = None, years: int = 5, source: str = "manual"
+) -> SyncResponse:
     years = _normalize_years(years)
     with _SYNC_WRITE_LOCK:
         started_at = _utc_now()
         universe = _normalize_tickers(tickers)
+        sync_status_tracker.begin(
+            source=source,
+            target_tickers=len(universe),
+            detail=f"Loading {len(universe)} tickers with {years} years of daily history.",
+        )
         raw = _download_ohlcv(universe, years=years)
         if raw.empty:
-            return SyncResponse(
+            response = SyncResponse(
                 started_at=started_at.isoformat(),
                 finished_at=_utc_now().isoformat(),
                 tickers=universe,
                 rows_written=0,
                 metadata_rows=0,
             )
+            sync_status_tracker.succeed(
+                rows_written=0,
+                metadata_rows=0,
+                detail="No new rows returned by the data provider.",
+            )
+            return response
 
+        sync_status_tracker.update(
+            phase="calculating",
+            detail="Recomputing indicators and long-horizon trend metrics.",
+        )
         indicator_frame = _compute_indicator_frame(raw)
+        sync_status_tracker.update(
+            phase="metadata",
+            detail="Refreshing company and fund metadata.",
+        )
         metadata = _fetch_company_metadata(universe)
         rows_written = 0
 
-        with duckdb_connection() as conn:
-            for ticker in universe:
-                if ticker not in indicator_frame["Ticker"].values:
-                    continue
+        try:
+            with duckdb_connection() as conn:
+                for index, ticker in enumerate(universe, start=1):
+                    if ticker not in indicator_frame["Ticker"].values:
+                        continue
 
-                subset = indicator_frame[indicator_frame["Ticker"] == ticker].copy()
-                cutoff = subset["Date"].max() - pd.Timedelta(days=LOOKBACK_BUFFER_DAYS)
-                subset = subset[subset["Date"] >= cutoff].copy()
-                raw_subset = raw[(raw["Ticker"] == ticker) & (raw["Date"] >= cutoff)].copy()
+                    sync_status_tracker.update(
+                        phase="writing",
+                        detail=f"Writing {ticker} to local market cache.",
+                        completed_tickers=index - 1,
+                        rows_written=rows_written,
+                    )
 
-                conn.register("raw_subset", raw_subset)
-                conn.execute(
-                    "DELETE FROM ohlcv_daily WHERE Ticker = ? AND Date >= ?",
-                    [ticker, cutoff.to_pydatetime()],
-                )
-                conn.execute("INSERT INTO ohlcv_daily SELECT * FROM raw_subset")
-                conn.unregister("raw_subset")
+                    subset = indicator_frame[indicator_frame["Ticker"] == ticker].copy()
+                    cutoff = subset["Date"].max() - pd.Timedelta(days=LOOKBACK_BUFFER_DAYS)
+                    subset = subset[subset["Date"] >= cutoff].copy()
+                    raw_subset = raw[(raw["Ticker"] == ticker) & (raw["Date"] >= cutoff)].copy()
 
-                write_subset = subset[
-                    [
-                        "Date",
-                        "Ticker",
-                        "Open",
-                        "High",
-                        "Low",
-                        "Close",
-                        "Volume",
-                        "Ticker_SMA_10",
-                        "Ticker_EMA_10",
-                        "Ticker_SMA_30",
-                        "Ticker_SMA_50",
-                        "Ticker_SMA_100",
-                        "Ticker_SMA_200",
-                        "Ticker_SMA_250",
-                        "Ticker_EMA_30",
-                        "Ticker_EMA_50",
-                        "Ticker_EMA_100",
-                        "Ticker_EMA_200",
-                        "Ticker_RSI",
-                        "Ticker_MACD",
-                        "Ticker_MACD_Signal",
-                        "Ticker_MACD_Diff",
-                        "Ticker_Bollinger_PBand",
-                        "Ticker_MFI",
-                        "Ticker_VWAP",
-                        "Ticker_Return_20D",
-                        "Ticker_Return_63D",
-                        "Ticker_Return_126D",
-                        "Ticker_Return_252D",
-                        "Ticker_52W_High",
-                        "Ticker_52W_Low",
-                        "Ticker_52W_Range_Pct",
-                        "Ticker_Avg_Volume_20D",
-                        "Ticker_Tech_Score",
-                    ]
-                ].copy()
-                conn.register("ticker_subset", write_subset)
-                conn.execute(
-                    "DELETE FROM ticker_data WHERE Ticker = ? AND Date >= ?",
-                    [ticker, cutoff.to_pydatetime()],
-                )
-                conn.execute("INSERT INTO ticker_data SELECT * FROM ticker_subset")
-                conn.unregister("ticker_subset")
-                rows_written += len(write_subset)
+                    conn.register("raw_subset", raw_subset)
+                    conn.execute(
+                        "DELETE FROM ohlcv_daily WHERE Ticker = ? AND Date >= ?",
+                        [ticker, cutoff.to_pydatetime()],
+                    )
+                    conn.execute("INSERT INTO ohlcv_daily SELECT * FROM raw_subset")
+                    conn.unregister("raw_subset")
 
-            if not metadata.empty:
-                conn.register("metadata_frame", metadata)
-                conn.execute("""
-                    INSERT OR REPLACE INTO stock_information
-                    SELECT
-                        Ticker,
-                        FullName,
-                        ShortName,
-                        Sector,
-                        Subsector,
-                        MarketCap,
-                        Exchange,
-                        Currency,
-                        Website,
-                        QuoteType
-                    FROM metadata_frame
-                """)
-                conn.unregister("metadata_frame")
+                    write_subset = subset[
+                        [
+                            "Date",
+                            "Ticker",
+                            "Open",
+                            "High",
+                            "Low",
+                            "Close",
+                            "Volume",
+                            "Ticker_SMA_10",
+                            "Ticker_EMA_10",
+                            "Ticker_SMA_30",
+                            "Ticker_SMA_50",
+                            "Ticker_SMA_100",
+                            "Ticker_SMA_200",
+                            "Ticker_SMA_250",
+                            "Ticker_EMA_30",
+                            "Ticker_EMA_50",
+                            "Ticker_EMA_100",
+                            "Ticker_EMA_200",
+                            "Ticker_RSI",
+                            "Ticker_MACD",
+                            "Ticker_MACD_Signal",
+                            "Ticker_MACD_Diff",
+                            "Ticker_Bollinger_PBand",
+                            "Ticker_MFI",
+                            "Ticker_VWAP",
+                            "Ticker_Return_20D",
+                            "Ticker_Return_63D",
+                            "Ticker_Return_126D",
+                            "Ticker_Return_252D",
+                            "Ticker_52W_High",
+                            "Ticker_52W_Low",
+                            "Ticker_52W_Range_Pct",
+                            "Ticker_Avg_Volume_20D",
+                            "Ticker_Tech_Score",
+                        ]
+                    ].copy()
+                    conn.register("ticker_subset", write_subset)
+                    conn.execute(
+                        "DELETE FROM ticker_data WHERE Ticker = ? AND Date >= ?",
+                        [ticker, cutoff.to_pydatetime()],
+                    )
+                    conn.execute("INSERT INTO ticker_data SELECT * FROM ticker_subset")
+                    conn.unregister("ticker_subset")
+                    rows_written += len(write_subset)
+
+                if not metadata.empty:
+                    sync_status_tracker.update(
+                        phase="metadata",
+                        detail="Writing refreshed metadata and sector mappings.",
+                        completed_tickers=len(universe),
+                        rows_written=rows_written,
+                        metadata_rows=len(metadata),
+                    )
+                    conn.register("metadata_frame", metadata)
+                    conn.execute("""
+                        INSERT OR REPLACE INTO stock_information
+                        SELECT
+                            Ticker,
+                            FullName,
+                            ShortName,
+                            Sector,
+                            Subsector,
+                            MarketCap,
+                            Exchange,
+                            Currency,
+                            Website,
+                            QuoteType
+                        FROM metadata_frame
+                    """)
+                    conn.unregister("metadata_frame")
+        except Exception as exc:
+            sync_status_tracker.fail(str(exc))
+            raise
 
         finished_at = _utc_now()
-        return SyncResponse(
+        response = SyncResponse(
             started_at=started_at.isoformat(),
             finished_at=finished_at.isoformat(),
             tickers=universe,
             rows_written=rows_written,
             metadata_rows=len(metadata),
         )
+        sync_status_tracker.succeed(
+            rows_written=rows_written,
+            metadata_rows=len(metadata),
+            detail=f"Wrote {rows_written:,} rows across {len(universe)} tickers.",
+        )
+        return response

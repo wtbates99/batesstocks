@@ -469,22 +469,29 @@ def get_terminal_overview(focus_ticker: str) -> TerminalOverview:
         ascending=[False, False, False],
         na_position="last",
     ).head(8)
-    reversals = latest[
-        (latest["Ticker_RSI"].between(25, 45, inclusive="both"))
-        & (latest["Close"] > latest["Ticker_SMA_200"])
-    ].sort_values(
-        ["change_pct", "Volume"],
-        ascending=[False, False],
-        na_position="last",
-    ).head(8)
-    breakouts = latest[
-        (latest["Close"] >= latest["Ticker_SMA_250"])
-        & (latest["Ticker_52W_Range_Pct"] >= 85)
-    ].sort_values(
-        ["Ticker_52W_Range_Pct", "Ticker_Return_20D", "Ticker_Tech_Score"],
-        ascending=[False, False, False],
-        na_position="last",
-    ).head(8)
+    reversals = (
+        latest[
+            (latest["Ticker_RSI"].between(25, 45, inclusive="both"))
+            & (latest["Close"] > latest["Ticker_SMA_200"])
+        ]
+        .sort_values(
+            ["change_pct", "Volume"],
+            ascending=[False, False],
+            na_position="last",
+        )
+        .head(8)
+    )
+    breakouts = (
+        latest[
+            (latest["Close"] >= latest["Ticker_SMA_250"]) & (latest["Ticker_52W_Range_Pct"] >= 85)
+        ]
+        .sort_values(
+            ["Ticker_52W_Range_Pct", "Ticker_Return_20D", "Ticker_Tech_Score"],
+            ascending=[False, False, False],
+            na_position="last",
+        )
+        .head(8)
+    )
 
     sector_lead = (
         latest.dropna(subset=["Sector"])
@@ -579,7 +586,9 @@ def get_terminal_overview(focus_ticker: str) -> TerminalOverview:
             tone="positive" if advancers >= decliners else "negative",
         ),
         TerminalHeadline(
-            ticker=str(strongest_sector["Sector"])[:12].upper() if strongest_sector is not None else "SECTOR",
+            ticker=str(strongest_sector["Sector"])[:12].upper()
+            if strongest_sector is not None
+            else "SECTOR",
             headline=(
                 f"{strongest_sector['Sector']} is leading on intermediate-term momentum"
                 if strongest_sector is not None
@@ -593,7 +602,9 @@ def get_terminal_overview(focus_ticker: str) -> TerminalOverview:
             tone="positive",
         ),
         TerminalHeadline(
-            ticker=(str(lead_ticker["Ticker"]) if lead_ticker is not None else focus_ticker.upper()),
+            ticker=(
+                str(lead_ticker["Ticker"]) if lead_ticker is not None else focus_ticker.upper()
+            ),
             headline=(
                 f"{lead_ticker['Ticker']} is the strongest current leader by 20-day trend"
                 if lead_ticker is not None

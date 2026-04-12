@@ -65,7 +65,7 @@ def _frontend_index_html() -> Path:
 async def _run_scheduled_market_sync() -> None:
     async with _SYNC_LOCK:
         years = int(os.getenv("SCHEDULED_SYNC_YEARS", "2"))
-        await to_thread(sync_market_data, None, years)
+        await to_thread(sync_market_data, None, years, "scheduled")
 
 
 @asynccontextmanager
@@ -76,7 +76,7 @@ async def lifespan(_: FastAPI):
     if should_auto_sync:
         try:
             if not has_market_data():
-                ensure_market_data()
+                ensure_market_data(years=5, source="startup")
         except Exception as exc:  # pragma: no cover - startup/network dependent
             logger.warning("AUTO_SYNC_ON_START failed: %s", exc)
     should_schedule = os.getenv("AUTO_SYNC_SCHEDULED", "true").lower() == "true"
@@ -111,7 +111,7 @@ def search(
 ) -> list[SearchResult]:
     if not has_market_data():
         try:
-            ensure_market_data()
+            ensure_market_data(source="search")
         except Exception as exc:  # pragma: no cover - network/provider dependent
             logger.warning("Search bootstrap sync failed: %s", exc)
     pattern = f"%{query.strip().upper()}%"
@@ -140,7 +140,7 @@ def _read_latest_prices(tickers: list[str]) -> LivePrices:
     if not cleaned:
         return LivePrices(prices={}, timestamp="")
     try:
-        ensure_market_data(cleaned)
+        ensure_market_data(cleaned, source="live_prices")
     except Exception as exc:  # pragma: no cover - network/provider dependent
         logger.warning("Live price bootstrap sync failed: %s", exc)
     placeholders = ", ".join(["?"] * len(cleaned))
