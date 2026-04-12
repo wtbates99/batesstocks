@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 from backend.api.terminal import router as terminal_router
 from backend.core.duckdb import duckdb_connection, ensure_schema
 from backend.models import LivePrices, SearchResult
+from backend.services.data_sync_service import ensure_market_data, has_market_data
 
 load_dotenv()
 
@@ -61,11 +62,11 @@ def _frontend_index_html() -> Path:
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     ensure_schema()
-    if os.getenv("AUTO_SYNC_ON_START", "false").lower() == "true":
+    should_auto_sync = os.getenv("AUTO_SYNC_ON_START", "true").lower() == "true"
+    if should_auto_sync:
         try:
-            from backend.services.data_sync_service import sync_market_data
-
-            sync_market_data()
+            if not has_market_data():
+                ensure_market_data()
         except Exception as exc:  # pragma: no cover - startup/network dependent
             logger.warning("AUTO_SYNC_ON_START failed: %s", exc)
     yield
@@ -89,6 +90,11 @@ if (_frontend_build_dir() / "assets").is_dir():
 def search(
     query: str = Query(..., min_length=1), limit: int = Query(10, ge=1, le=25)
 ) -> list[SearchResult]:
+    if not has_market_data():
+        try:
+            ensure_market_data()
+        except Exception as exc:  # pragma: no cover - network/provider dependent
+            logger.warning("Search bootstrap sync failed: %s", exc)
     pattern = f"%{query.strip().upper()}%"
     with duckdb_connection(read_only=True) as conn:
         rows = conn.execute(
@@ -114,6 +120,10 @@ def _read_latest_prices(tickers: list[str]) -> LivePrices:
     cleaned = [ticker.strip().upper() for ticker in tickers if ticker.strip()]
     if not cleaned:
         return LivePrices(prices={}, timestamp="")
+    try:
+        ensure_market_data(cleaned)
+    except Exception as exc:  # pragma: no cover - network/provider dependent
+        logger.warning("Live price bootstrap sync failed: %s", exc)
     placeholders = ", ".join(["?"] * len(cleaned))
     with duckdb_connection(read_only=True) as conn:
         rows = conn.execute(

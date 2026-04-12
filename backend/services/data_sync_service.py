@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -26,6 +27,11 @@ DEFAULT_UNIVERSE = [
 ]
 
 LOOKBACK_BUFFER_DAYS = 60
+YFINANCE_CACHE_DIR = Path("/tmp/yfinance-cache")
+
+if hasattr(yf, "set_tz_cache_location"):
+    YFINANCE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    yf.set_tz_cache_location(str(YFINANCE_CACHE_DIR))
 
 
 def _utc_now() -> datetime:
@@ -35,6 +41,38 @@ def _utc_now() -> datetime:
 def _normalize_tickers(tickers: list[str] | None) -> list[str]:
     values = tickers or DEFAULT_UNIVERSE
     return sorted({ticker.strip().upper() for ticker in values if ticker.strip()})
+
+
+def has_market_data() -> bool:
+    with duckdb_connection(read_only=True) as conn:
+        row = conn.execute("SELECT COUNT(*) FROM ticker_data").fetchone()
+    return bool(row and row[0] > 0)
+
+
+def get_missing_tickers(tickers: list[str] | None = None) -> list[str]:
+    universe = _normalize_tickers(tickers)
+    if not universe:
+        return []
+
+    placeholders = ", ".join(["?"] * len(universe))
+    with duckdb_connection(read_only=True) as conn:
+        rows = conn.execute(
+            f"""
+            SELECT DISTINCT Ticker
+            FROM ticker_data
+            WHERE Ticker IN ({placeholders})
+            """,
+            universe,
+        ).fetchall()
+    present = {str(row[0]).upper() for row in rows}
+    return [ticker for ticker in universe if ticker not in present]
+
+
+def ensure_market_data(tickers: list[str] | None = None, years: int = 5) -> SyncResponse | None:
+    missing = get_missing_tickers(tickers)
+    if not missing:
+        return None
+    return sync_market_data(missing, years=years)
 
 
 def _download_ohlcv(tickers: list[str], years: int) -> pd.DataFrame:

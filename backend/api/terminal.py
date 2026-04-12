@@ -20,7 +20,7 @@ from backend.models import (
     TerminalOverview,
 )
 from backend.services.backup_service import create_backup, list_backups
-from backend.services.data_sync_service import sync_market_data
+from backend.services.data_sync_service import ensure_market_data, sync_market_data
 from backend.services.terminal_service import (
     get_security_overview,
     get_terminal_overview,
@@ -38,6 +38,7 @@ def _utc_now() -> str:
 @router.get("/terminal/workspace", response_model=TerminalOverview)
 def terminal_workspace(ticker: str = Query("SPY", min_length=1, max_length=10)) -> TerminalOverview:
     ensure_schema()
+    ensure_market_data([ticker])
     return get_terminal_overview(ticker)
 
 
@@ -47,6 +48,7 @@ def terminal_security(
     limit: int = Query(180, ge=30, le=365),
 ) -> SecurityOverview:
     ensure_schema()
+    ensure_market_data([ticker])
     try:
         return get_security_overview(ticker, limit=limit)
     except ValueError as exc:

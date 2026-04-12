@@ -1,264 +1,249 @@
-# BatesStocks
+# BATESSTOCKS
 
-A self-hosted Bloomberg-style stock dashboard with technical analysis, fundamental data, live options chains, earnings calendars, market breadth, AI-powered analysis, and more. Built with FastAPI and React.
+BATESSTOCKS is a self-hosted Bloomberg-style terminal built for a constrained home-server deployment. The current runtime is a full replacement of the old app: FastAPI on the backend, DuckDB as the analytics engine, and a Vite + React + TypeScript frontend.
 
----
+The active product surface is a dense terminal workflow with:
+- Dashboard workspace
+- Security monitor
+- Strategy screener
+- Strategy backtesting
+- Integrated AI panel
 
-## Features
+The app is designed to ship as a Docker image and be pulled by a parent home-server stack via Watchtower.
 
-### Charts & Technical Analysis
-- **Multi-ticker dashboard** — 2–4 column chart grid with area, candlestick, or relative-performance (indexed base-100) chart types
-- **24+ indicators** — SMA, EMA, VWAP, RSI, MACD, Stochastic, Bollinger Bands, OBV, CMF, Force Index, MFI, TSI, Williams %R, ROC, and more
-- **Composite technical score (0–100)** — pre-computed nightly per ticker; shown on chart cards and in the screener
-- **Chart pattern detection** — support/resistance pivots, double top/bottom detected nightly
-- **Bullish groupings** — momentum, breakout, trend-strength signal badges on each card
-- **2 years of daily OHLCV** for all S&P 500 stocks, auto-refreshed nightly at 6:30 PM ET
-- **CSV export** on every chart
+## Current Runtime
 
-### Company Spotlight (`/spotlight/:ticker`)
-Eight info tabs per stock:
+Backend:
+- FastAPI
+- DuckDB
+- Pandas / NumPy for sync and indicator computation
+- `yfinance` for free market data
 
-| Tab | Content |
-|-----|---------|
-| **FINANCIALS** | Market cap, P/E, EPS, beta, dividend yield, revenue, gross profit, FCF |
-| **GENERAL** | Exchange, currency, country, quote type |
-| **COMPANY** | CEO, employees, address, phone, website |
-| **NEWS** | Latest 15 headlines from Yahoo Finance (15-min cache) |
-| **OPTIONS** | Full call/put chains — strike, bid/ask, IV%, OI, ITM highlighting; expiry selector |
-| **EARNINGS** | EPS estimate vs actual bar chart + surprise % history |
-| **PEERS** | All subsector peers ranked by market cap with RSI, tech score, 52W return |
-| **PATTERNS** | Detected support/resistance, double top/bottom with confidence scores |
+Frontend:
+- React 18
+- TypeScript
+- Vite
+- `lightweight-charts` + `recharts`
 
-### Market Intelligence
-- **Market Breadth (`/market`)** — advancing/declining counts, % above SMA30, 52W new highs/lows, avg RSI, avg tech score, advance-decline bar, sector rotation chart
-- **Sector Rotation** — horizontal return chart per GICS sector for 30/90/180/365-day windows
-- **Earnings Calendar (`/calendar`)** — upcoming earnings for all S&P 500 grouped by date, with EPS estimate and surprise %
-- **Correlation Matrix** — NxN Pearson return heatmap for selected tickers, collapsible on homepage
+Current routes:
+- `/` dashboard
+- `/security/:ticker`
+- `/screener`
+- `/backtest`
 
-### Screener (`/screener`)
-- Filter by sector, P/E range, market cap, RSI range, 52W return, and chart pattern type
-- Sort by any column including composite tech score
-- Click any row to open the company spotlight
+Current API surface:
+- `GET /search`
+- `GET|POST /live-prices`
+- `POST /ai/chat`
+- `GET /terminal/workspace`
+- `GET /terminal/security/{ticker}`
+- `POST /strategies/backtest`
+- `POST /strategies/screen`
+- `POST /system/sync`
+- `GET /system/backups`
+- `POST /system/backups/create`
+- `GET /health/live`
+- `GET /health/ready`
 
-### Heatmap (`/heatmap`)
-- Drill-down treemap: Sector → Subsector → Individual Stock
-- Sector Rotation tab with selectable time window
+## First-Boot Data Behavior
 
-### Watchlist & Portfolio (`/watchlist`)
-- **Watchlists** — create/edit named ticker lists; load any list into the chart dashboard
-- **Portfolio** — track positions with cost basis, unrealized P&L, and a value-over-time chart
-- **Alerts** — set price or indicator thresholds (above/below); evaluated nightly with triggered state
+This app no longer assumes a pre-populated database.
 
-### AI Analysis
-- Chat terminal powered by local **Ollama** (`qwen3.5:cloud`) in production
-- Dev mode supports **Anthropic Claude** (if `ANTHROPIC_API_KEY` set) or **OpenAI**
-- Pre-built quick prompts: bullish analysis, breakout detection, trend summary
-- Full indicator context passed automatically (RSI, MACD, Bollinger, price levels)
+On startup, if DuckDB is empty and `AUTO_SYNC_ON_START=true`, BATESSTOCKS pulls a default market universe and computes the local analytics tables automatically.
 
-### UX
-- Dark/light mode, keyboard shortcuts, collapsible sidebar
-- Save/load view presets (ticker + metric combinations) in localStorage
-- Responsive chart heights
+Default universe:
+- `SPY`
+- `QQQ`
+- `IWM`
+- `AAPL`
+- `MSFT`
+- `NVDA`
+- `AMZN`
+- `META`
+- `GOOGL`
+- `TSLA`
+- `JPM`
+- `XOM`
 
----
+If a requested ticker is missing, the API will attempt to sync that symbol before returning terminal data. `SPY` is the intended default landing symbol.
 
-## Quick Start (Docker)
+## Docker
+
+The repo ships with a multi-stage Docker build:
+- frontend built in Node
+- backend/runtime in Python 3.11
+- non-root app user
+- built-in healthcheck
+
+Build locally:
 
 ```bash
-git clone https://github.com/wtbates99/batesstocks.git
-cd batesstocks
-cp .env.example .env   # edit as needed
+docker build -t batesstocks:test .
+```
+
+Run locally:
+
+```bash
+mkdir -p ./data ./backups
+
+docker run --rm \
+  -p 8000:8000 \
+  -e DB_PATH=/app/data/stock_data.duckdb \
+  -e BACKUP_DIR=/app/backups \
+  -e AUTO_SYNC_ON_START=true \
+  -v "$(pwd)/data:/app/data" \
+  -v "$(pwd)/backups:/app/backups" \
+  batesstocks:test
+```
+
+Health checks:
+
+```bash
+curl -sf http://127.0.0.1:8000/health/live
+curl -sf http://127.0.0.1:8000/health/ready
+```
+
+## Docker Compose
+
+The local compose file mounts:
+- DuckDB data file
+- backup directory
+
+Start:
+
+```bash
 docker compose up --build
 ```
 
-Access at `http://localhost:8000`. Redis runs as a sidecar. SQLite is persisted at `./stock_data.db`.
-
-On first launch the server fetches 2 years of S&P 500 data in two phases (~10 min total). The UI is usable immediately — charts populate as data arrives.
+Stop:
 
 ```bash
-docker compose up -d         # run in background
-docker compose down          # stop
-docker compose logs -f app   # tail app logs
+docker compose down
 ```
 
----
+Important environment variables:
 
-## Manual Setup
+| Variable | Default | Purpose |
+|---|---|---|
+| `DB_PATH` | `stock_data.duckdb` | DuckDB file path |
+| `BACKUP_DIR` | `<db dir>/backups` | Snapshot backup directory |
+| `PORT` | `8000` | Uvicorn port |
+| `AUTO_SYNC_ON_START` | `true` | Pull default market data when DB is empty |
+| `DUCKDB_MEMORY_LIMIT` | `2GB` | Per-process DuckDB memory cap |
+| `DUCKDB_THREADS` | `4` | DuckDB execution threads |
+| `OLLAMA_HOST` | `http://localhost:11434` | Local Ollama endpoint |
+| `OLLAMA_MODEL` | `llama3.1` | Default Ollama model |
+| `OPENAI_API_KEY` | unset | Enables OpenAI chat provider |
+| `OPENAI_MODEL` | `gpt-5-mini` | Default OpenAI model |
+| `ANTHROPIC_API_KEY` | unset | Enables Anthropic chat provider |
+| `ANTHROPIC_MODEL` | `claude-3-5-haiku-latest` | Default Anthropic model |
+| `AI_PROVIDER` | `ollama` | Default AI provider |
+| `CORS_ORIGINS` | local + prod defaults | Allowed origins |
 
-**Prerequisites**: Python 3.11+, Node.js 20+, [uv](https://github.com/astral-sh/uv)
+## Manual Development
+
+Backend setup:
 
 ```bash
-git clone https://github.com/wtbates99/batesstocks.git
-cd batesstocks
-cp .env.example .env
+uv sync
+```
 
-uv sync               # install Python deps
+Frontend setup:
 
+```bash
 cd frontend
 npm install
-npm run build
-cd ..
-
-uv run python main.py   # starts at http://localhost:8000
 ```
 
-### Frontend dev server (hot reload)
+Run frontend dev server:
 
 ```bash
-# Terminal 1
-uv run python main.py
-
-# Terminal 2
-cd frontend && npm start   # proxies API calls to :8000
+cd frontend
+npm run dev
 ```
 
----
-
-## Configuration
-
-| Variable | Default | Description |
-|---|---|---|
-| `DB_PATH` | `stock_data.db` | SQLite database path |
-| `REDIS_HOST` | `localhost` | Redis hostname |
-| `REDIS_PORT` | `6379` | Redis port |
-| `OLLAMA_HOST` | `http://localhost:11434` | Ollama API base URL |
-| `OLLAMA_MODEL` | `qwen3.5:cloud` | Model used in production |
-| `ANTHROPIC_API_KEY` | — | Enables Claude in dev mode |
-| `ENV` | `development` | Set `production` to lock AI to Ollama + enable IP rate limiting |
-| `APP_HOST` | `0.0.0.0` | Uvicorn bind host |
-| `APP_PORT` | `8000` | Uvicorn bind port |
-| `CORS_ORIGINS` | `http://localhost:8000,...` | Comma-separated allowed origins |
-
-Redis unavailability is handled automatically — the app falls back to in-memory fakeredis.
-
----
-
-## Data Refresh
-
-Data refreshes automatically every day at **18:30 US/Eastern** (after market close). The scheduler fetches only new rows since the last stored date, recomputes all indicators, detects chart patterns, evaluates alerts, and flushes the Redis cache.
-
-Manual trigger (no restart required):
-
-```
-POST /refresh_data
-GET  /refresh_status   → {"running": true, "phase": "full_load", "loaded": 120, "total": 503}
-```
-
-Two-phase pipeline:
-1. **Fast load** — 27 priority tickers (AAPL, MSFT, TSLA, NVDA …) loaded first so the default view works immediately
-2. **Full load** — remaining ~475 S&P 500 tickers in the background
-
----
-
-## API Reference
-
-### Stock Data
-| Endpoint | Rate limit | Description |
-|---|---|---|
-| `GET /stock/{ticker}` | 60/min | OHLCV + all 24+ indicators. Params: `start_date`, `end_date` |
-| `GET /company/{ticker}` | 30/min | Fundamentals and company info |
-| `GET /news/{ticker}` | 20/min | Latest headlines (15-min cache) |
-| `GET /options/{ticker}` | 10/min | Options chain. Param: `expiry` (YYYY-MM-DD) |
-| `GET /earnings/{ticker}` | 20/min | EPS estimate vs actual history |
-| `GET /peers/{ticker}` | 20/min | Subsector peers ranked by market cap |
-| `GET /patterns/{ticker}` | 20/min | Detected chart patterns. Param: `days` |
-
-### Market & Screening
-| Endpoint | Rate limit | Description |
-|---|---|---|
-| `GET /screener` | 20/min | All S&P 500 with RSI, P/E, market cap, tech score, 52W return |
-| `GET /heatmap` | 20/min | Treemap data. Param: `level` (sector/subsector/stock) |
-| `GET /groupings` | 20/min | Live bullish groupings (momentum / breakout / trend strength) |
-| `GET /market-breadth` | 20/min | Advancing/declining, 52W highs/lows, SMA stats |
-| `GET /sector-rotation` | 10/min | Sector returns. Param: `days` (30–730) |
-| `GET /correlations` | 10/min | Pearson correlation matrix. Params: `tickers[]`, `days` |
-| `GET /earnings` | 5/min | Upcoming earnings calendar. Param: `days_ahead` |
-| `GET /patterns` | 10/min | Recent patterns across all tickers. Params: `pattern_type`, `days` |
-
-### Portfolio & User Data
-| Endpoint | Description |
-|---|---|
-| `GET /portfolios` | List portfolios |
-| `POST /portfolios` | Create portfolio |
-| `GET /portfolios/{id}` | Portfolio with positions and P&L |
-| `POST /portfolios/{id}/positions` | Add position |
-| `PUT /portfolios/{id}/positions/{pid}` | Edit position |
-| `DELETE /portfolios/{id}/positions/{pid}` | Delete position |
-| `GET /watchlists` | List watchlists |
-| `POST /watchlists` | Create watchlist |
-| `PUT /watchlists/{id}` | Update watchlist |
-| `DELETE /watchlists/{id}` | Delete watchlist |
-| `GET /alerts` | List alerts |
-| `POST /alerts` | Create alert |
-| `DELETE /alerts/{id}` | Delete alert |
-
-### Search & AI
-| Endpoint | Rate limit | Description |
-|---|---|---|
-| `GET /search?query=` | 30/min | Ticker and company name autocomplete |
-| `POST /ai/chat` | 10/min | AI analysis with indicator context |
-| `POST /refresh_data` | 2/min | Trigger full pipeline |
-| `GET /refresh_status` | 20/min | Pipeline progress |
-
-Interactive docs: `http://localhost:8000/docs`
-
-### AI chat request body
-
-```json
-{
-  "provider": "ollama",
-  "model": "qwen3:8b",
-  "api_key": null,
-  "message": "Which stocks show the strongest momentum?",
-  "context": {
-    "tickers": ["AAPL", "MSFT"],
-    "dateRange": "30 days",
-    "metrics": ["Ticker_RSI", "Ticker_MACD"],
-    "dataSummary": "..."
-  }
-}
-```
-
-Supported providers: `ollama`, `anthropic`, `openai`. In production (`ENV=production`) the provider is always Ollama and a 100-request/IP daily limit applies.
-
----
-
-## Keyboard Shortcuts
-
-| Key | Action |
-|---|---|
-| `\` | Toggle AI terminal |
-| `/` | Focus search bar |
-| `t` | Toggle dark / light mode |
-| `g` | Cycle stock groupings |
-| `[` | Shorter date range |
-| `]` | Longer date range |
-| `?` | Show shortcuts help |
-
----
-
-## Tech Stack
-
-| Layer | Technology |
-|---|---|
-| Backend | FastAPI, SQLAlchemy, SQLite, `databases` (async) |
-| Indicators | `ta` library (24+ technical indicators) |
-| Frontend | React 18, Recharts, Tailwind CSS |
-| Caching | Redis (fakeredis fallback) |
-| Rate limiting | SlowAPI |
-| Scheduling | APScheduler (daily 18:30 ET refresh) |
-| Data | yfinance, BeautifulSoup (Wikipedia S&P 500) |
-| AI | Ollama, Anthropic Claude, OpenAI |
-| Packaging | uv, Docker + Docker Compose |
-
----
-
-## Tests
+Run backend:
 
 ```bash
-uv run pytest
+uv run uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
-- `tests/test_data_manipulation.py` — indicator math (RSI range, SMA correctness, Bollinger band ordering, no infinities)
-- `tests/test_signals.py` — SQL signal views: bullish/bearish detection, Bollinger breakouts, golden cross, volume breakout
-- `tests/test_data_pull.py` — pipeline table creation and column schema with mocked yfinance
+The production app serves the built frontend from FastAPI. In development, run Vite separately.
+
+## Data Model
+
+DuckDB is the primary local analytics store.
+
+Current core tables:
+- `ohlcv_daily`
+- `ticker_data`
+- `stock_information`
+- `strategy_runs`
+- `backup_runs`
+
+Current computed fields include:
+- SMA / EMA
+- RSI
+- MACD
+- Bollinger position
+- MFI
+- VWAP
+- terminal tech score
+
+## Backups
+
+Backups are implemented for deployment and operations, but they are not meant to be a primary user-facing terminal feature.
+
+Current backup behavior:
+- checkpoint before copy
+- copy DuckDB snapshot safely
+- optional gzip compression
+- retention pruning
+- restore-open validation
+
+Endpoints:
+- `GET /system/backups`
+- `POST /system/backups/create`
+
+## AI Panel
+
+The integrated AI panel is terminal-facing and supports:
+- market questions
+- strategy drafting help
+- backtest interpretation
+- security context analysis
+
+Providers supported:
+- Ollama
+- OpenAI
+- Anthropic
+
+If no provider is reachable or configured, the app returns a fallback analyst response instead of failing the UI.
+
+## Validation
+
+Useful checks:
+
+```bash
+.venv/bin/ruff check .
+.venv/bin/pytest --tb=short -v
+cd frontend && npm run lint
+cd frontend && npm run build
+docker build -t batesstocks:test .
+```
+
+## Deployment Notes
+
+This repo is intended to be consumed by a parent home-server repo that:
+- runs the container through Docker Compose
+- mounts persistent DuckDB storage
+- pulls new images through Watchtower
+
+Recommended parent-stack contract:
+- mount `/app/data`
+- mount `/app/backups`
+- set `DB_PATH=/app/data/stock_data.duckdb`
+- set `BACKUP_DIR=/app/backups`
+- keep `AUTO_SYNC_ON_START=true` unless you have an external sync workflow
+
+If the parent stack still references old SQLite files or Redis sidecars from the removed app, those references should be deleted there. They are not part of the active BATESSTOCKS runtime.
