@@ -86,7 +86,9 @@ if (_frontend_build_dir() / "assets").is_dir():
 
 
 @app.get("/search", response_model=list[SearchResult])
-def search(query: str = Query(..., min_length=1), limit: int = Query(10, ge=1, le=25)) -> list[SearchResult]:
+def search(
+    query: str = Query(..., min_length=1), limit: int = Query(10, ge=1, le=25)
+) -> list[SearchResult]:
     pattern = f"%{query.strip().upper()}%"
     with duckdb_connection(read_only=True) as conn:
         rows = conn.execute(

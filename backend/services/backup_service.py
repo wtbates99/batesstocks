@@ -3,25 +3,25 @@ from __future__ import annotations
 import gzip
 import shutil
 import tempfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import duckdb
 
-from backend.core.config import get_backup_dir, get_db_path
+from backend.core.config import get_db_path
 from backend.core.duckdb import duckdb_connection, ensure_backup_dir
 from backend.models import BackupCreateResponse, BackupManifest, BackupStatus
 
 
 def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _backup_manifest(path: Path, compressed: bool) -> BackupManifest:
     stat = path.stat()
     return BackupManifest(
         filename=path.name,
-        created_at=datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+        created_at=datetime.fromtimestamp(stat.st_mtime, tz=UTC).isoformat(),
         size_bytes=stat.st_size,
         compressed=compressed,
     )
@@ -51,7 +51,11 @@ def _validate_backup(path: Path) -> None:
 def list_backups(retention_count: int = 7) -> BackupStatus:
     backup_dir = ensure_backup_dir()
     files = sorted(
-        [p for p in backup_dir.iterdir() if p.is_file() and p.name.endswith((".duckdb", ".duckdb.gz"))],
+        [
+            p
+            for p in backup_dir.iterdir()
+            if p.is_file() and p.name.endswith((".duckdb", ".duckdb.gz"))
+        ],
         key=lambda item: item.stat().st_mtime,
         reverse=True,
     )
@@ -88,7 +92,11 @@ def create_backup(compress: bool = True, retention_count: int = 7) -> BackupCrea
 
     pruned: list[str] = []
     files = sorted(
-        [p for p in backup_dir.iterdir() if p.is_file() and p.name.endswith((".duckdb", ".duckdb.gz"))],
+        [
+            p
+            for p in backup_dir.iterdir()
+            if p.is_file() and p.name.endswith((".duckdb", ".duckdb.gz"))
+        ],
         key=lambda item: item.stat().st_mtime,
         reverse=True,
     )

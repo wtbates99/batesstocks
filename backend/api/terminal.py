@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -11,12 +11,12 @@ from backend.models import (
     BackupCreateResponse,
     BackupStatus,
     SecurityOverview,
-    SyncRequest,
-    SyncResponse,
     StrategyBacktestRequest,
     StrategyBacktestResponse,
     StrategyDefinition,
     StrategyScreenResponse,
+    SyncRequest,
+    SyncResponse,
     TerminalOverview,
 )
 from backend.services.backup_service import create_backup, list_backups
@@ -32,7 +32,7 @@ router = APIRouter(tags=["terminal"])
 
 
 def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 @router.get("/terminal/workspace", response_model=TerminalOverview)
