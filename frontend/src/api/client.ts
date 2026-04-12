@@ -6,6 +6,7 @@ import type {
   LivePrices,
   SearchResult,
   SyncRequest,
+  SyncStatus,
   SyncResponse,
   SecurityOverview,
   StrategyBacktestRequest,
@@ -69,6 +70,8 @@ export const api = {
       get<BackupStatus>('/system/backups', { retention_count: retentionCount }),
     createBackup: (body: BackupCreateRequest) =>
       post<BackupCreateResponse>('/system/backups/create', body),
+    syncStatus: () =>
+      get<SyncStatus>('/system/sync/status'),
     sync: (body: SyncRequest) =>
       post<SyncResponse>('/system/sync', body),
   },

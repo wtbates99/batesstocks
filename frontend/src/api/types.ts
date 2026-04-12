@@ -223,3 +223,19 @@ export interface SyncResponse {
   rows_written: number
   metadata_rows: number
 }
+
+export interface SyncStatus {
+  state: string
+  source: string
+  phase: string
+  detail: string
+  started_at?: string | null
+  updated_at?: string | null
+  finished_at?: string | null
+  target_tickers: number
+  completed_tickers: number
+  rows_written: number
+  metadata_rows: number
+  last_success_at?: string | null
+  last_error?: string | null
+}
