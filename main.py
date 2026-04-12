@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from asyncio import Lock, to_thread
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -17,7 +18,8 @@ from pydantic import BaseModel, Field
 from backend.api.terminal import router as terminal_router
 from backend.core.duckdb import duckdb_connection, ensure_schema
 from backend.models import LivePrices, SearchResult
-from backend.services.data_sync_service import ensure_market_data, has_market_data
+from backend.services.data_sync_service import ensure_market_data, has_market_data, sync_market_data
+from backend.services.sync_scheduler import MarketSyncScheduler
 
 load_dotenv()
 
@@ -32,6 +34,7 @@ CORS_ORIGINS = os.getenv(
     "CORS_ORIGINS",
     "http://localhost:8000,http://localhost:3000,https://batesstocks.com,https://www.batesstocks.com",
 ).split(",")
+_SYNC_LOCK = Lock()
 
 
 class PriceRequest(BaseModel):
@@ -59,9 +62,16 @@ def _frontend_index_html() -> Path:
     return _frontend_build_dir() / "index.html"
 
 
+async def _run_scheduled_market_sync() -> None:
+    async with _SYNC_LOCK:
+        years = int(os.getenv("SCHEDULED_SYNC_YEARS", "2"))
+        await to_thread(sync_market_data, None, years)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     ensure_schema()
+    scheduler: MarketSyncScheduler | None = None
     should_auto_sync = os.getenv("AUTO_SYNC_ON_START", "true").lower() == "true"
     if should_auto_sync:
         try:
@@ -69,7 +79,16 @@ async def lifespan(_: FastAPI):
                 ensure_market_data()
         except Exception as exc:  # pragma: no cover - startup/network dependent
             logger.warning("AUTO_SYNC_ON_START failed: %s", exc)
+    should_schedule = os.getenv("AUTO_SYNC_SCHEDULED", "true").lower() == "true"
+    if should_schedule:
+        scheduler = MarketSyncScheduler(
+            sync_callback=_run_scheduled_market_sync,
+            poll_interval_seconds=float(os.getenv("SCHEDULED_SYNC_POLL_SECONDS", "300")),
+        )
+        scheduler.start()
     yield
+    if scheduler is not None:
+        await scheduler.stop()
 
 
 app = FastAPI(lifespan=lifespan)
