@@ -545,7 +545,7 @@ def get_terminal_overview(focus_ticker: str) -> TerminalOverview:
         TerminalHeadline(
             ticker=focus_ticker.upper(),
             headline=f"{focus_ticker.upper()} remains the active focus instrument",
-            detail="Terminal workspace is wired to the new DuckDB analytics surface.",
+            detail="Security monitor, chart history, and signal panels are keyed off the live terminal universe.",
             tone="positive",
         ),
         TerminalHeadline(
@@ -555,10 +555,10 @@ def get_terminal_overview(focus_ticker: str) -> TerminalOverview:
             tone="warning",
         ),
         TerminalHeadline(
-            ticker="BACKUP",
-            headline="DuckDB backup flow uses checkpoint-safe snapshot copies",
-            detail="Retention and optional compression are exposed through the new system endpoints.",
-            tone="neutral",
+            ticker="BREADTH",
+            headline="Market breadth is computed from the current local universe snapshot",
+            detail=f"{int(advancers or 0)} advancers versus {int(decliners or 0)} decliners on the latest bar.",
+            tone="positive" if (advancers or 0) >= (decliners or 0) else "negative",
         ),
     ]
 

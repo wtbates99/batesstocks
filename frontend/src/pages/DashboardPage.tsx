@@ -1,6 +1,6 @@
-import { startTransition, useDeferredValue, useEffect, useMemo, useState } from 'react'
+import { startTransition, useDeferredValue, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { DatabaseBackup, Radar, RefreshCw, ScanSearch, TestTubeDiagonal } from 'lucide-react'
+import { Radar, RefreshCw, ScanSearch, TestTubeDiagonal } from 'lucide-react'
 import { api } from '../api/client'
 import { useAiContext } from '../contexts/AiContext'
 import type { TerminalMover } from '../api/types'
@@ -84,16 +84,8 @@ export default function DashboardPage() {
   const [tickerInput, setTickerInput] = useState('SPY')
   const focusTicker = useDeferredValue(tickerInput.trim().toUpperCase() || 'SPY')
   const { data, loading, error, refetch } = useApi(() => api.terminal.workspace(focusTicker), [focusTicker])
-  const { data: backups, refetch: refetchBackups } = useApi(() => api.system.backups(6), [])
   const [syncInfo, setSyncInfo] = useState<string | null>(null)
   const [syncing, setSyncing] = useState(false)
-
-  const backupSummary = useMemo(() => backups?.available_backups[0] ?? null, [backups])
-
-  const createBackup = async () => {
-    await api.system.createBackup({ compress: true, retention_count: 6 })
-    refetchBackups()
-  }
 
   const syncMarket = async () => {
     setSyncing(true)
@@ -141,12 +133,12 @@ export default function DashboardPage() {
                 placeholder="SPY"
               />
               <div style={{ marginTop: 8, fontSize: 'var(--text-xs)', color: 'var(--text-muted)', lineHeight: 1.5 }}>
-                Bloomberg-style terminal home built on the rebuilt terminal workspace endpoint.
+                Live market workspace. Enter a symbol and jump straight into the security monitor.
               </div>
             </div>
 
             <div className="metric-card" style={{ padding: 10 }}>
-              <div className="metric-label">Control Surface</div>
+              <div className="metric-label">Terminal Actions</div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginTop: 6 }}>
                 <button className="term-btn" onClick={() => navigate('/screener')}>
                   <ScanSearch size={11} />
@@ -164,34 +156,28 @@ export default function DashboardPage() {
                   <RefreshCw size={11} />
                   {syncing ? 'Syncing…' : 'Sync'}
                 </button>
-                <button className="term-btn" onClick={createBackup}>
-                  <DatabaseBackup size={11} />
-                  Backup
-                </button>
               </div>
             </div>
 
             <div className="panel" style={{ minHeight: 0 }}>
               <div className="panel-header">
-                <span className="panel-title">DuckDB Backup</span>
+                <span className="panel-title">Market Sync</span>
               </div>
               <div className="panel-body">
                 <div className="metric-grid">
                   <div className="metric-card">
-                    <div className="metric-label">Retention</div>
-                    <div className="metric-value">{backups?.retention_count ?? '—'}</div>
+                    <div className="metric-label">Default Focus</div>
+                    <div className="metric-value">SPY</div>
                   </div>
                   <div className="metric-card">
-                    <div className="metric-label">Latest File</div>
+                    <div className="metric-label">Universe</div>
                     <div className="metric-value" style={{ fontSize: 'var(--text-sm)' }}>
-                      {backupSummary?.filename ?? 'none'}
+                      US core
                     </div>
                   </div>
                 </div>
                 <div style={{ marginTop: 8, fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--text-muted)', lineHeight: 1.5 }}>
-                  {backupSummary
-                    ? `${backupSummary.created_at.slice(0, 19).replace('T', ' ')} UTC • ${backupSummary.compressed ? 'gzip' : 'raw'} • ${backupSummary.size_bytes.toLocaleString()} bytes`
-                    : 'No snapshot created yet'}
+                  Price history, indicators, and screen inputs are populated from live market data. Use Sync to refresh the local universe.
                 </div>
                 {syncInfo && (
                   <div style={{ marginTop: 8, fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--blue)' }}>
