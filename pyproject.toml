@@ -1,29 +1,18 @@
 [project]
 name = "batesstocks"
-version = "0.1.0"
-description = "Stock technical indicators dashboard with AI analysis"
+version = "1.0.0"
+description = "BATESSTOCKS terminal-grade financial analytics platform"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi==0.115.2",
     "uvicorn[standard]==0.32.0",
     "duckdb>=1.1.0",
     "pydantic>=2.10.0",
-    "fakeredis==2.25.1",
-    "redis==5.1.1",
     "httpx>=0.27.0",
-    "websockets>=13.0",
-    "yfinance>=0.2.50",
-    "ta==0.11.0",
-    "pandas==2.2.3",
     "numpy==2.1.2",
-    "beautifulsoup4==4.12.3",
-    "lxml==5.3.0",
-    "requests==2.32.3",
-    "python-dateutil==2.9.0.post0",
+    "pandas==2.2.3",
     "python-dotenv>=1.0.0",
-    "slowapi>=0.1.9",
-    "apscheduler>=3.10.0,<4.0",
-    "pytz>=2024.1",
+    "yfinance>=0.2.50",
 ]
 
 [dependency-groups]

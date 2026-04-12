@@ -51,7 +51,7 @@ export default function SearchBar({ placeholder = 'Search ticker or company…',
     if (onSelect) {
       onSelect(ticker)
     } else {
-      navigate(`/spotlight/${ticker}`)
+      navigate(`/security/${ticker}`)
     }
   }
 

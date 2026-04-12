@@ -17,10 +17,6 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (p) => p.replace(/^\/api/, ''),
       },
-      '/ws': {
-        target: 'ws://localhost:8000',
-        ws: true,
-      },
     },
   },
   build: {
@@ -30,7 +26,8 @@ export default defineConfig({
       output: {
         manualChunks: {
           vendor: ['react', 'react-dom', 'react-router-dom'],
-          charts: ['lightweight-charts', 'recharts'],
+          chartCore: ['lightweight-charts'],
+          chartAnalytics: ['recharts'],
         },
       },
     },
