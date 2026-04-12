@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 
 import pandas as pd
 
 SP500_SOURCE_URL = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+STATIC_SP500_PATH = Path(__file__).resolve().parent.parent / "data" / "sp500_constituents.txt"
 
 INDEX_AND_SECTOR_FUNDS = [
     "SPY",
@@ -79,6 +81,22 @@ def _normalize_symbol(symbol: str) -> str:
     return symbol.strip().upper().replace(".", "-")
 
 
+def _load_static_sp500_constituents() -> tuple[str, ...]:
+    if not STATIC_SP500_PATH.is_file():
+        return tuple(_normalize_symbol(symbol) for symbol in FALLBACK_LARGE_CAPS)
+
+    symbols = tuple(
+        sorted(
+            {
+                _normalize_symbol(line)
+                for line in STATIC_SP500_PATH.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            }
+        )
+    )
+    return symbols or tuple(_normalize_symbol(symbol) for symbol in FALLBACK_LARGE_CAPS)
+
+
 @lru_cache(maxsize=1)
 def get_sp500_constituents() -> tuple[str, ...]:
     try:
@@ -101,7 +119,7 @@ def get_sp500_constituents() -> tuple[str, ...]:
         if symbols:
             return symbols
 
-    return tuple(_normalize_symbol(symbol) for symbol in FALLBACK_LARGE_CAPS)
+    return _load_static_sp500_constituents()
 
 
 def normalize_universe(tickers: list[str] | None = None) -> list[str]:
