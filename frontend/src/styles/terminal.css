@@ -663,6 +663,106 @@ body {
   color: var(--text-primary);
 }
 
+/* ── Security workspace ───────────────────────────────────────────────────── */
+.security-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  background:
+    linear-gradient(135deg, rgba(240, 136, 62, 0.08), transparent 30%),
+    linear-gradient(180deg, rgba(20, 24, 32, 0.98), rgba(15, 18, 20, 0.98));
+}
+
+.security-kicker {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.security-title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.security-ticker {
+  font-family: var(--font-mono);
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--orange);
+  letter-spacing: 0.08em;
+}
+
+.security-name {
+  font-size: var(--text-md);
+  color: var(--text-primary);
+}
+
+.security-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.security-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(320px, 0.85fr);
+  gap: 8px;
+  min-height: 0;
+  flex: 1;
+}
+
+.security-main,
+.security-side {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+}
+
+.security-table-wrap {
+  max-height: 280px;
+}
+
+.security-signal-list {
+  display: grid;
+  gap: 6px;
+}
+
+.security-signal-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+}
+
+.security-signal-label {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.security-signal-value {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+.security-command-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 /* ── Loading & empty ─────────────────────────────────────────────────────── */
 .loading-bar {
   height: 2px;
@@ -883,6 +983,7 @@ body {
 @media (max-width: 900px) {
   .topbar-indices { display: none; }
   .ai-panel { display: none; }
+  .security-grid { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 600px) {
@@ -893,4 +994,15 @@ body {
 
   .fnbar { overflow-x: auto; }
   .fn-label { display: none; }
+
+  .security-header,
+  .security-title-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .security-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
 }

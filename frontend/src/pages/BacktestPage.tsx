@@ -1,88 +1,101 @@
-import { useState } from 'react'
-import { Play, Zap, TrendingUp, TrendingDown, Award } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { Play, ScanSearch } from 'lucide-react'
 import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine,
+  CartesianGrid,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
 } from 'recharts'
-import { useApi } from '../hooks/useApi'
 import { api } from '../api/client'
-import type { BacktestRequest, BacktestResult } from '../api/types'
+import { useAiContext } from '../contexts/AiContext'
+import type { StrategyBacktestResponse, StrategyDefinition } from '../api/types'
 
 const METRICS = [
-  'Ticker_RSI', 'Ticker_MACD', 'Ticker_MACD_Diff', 'Ticker_MACD_Signal',
-  'Ticker_Close', 'Ticker_SMA_10', 'Ticker_SMA_30', 'Ticker_EMA_10', 'Ticker_EMA_30',
-  'Ticker_SMA_200W', 'Ticker_SMA_250W', 'Ticker_Bollinger_PBand', 'Ticker_Bollinger_WBand',
-  'Ticker_MFI', 'Ticker_Tech_Score', 'Ticker_Stochastic_K', 'Ticker_Stochastic_D',
-  'Ticker_Williams_R', 'Ticker_ROC', 'Ticker_VWAP',
+  'Close',
+  'Ticker_RSI',
+  'Ticker_MACD',
+  'Ticker_MACD_Signal',
+  'Ticker_MACD_Diff',
+  'Ticker_SMA_10',
+  'Ticker_SMA_30',
+  'Ticker_EMA_10',
+  'Ticker_EMA_30',
+  'Ticker_Tech_Score',
+  'Ticker_Bollinger_PBand',
+  'Ticker_MFI',
+  'Ticker_VWAP',
 ]
 
-const CONDITIONS = ['above', 'below', 'crosses_above', 'crosses_below']
-
-const PRESETS: { label: string; config: Partial<BacktestRequest> }[] = [
-  {
-    label: 'RSI Reversal',
-    config: { entry_metric: 'Ticker_RSI', entry_condition: 'crosses_above', entry_threshold: 30, exit_metric: 'Ticker_RSI', exit_condition: 'crosses_above', exit_threshold: 70 },
-  },
-  {
-    label: 'MACD Crossover',
-    config: { entry_metric: 'Ticker_MACD', entry_condition: 'crosses_above', entry_threshold_metric: 'Ticker_MACD_Signal', exit_metric: 'Ticker_MACD', exit_condition: 'crosses_below', exit_threshold_metric: 'Ticker_MACD_Signal' },
-  },
-  {
-    label: 'SMA 10/30',
-    config: { entry_metric: 'Ticker_SMA_10', entry_condition: 'crosses_above', entry_threshold_metric: 'Ticker_SMA_30', exit_metric: 'Ticker_SMA_10', exit_condition: 'crosses_below', exit_threshold_metric: 'Ticker_SMA_30' },
-  },
-  {
-    label: 'Tech Score Momentum',
-    config: { entry_metric: 'Ticker_Tech_Score', entry_condition: 'crosses_above', entry_threshold: 65, exit_metric: 'Ticker_Tech_Score', exit_condition: 'crosses_below', exit_threshold: 40 },
-  },
-  {
-    label: 'Oversold Bounce',
-    config: { entry_metric: 'Ticker_RSI', entry_condition: 'crosses_above', entry_threshold: 25, exit_metric: 'Ticker_RSI', exit_condition: 'above', exit_threshold: 60 },
-  },
+const CONDITIONS: Array<StrategyDefinition['entry']['condition']> = [
+  'above',
+  'below',
+  'crosses_above',
+  'crosses_below',
 ]
 
-function StatCard({ label, value, color, sub }: { label: string; value: string; color?: string; sub?: string }) {
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="metric-card" style={{ minWidth: 90 }}>
-      <div className="metric-label">{label}</div>
-      <div className="metric-value" style={{ color, fontSize: 'var(--text-md)' }}>{value}</div>
-      {sub && <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginTop: 2 }}>{sub}</div>}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+      <label style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+        {label}
+      </label>
+      {children}
     </div>
   )
 }
 
-export default function BacktestPage() {
-  const [form, setForm] = useState<BacktestRequest>({
-    ticker: 'SPY',
-    entry_metric: 'Ticker_RSI',
-    entry_condition: 'crosses_above',
-    entry_threshold: 30,
-    exit_metric: 'Ticker_RSI',
-    exit_condition: 'crosses_above',
-    exit_threshold: 70,
-    initial_capital: 10000,
+function StatCard({ label, value, tone = 'var(--text-primary)' }: { label: string; value: string; tone?: string }) {
+  return (
+    <div className="metric-card">
+      <div className="metric-label">{label}</div>
+      <div className="metric-value" style={{ color: tone }}>{value}</div>
+    </div>
+  )
+}
+
+function buildDefaultStrategy(): StrategyDefinition {
+  return {
+    name: 'Terminal Momentum Stack',
+    entry: {
+      metric: 'Ticker_Tech_Score',
+      condition: 'crosses_above',
+      threshold: 65,
+    },
+    exit: {
+      metric: 'Ticker_Tech_Score',
+      condition: 'crosses_below',
+      threshold: 45,
+    },
+    initial_capital: 100000,
     position_size_pct: 100,
-  })
-  const [result, setResult] = useState<BacktestResult | null>(null)
-  const [loading, setLoading] = useState(false)
+    stop_loss_pct: 8,
+    max_open_positions: 1,
+  }
+}
+
+export default function BacktestPage() {
+  const { setContext } = useAiContext()
+  const [ticker, setTicker] = useState('SPY')
+  const [strategy, setStrategy] = useState<StrategyDefinition>(buildDefaultStrategy)
+  const [result, setResult] = useState<StrategyBacktestResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [screenResult, setScreenResult] = useState<string[] | null>(null)
+  const [loading, setLoading] = useState(false)
   const [screening, setScreening] = useState(false)
 
-  const set = (k: keyof BacktestRequest, v: unknown) =>
-    setForm(f => ({ ...f, [k]: v }))
-
-  const applyPreset = (preset: typeof PRESETS[0]) =>
-    setForm(f => ({ ...f, ...preset.config }))
-
-  const run = async () => {
+  const runBacktest = async () => {
     setLoading(true)
     setError(null)
-    setResult(null)
     try {
-      const res = await api.backtest({ ...form })
-      setResult(res)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      const response = await api.strategies.backtest({
+        ticker: ticker.toUpperCase(),
+        strategy,
+      })
+      setResult(response)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
     } finally {
       setLoading(false)
     }
@@ -90,294 +103,235 @@ export default function BacktestPage() {
 
   const runScreen = async () => {
     setScreening(true)
+    setError(null)
     try {
-      const tickers = await api.strategyScreen({
-        entry_metric: form.entry_metric,
-        entry_condition: form.entry_condition,
-        entry_threshold: form.entry_threshold,
-        entry_threshold_metric: form.entry_threshold_metric ?? null,
-      })
-      setScreenResult(tickers)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      const response = await api.strategies.screen(strategy)
+      setResult((current) => current ? { ...current, current_matches: response.matches } : null)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
     } finally {
       setScreening(false)
     }
   }
 
-  const Field = ({ label, children }: { label: string; children: React.ReactNode }) => (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-      <label style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{label}</label>
-      {children}
-    </div>
+  const chartData = useMemo(
+    () => result?.equity_curve.map((point) => ({
+      date: point.date.slice(5),
+      equity: point.equity,
+      benchmark: point.benchmark,
+    })) ?? [],
+    [result],
   )
 
+  useEffect(() => {
+    setContext({
+      page: 'backtest',
+      ticker,
+      strategy: strategy.name,
+      summary: result?.summary ?? null,
+      currentMatches: result?.current_matches?.slice(0, 10) ?? [],
+    })
+  }, [result, setContext, strategy.name, ticker])
+
   return (
-    <div style={{ display: 'flex', gap: 8, height: '100%', minHeight: 0 }}>
-      {/* Left: builder */}
-      <div className="panel" style={{ width: 300, flexShrink: 0 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: '320px 1fr', gap: 8, height: '100%', minHeight: 0 }}>
+      <div className="panel">
         <div className="panel-header">
           <span className="panel-title">Strategy Builder</span>
         </div>
-        <div className="panel-body" style={{ display: 'flex', flexDirection: 'column', gap: 10, overflow: 'auto' }}>
-          {/* Presets */}
-          <div>
-            <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Presets</div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-              {PRESETS.map(p => (
-                <button key={p.label} className="term-btn" style={{ fontSize: 'var(--text-xs)', padding: '2px 6px' }} onClick={() => applyPreset(p)}>
-                  {p.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div style={{ height: 1, background: 'var(--border)' }} />
-
+        <div className="panel-body" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <Field label="Ticker">
+            <input className="term-input" value={ticker} onChange={(e) => setTicker(e.target.value.toUpperCase())} />
+          </Field>
+          <Field label="Strategy Name">
             <input
               className="term-input"
-              value={form.ticker}
-              onChange={e => set('ticker', e.target.value.toUpperCase())}
-              placeholder="SPY"
+              value={strategy.name}
+              onChange={(e) => setStrategy((prev) => ({ ...prev, name: e.target.value }))}
             />
           </Field>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
-            <Field label="Start Date">
-              <input className="term-input" type="date" value={form.start_date ?? ''} onChange={e => set('start_date', e.target.value || null)} />
-            </Field>
-            <Field label="End Date">
-              <input className="term-input" type="date" value={form.end_date ?? ''} onChange={e => set('end_date', e.target.value || null)} />
-            </Field>
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
-            <Field label="Capital ($)">
-              <input className="term-input" type="number" value={form.initial_capital} onChange={e => set('initial_capital', parseFloat(e.target.value))} />
-            </Field>
-            <Field label="Size (%)">
-              <input className="term-input" type="number" value={form.position_size_pct} onChange={e => set('position_size_pct', parseFloat(e.target.value))} min={1} max={100} />
-            </Field>
-          </div>
-
           <div style={{ height: 1, background: 'var(--border)' }} />
 
-          {/* Entry */}
-          <div style={{ fontSize: 'var(--text-xs)', color: 'var(--green)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-            Entry Condition
+          <div style={{ color: 'var(--green)', fontSize: 'var(--text-xs)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+            Entry Leg
           </div>
-
-          <Field label="Entry Metric">
-            <select className="term-select" value={form.entry_metric} onChange={e => set('entry_metric', e.target.value)}>
-              {METRICS.map(m => <option key={m} value={m}>{m.replace('Ticker_', '')}</option>)}
+          <Field label="Metric">
+            <select className="term-select" value={strategy.entry.metric} onChange={(e) => setStrategy((prev) => ({ ...prev, entry: { ...prev.entry, metric: e.target.value } }))}>
+              {METRICS.map((metric) => <option key={metric} value={metric}>{metric}</option>)}
             </select>
           </Field>
-
           <Field label="Condition">
-            <select className="term-select" value={form.entry_condition} onChange={e => set('entry_condition', e.target.value)}>
-              {CONDITIONS.map(c => <option key={c} value={c}>{c.replace('_', ' ')}</option>)}
+            <select className="term-select" value={strategy.entry.condition} onChange={(e) => setStrategy((prev) => ({ ...prev, entry: { ...prev.entry, condition: e.target.value as StrategyDefinition['entry']['condition'] } }))}>
+              {CONDITIONS.map((condition) => <option key={condition} value={condition}>{condition}</option>)}
             </select>
           </Field>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
-            <Field label="Threshold">
-              <input className="term-input" type="number" step="0.1" value={form.entry_threshold ?? 0} onChange={e => set('entry_threshold', parseFloat(e.target.value))} />
-            </Field>
-            <Field label="vs. Metric">
-              <select className="term-select" value={form.entry_threshold_metric ?? ''} onChange={e => set('entry_threshold_metric', e.target.value || null)}>
-                <option value="">None</option>
-                {METRICS.map(m => <option key={m} value={m}>{m.replace('Ticker_', '')}</option>)}
-              </select>
-            </Field>
-          </div>
-
-          <div style={{ height: 1, background: 'var(--border)' }} />
-
-          {/* Exit */}
-          <div style={{ fontSize: 'var(--text-xs)', color: 'var(--red)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-            Exit Condition
-          </div>
-
-          <Field label="Exit Metric">
-            <select className="term-select" value={form.exit_metric} onChange={e => set('exit_metric', e.target.value)}>
-              {METRICS.map(m => <option key={m} value={m}>{m.replace('Ticker_', '')}</option>)}
-            </select>
+          <Field label="Threshold">
+            <input
+              className="term-input"
+              type="number"
+              value={strategy.entry.threshold ?? ''}
+              onChange={(e) => setStrategy((prev) => ({ ...prev, entry: { ...prev.entry, threshold: e.target.value === '' ? null : parseFloat(e.target.value) } }))}
+            />
           </Field>
 
+          <div style={{ color: 'var(--red)', fontSize: 'var(--text-xs)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+            Exit Leg
+          </div>
+          <Field label="Metric">
+            <select className="term-select" value={strategy.exit.metric} onChange={(e) => setStrategy((prev) => ({ ...prev, exit: { ...prev.exit, metric: e.target.value } }))}>
+              {METRICS.map((metric) => <option key={metric} value={metric}>{metric}</option>)}
+            </select>
+          </Field>
           <Field label="Condition">
-            <select className="term-select" value={form.exit_condition} onChange={e => set('exit_condition', e.target.value)}>
-              {CONDITIONS.map(c => <option key={c} value={c}>{c.replace('_', ' ')}</option>)}
+            <select className="term-select" value={strategy.exit.condition} onChange={(e) => setStrategy((prev) => ({ ...prev, exit: { ...prev.exit, condition: e.target.value as StrategyDefinition['exit']['condition'] } }))}>
+              {CONDITIONS.map((condition) => <option key={condition} value={condition}>{condition}</option>)}
             </select>
           </Field>
+          <Field label="Threshold">
+            <input
+              className="term-input"
+              type="number"
+              value={strategy.exit.threshold ?? ''}
+              onChange={(e) => setStrategy((prev) => ({ ...prev, exit: { ...prev.exit, threshold: e.target.value === '' ? null : parseFloat(e.target.value) } }))}
+            />
+          </Field>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
-            <Field label="Threshold">
-              <input className="term-input" type="number" step="0.1" value={form.exit_threshold ?? 0} onChange={e => set('exit_threshold', parseFloat(e.target.value))} />
+          <div className="grid-2">
+            <Field label="Capital">
+              <input
+                className="term-input"
+                type="number"
+                value={strategy.initial_capital}
+                onChange={(e) => setStrategy((prev) => ({ ...prev, initial_capital: parseFloat(e.target.value) || 0 }))}
+              />
             </Field>
-            <Field label="vs. Metric">
-              <select className="term-select" value={form.exit_threshold_metric ?? ''} onChange={e => set('exit_threshold_metric', e.target.value || null)}>
-                <option value="">None</option>
-                {METRICS.map(m => <option key={m} value={m}>{m.replace('Ticker_', '')}</option>)}
-              </select>
+            <Field label="Stop Loss %">
+              <input
+                className="term-input"
+                type="number"
+                value={strategy.stop_loss_pct ?? ''}
+                onChange={(e) => setStrategy((prev) => ({ ...prev, stop_loss_pct: e.target.value === '' ? null : parseFloat(e.target.value) }))}
+              />
             </Field>
           </div>
 
-          <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
-            <button className="term-btn primary" onClick={run} disabled={loading} style={{ flex: 1, justifyContent: 'center' }}>
-              <Play size={11} /> {loading ? 'Running…' : 'Backtest'}
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button className="term-btn primary" style={{ flex: 1, justifyContent: 'center' }} onClick={runBacktest} disabled={loading}>
+              <Play size={11} />
+              {loading ? 'Running…' : 'Backtest'}
             </button>
-            <button className="term-btn" onClick={runScreen} disabled={screening} data-tooltip="Find current matches in S&P 500">
-              <Zap size={11} /> {screening ? '…' : 'Screen'}
+            <button className="term-btn" onClick={runScreen} disabled={screening}>
+              <ScanSearch size={11} />
+              {screening ? 'Scanning…' : 'Screen'}
             </button>
           </div>
 
-          {error && (
-            <div style={{ fontSize: 'var(--text-xs)', color: 'var(--red)', padding: '6px 8px', background: 'var(--red-bg)', border: '1px solid var(--red-dim)', borderRadius: 'var(--radius)' }}>
-              {error}
-            </div>
-          )}
+          {error && <div style={{ color: 'var(--red)', fontSize: 'var(--text-xs)' }}>{error}</div>}
         </div>
       </div>
 
-      {/* Right: results */}
-      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {screenResult && (
+      <div className="col" style={{ minWidth: 0 }}>
+        <div className="metric-grid">
+          <StatCard label="Strategy" value={result?.strategy_name ?? 'Awaiting run'} tone="var(--orange)" />
+          <StatCard label="Return" value={result ? `${result.summary.total_return_pct.toFixed(2)}%` : '—'} tone={result && result.summary.total_return_pct >= 0 ? 'var(--green)' : 'var(--red)'} />
+          <StatCard label="Buy/Hold" value={result ? `${result.summary.buy_hold_return_pct.toFixed(2)}%` : '—'} />
+          <StatCard label="Drawdown" value={result ? `${result.summary.max_drawdown_pct.toFixed(2)}%` : '—'} tone="var(--red)" />
+          <StatCard label="Win Rate" value={result ? `${result.summary.win_rate.toFixed(1)}%` : '—'} />
+          <StatCard label="Sharpe" value={result?.summary.sharpe_ratio?.toFixed(2) ?? '—'} />
+        </div>
+
+        <div className="panel" style={{ flex: 1, minHeight: 260 }}>
+          <div className="panel-header">
+            <span className="panel-title">Equity Curve</span>
+          </div>
+          <div className="panel-body">
+            {chartData.length === 0 ? (
+              <div className="empty-state">Run a backtest to populate the equity curve.</div>
+            ) : (
+              <ResponsiveContainer width="100%" height={260}>
+                <LineChart data={chartData}>
+                  <CartesianGrid stroke="var(--border)" />
+                  <XAxis dataKey="date" stroke="var(--text-muted)" minTickGap={24} />
+                  <YAxis stroke="var(--text-muted)" width={72} />
+                  <Tooltip
+                    contentStyle={{
+                      background: 'var(--bg-card)',
+                      border: '1px solid var(--border)',
+                      borderRadius: 2,
+                    }}
+                  />
+                  <Line type="monotone" dataKey="benchmark" stroke="var(--blue)" dot={false} strokeWidth={1.4} />
+                  <Line type="monotone" dataKey="equity" stroke="var(--orange)" dot={false} strokeWidth={1.8} />
+                </LineChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+        </div>
+
+        <div className="grid-2" style={{ minHeight: 0 }}>
           <div className="panel">
             <div className="panel-header">
-              <span className="panel-title">
-                <Zap size={11} style={{ color: 'var(--orange)', marginRight: 4 }} />
-                Strategy Matches — {screenResult.length} tickers
-              </span>
+              <span className="panel-title">Current Matches</span>
             </div>
-            <div className="panel-body" style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-              {screenResult.map(t => (
-                <a key={t} href={`/spotlight/${t}`} style={{ textDecoration: 'none' }}>
-                  <span className="badge badge-orange">{t}</span>
-                </a>
-              ))}
-              {screenResult.length === 0 && <span style={{ color: 'var(--text-muted)', fontSize: 'var(--text-xs)' }}>No matches</span>}
-            </div>
-          </div>
-        )}
-
-        {loading && (
-          <div className="panel" style={{ flex: 1 }}>
-            <div className="panel-body" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-              <div className="spinner" />
-              <span style={{ color: 'var(--text-muted)', fontSize: 'var(--text-sm)' }}>Running backtest…</span>
-            </div>
-          </div>
-        )}
-
-        {result && !loading && (
-          <>
-            {/* Stats */}
-            <div className="panel">
-              <div className="panel-header">
-                <span className="panel-title">{result.ticker} — {result.strategy}</span>
-              </div>
-              <div className="panel-body">
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                  <StatCard label="Total Return" value={`${result.total_return_pct >= 0 ? '+' : ''}${result.total_return_pct.toFixed(2)}%`} color={result.total_return_pct >= 0 ? 'var(--green)' : 'var(--red)'} />
-                  <StatCard label="Buy & Hold" value={`${result.buy_hold_return_pct >= 0 ? '+' : ''}${result.buy_hold_return_pct.toFixed(2)}%`} color={result.buy_hold_return_pct >= 0 ? 'var(--green)' : 'var(--red)'} />
-                  <StatCard label="Win Rate" value={`${result.win_rate.toFixed(1)}%`} color={result.win_rate >= 50 ? 'var(--green)' : 'var(--red)'} />
-                  <StatCard label="# Trades" value={String(result.num_trades)} />
-                  <StatCard label="Avg Ret" value={`${result.avg_return_pct.toFixed(2)}%`} color={result.avg_return_pct >= 0 ? 'var(--green)' : 'var(--red)'} />
-                  <StatCard label="Max DD" value={`-${result.max_drawdown_pct.toFixed(2)}%`} color="var(--red)" />
-                  <StatCard label="Sharpe" value={result.sharpe_ratio?.toFixed(2) ?? '—'} />
-                  {result.sortino_ratio != null && <StatCard label="Sortino" value={result.sortino_ratio.toFixed(2)} />}
-                  {result.calmar_ratio != null && <StatCard label="Calmar" value={result.calmar_ratio.toFixed(2)} />}
-                  {result.profit_factor != null && <StatCard label="PF" value={result.profit_factor.toFixed(2)} />}
-                  {result.annualized_return_pct != null && <StatCard label="Ann. Ret" value={`${result.annualized_return_pct.toFixed(2)}%`} color={result.annualized_return_pct >= 0 ? 'var(--green)' : 'var(--red)'} />}
-                </div>
-              </div>
-            </div>
-
-            {/* Equity curve */}
-            <div className="panel" style={{ flex: 1, minHeight: 200 }}>
-              <div className="panel-header"><span className="panel-title">Equity Curve</span></div>
-              <div className="panel-body no-pad" style={{ padding: '8px 0 0 0' }}>
-                <ResponsiveContainer width="100%" height={220}>
-                  <LineChart data={result.equity_curve} margin={{ left: 8, right: 8, top: 4, bottom: 4 }}>
-                    <CartesianGrid strokeDasharray="2 4" stroke="var(--border)" />
-                    <XAxis
-                      dataKey="date"
-                      tick={{ fontSize: 9, fill: 'var(--text-muted)', fontFamily: 'IBM Plex Mono' }}
-                      tickFormatter={d => d.slice(5)}
-                      interval="preserveStartEnd"
-                    />
-                    <YAxis
-                      tick={{ fontSize: 9, fill: 'var(--text-muted)', fontFamily: 'IBM Plex Mono' }}
-                      tickFormatter={v => `$${(v / 1000).toFixed(0)}k`}
-                      width={44}
-                    />
-                    <Tooltip
-                      contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border)', fontSize: 11, fontFamily: 'IBM Plex Mono' }}
-                      formatter={(v: number) => [`$${v.toFixed(2)}`, 'Portfolio']}
-                    />
-                    <ReferenceLine y={result.equity_curve[0]?.value ?? 10000} stroke="var(--border-bright)" strokeDasharray="4 4" />
-                    <Line
-                      type="monotone"
-                      dataKey="value"
-                      stroke={result.total_return_pct >= 0 ? 'var(--green)' : 'var(--red)'}
-                      strokeWidth={1.5}
-                      dot={false}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-
-            {/* Trades */}
-            <div className="panel">
-              <div className="panel-header"><span className="panel-title">Trades ({result.trades.length})</span></div>
-              <div className="panel-body no-pad" style={{ maxHeight: 200, overflow: 'auto' }}>
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>Entry</th>
-                      <th style={{ textAlign: 'right' }}>Entry $</th>
-                      <th>Exit</th>
-                      <th style={{ textAlign: 'right' }}>Exit $</th>
-                      <th style={{ textAlign: 'right' }}>Return</th>
-                      <th style={{ textAlign: 'right' }}>P&L</th>
+            <div className="panel-body no-pad">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Ticker</th>
+                    <th>Sector</th>
+                    <th style={{ textAlign: 'right' }}>Px</th>
+                    <th style={{ textAlign: 'right' }}>RSI</th>
+                    <th style={{ textAlign: 'right' }}>Score</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(result?.current_matches ?? []).map((match) => (
+                    <tr key={match.ticker}>
+                      <td className="col-ticker">{match.ticker}</td>
+                      <td>{match.sector ?? '—'}</td>
+                      <td style={{ textAlign: 'right' }}>{match.last_price?.toFixed(2) ?? '—'}</td>
+                      <td style={{ textAlign: 'right' }}>{match.rsi?.toFixed(1) ?? '—'}</td>
+                      <td style={{ textAlign: 'right' }}>{match.tech_score?.toFixed(0) ?? '—'}</td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {result.trades.map((t, i) => (
-                      <tr key={i}>
-                        <td>{t.entry_date}</td>
-                        <td style={{ textAlign: 'right' }}>{t.entry_price.toFixed(2)}</td>
-                        <td>{t.exit_date}</td>
-                        <td style={{ textAlign: 'right' }}>{t.exit_price.toFixed(2)}</td>
-                        <td style={{ textAlign: 'right' }}>
-                          <span className={t.return_pct >= 0 ? 'up' : 'down'}>
-                            {t.return_pct >= 0 ? '+' : ''}{t.return_pct.toFixed(2)}%
-                          </span>
-                        </td>
-                        <td style={{ textAlign: 'right' }}>
-                          <span className={t.pnl >= 0 ? 'up' : 'down'}>
-                            {t.pnl >= 0 ? '+' : ''}${t.pnl.toFixed(2)}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </>
-        )}
-
-        {!result && !loading && !screenResult && (
-          <div className="panel" style={{ flex: 1 }}>
-            <div className="empty-state" style={{ height: '100%' }}>
-              <Award size={32} style={{ color: 'var(--text-dim)' }} />
-              <span>Configure a strategy and click Backtest</span>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </div>
-        )}
+
+          <div className="panel">
+            <div className="panel-header">
+              <span className="panel-title">Trades</span>
+            </div>
+            <div className="panel-body no-pad">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Entry</th>
+                    <th>Exit</th>
+                    <th style={{ textAlign: 'right' }}>Ret</th>
+                    <th style={{ textAlign: 'right' }}>PnL</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(result?.trades ?? []).map((trade, index) => (
+                    <tr key={`${trade.entry_date}-${index}`}>
+                      <td>{trade.entry_date}</td>
+                      <td>{trade.exit_date}</td>
+                      <td style={{ textAlign: 'right' }} className={trade.return_pct >= 0 ? 'up' : 'down'}>
+                        {trade.return_pct.toFixed(2)}%
+                      </td>
+                      <td style={{ textAlign: 'right' }} className={trade.pnl >= 0 ? 'up' : 'down'}>
+                        {trade.pnl.toFixed(2)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   )

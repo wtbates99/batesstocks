@@ -1,21 +1,17 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useLocation, useNavigate, Link } from 'react-router-dom'
 import { Bot, Activity, ChevronRight } from 'lucide-react'
 import SearchBar from '../SearchBar'
 import AiPanel from '../AiPanel'
 import { usePoll } from '../../hooks/useApi'
 import { api } from '../../api/client'
+import { useAiContext } from '../../contexts/AiContext'
 
 const NAV = [
   { key: 'F1', label: 'DASH',   path: '/' },
   { key: 'F2', label: 'SCRN',   path: '/screener' },
   { key: 'F3', label: 'BKTS',   path: '/backtest' },
-  { key: 'F4', label: 'HEAT',   path: '/heatmap' },
-  { key: 'F5', label: 'MRKT',   path: '/market' },
-  { key: 'F6', label: 'WTCH',   path: '/watchlist' },
-  { key: 'F7', label: 'CALS',   path: '/calendar' },
-  { key: 'F8', label: 'PTFL',   path: '/portfolio' },
-  { key: 'F9', label: 'ALRT',   path: '/alerts' },
+  { key: 'F4', label: 'SECR',   path: '/security/SPY' },
 ]
 
 const INDEX_TICKERS = ['SPY', 'QQQ', 'IWM', '^VIX']
@@ -72,6 +68,15 @@ export default function TerminalShell({ children }: Props) {
   const navigate = useNavigate()
   const [aiOpen, setAiOpen] = useState(false)
   const [cmdOpen, setCmdOpen] = useState(false)
+  const [aiPrefill, setAiPrefill] = useState<string | undefined>()
+  const { context: aiCtx, _register } = useAiContext()
+
+  // Register the open+prefill handler so pages can call openAi(msg)
+  const openAiWithPrefill = useCallback((prefill?: string) => {
+    setAiPrefill(prefill)
+    setAiOpen(true)
+  }, [])
+  useEffect(() => { _register(openAiWithPrefill) }, [_register, openAiWithPrefill])
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -152,7 +157,12 @@ export default function TerminalShell({ children }: Props) {
         <div className="page-area">
           {children}
         </div>
-        <AiPanel open={aiOpen} onClose={() => setAiOpen(false)} />
+        <AiPanel
+          open={aiOpen}
+          onClose={() => { setAiOpen(false); setAiPrefill(undefined) }}
+          context={aiCtx}
+          prefill={aiPrefill}
+        />
       </div>
 
       {/* Status bar */}
@@ -188,7 +198,6 @@ function CommandPalette({ onClose }: { onClose: () => void }) {
   const items = [
     ...NAV.map((n, i) => ({ label: n.label, action: () => navigate(n.path), shortcut: `Ctrl+${i + 1}` })),
     { label: 'AI Assistant', action: () => { /* handled via parent */ onClose() }, shortcut: 'Ctrl+0' },
-    { label: 'Pipeline → Trigger refresh', action: () => { api.pipeline.trigger(); onClose() }, shortcut: '' },
   ].filter(item => !q || item.label.toLowerCase().includes(q.toLowerCase()))
 
   useEffect(() => {
@@ -232,4 +241,3 @@ function CommandPalette({ onClose }: { onClose: () => void }) {
     </div>
   )
 }
-
