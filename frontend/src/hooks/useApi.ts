@@ -14,32 +14,43 @@ export function useApi<T>(
   const [data, setData] = useState<T | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const cancelRef = useRef(false)
+  const fetcherRef = useRef(fetcher)
+  const mountedRef = useRef(true)
+  const requestIdRef = useRef(0)
+
+  useEffect(() => {
+    fetcherRef.current = fetcher
+  }, [fetcher])
 
   const fetch = useCallback(async () => {
-    cancelRef.current = false
+    const requestId = ++requestIdRef.current
     setLoading(true)
     setError(null)
     try {
-      const result = await fetcher()
-      if (!cancelRef.current) {
+      const result = await fetcherRef.current()
+      if (mountedRef.current && requestId === requestIdRef.current) {
         setData(result)
       }
     } catch (e) {
-      if (!cancelRef.current) {
+      if (mountedRef.current && requestId === requestIdRef.current) {
         setError(e instanceof Error ? e.message : String(e))
       }
     } finally {
-      if (!cancelRef.current) {
+      if (mountedRef.current && requestId === requestIdRef.current) {
         setLoading(false)
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps)
 
   useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
+
+  useEffect(() => {
     fetch()
-    return () => { cancelRef.current = true }
   }, [fetch])
 
   return { data, loading, error, refetch: fetch }

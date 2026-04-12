@@ -56,6 +56,17 @@ export default function AiPanel({ open, onClose, context = {}, prefill }: Props)
   const scrollRef  = useRef<HTMLDivElement>(null)
   const inputRef   = useRef<HTMLTextAreaElement>(null)
   const prefillSent = useRef<string | undefined>(undefined)
+  const messagesRef = useRef<AiMessage[]>([])
+  const loadingRef = useRef(false)
+  const requestIdRef = useRef(0)
+
+  useEffect(() => {
+    messagesRef.current = messages
+  }, [messages])
+
+  useEffect(() => {
+    loadingRef.current = loading
+  }, [loading])
 
   // Auto-focus when opened
   useEffect(() => {
@@ -71,9 +82,9 @@ export default function AiPanel({ open, onClose, context = {}, prefill }: Props)
   useEffect(() => {
     if (open && prefill && prefill !== prefillSent.current) {
       prefillSent.current = prefill
-      sendMessage(prefill)
+      void sendMessage(prefill)
     }
-  }, [open, prefill]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [open, prefill])
 
   // Reset prefill tracker when panel closes
   useEffect(() => {
@@ -81,9 +92,14 @@ export default function AiPanel({ open, onClose, context = {}, prefill }: Props)
   }, [open])
 
   const sendMessage = async (text: string) => {
-    if (!text.trim() || loading) return
+    const trimmed = text.trim()
+    if (!trimmed || loadingRef.current) return
+
     const userMsg: AiMessage = { role: 'user', content: text.trim() }
-    const newMessages = [...messages, userMsg]
+    const newMessages = [...messagesRef.current, userMsg]
+    const requestId = ++requestIdRef.current
+
+    messagesRef.current = newMessages
     setMessages(newMessages)
     setInput('')
     setLoading(true)
@@ -92,14 +108,18 @@ export default function AiPanel({ open, onClose, context = {}, prefill }: Props)
         messages: newMessages,
         context,
       })
-      setMessages(m => [...m, { role: 'assistant', content: res.content }])
+      if (requestId !== requestIdRef.current) return
+      setMessages([...newMessages, { role: 'assistant', content: res.content }])
     } catch (e) {
-      setMessages(m => [...m, {
+      if (requestId !== requestIdRef.current) return
+      setMessages([...newMessages, {
         role: 'assistant',
         content: `Error: ${e instanceof Error ? e.message : 'Request failed'}`,
       }])
     } finally {
-      setLoading(false)
+      if (requestId === requestIdRef.current) {
+        setLoading(false)
+      }
     }
   }
 
@@ -168,14 +188,14 @@ export default function AiPanel({ open, onClose, context = {}, prefill }: Props)
           </div>
         )}
 
-        {messages.map((m, i) => (
-          <div key={i} className={`ai-msg ${m.role}`}>
-            <div className="ai-msg-role">{m.role === 'user' ? 'YOU' : 'AI'}</div>
+        {messages.map((message, index) => (
+          <div key={`${message.role}-${index}-${message.content.slice(0, 24)}`} className={`ai-msg ${message.role}`}>
+            <div className="ai-msg-role">{message.role === 'user' ? 'YOU' : 'AI'}</div>
             <div
               className="ai-msg-content selectable"
               style={{ whiteSpace: 'pre-wrap', lineHeight: 1.5 }}
             >
-              {m.content}
+              {message.content}
             </div>
           </div>
         ))}
@@ -204,7 +224,7 @@ export default function AiPanel({ open, onClose, context = {}, prefill }: Props)
         />
         <button
           className="term-btn primary"
-          onClick={() => sendMessage(input)}
+          onClick={() => void sendMessage(input)}
           disabled={!input.trim() || loading}
           style={{ padding: '4px 8px', alignSelf: 'flex-end' }}
         >

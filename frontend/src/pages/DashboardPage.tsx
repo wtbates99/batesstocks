@@ -172,12 +172,12 @@ export default function DashboardPage() {
                   <div className="metric-card">
                     <div className="metric-label">Universe</div>
                     <div className="metric-value" style={{ fontSize: 'var(--text-sm)' }}>
-                      US core
+                      {data ? `${data.universe_size} tracked` : 'SP500 + ETFs'}
                     </div>
                   </div>
                 </div>
                 <div style={{ marginTop: 8, fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--text-muted)', lineHeight: 1.5 }}>
-                  Price history, indicators, and screen inputs are populated from live market data. Use Sync to refresh the local universe.
+                  Price history, breadth, and screener inputs are populated from the tracked S&amp;P 500 universe plus major index and sector ETFs. Use Sync to refresh the market set.
                 </div>
                 {syncInfo && (
                   <div style={{ marginTop: 8, fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--blue)' }}>

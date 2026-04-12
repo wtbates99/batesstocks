@@ -66,38 +66,28 @@ def _load_focus_frame(
         return conn.execute(sql, params).df()
 
 
-def _load_screen_frame() -> pd.DataFrame:
+def _load_screen_frame(universe: list[str] | None = None) -> pd.DataFrame:
     with duckdb_connection(read_only=True) as conn:
-        return conn.execute("""
-            WITH latest AS (
+        frame = conn.execute("""
+            WITH ranked AS (
                 SELECT
                     td.*,
-                    ROW_NUMBER() OVER (PARTITION BY td.Ticker ORDER BY td.Date DESC) AS rn,
-                    LAG(td.Ticker_RSI) OVER (PARTITION BY td.Ticker ORDER BY td.Date) AS prev_rsi,
-                    LAG(td.Ticker_MACD) OVER (PARTITION BY td.Ticker ORDER BY td.Date) AS prev_macd,
-                    LAG(td.Ticker_MACD_Signal) OVER (PARTITION BY td.Ticker ORDER BY td.Date) AS prev_macd_signal,
-                    LAG(td.Ticker_Tech_Score) OVER (PARTITION BY td.Ticker ORDER BY td.Date) AS prev_tech_score
+                    ROW_NUMBER() OVER (PARTITION BY td.Ticker ORDER BY td.Date DESC) AS rn
                 FROM ticker_data td
             )
             SELECT
-                latest.Date,
-                latest.Ticker,
+                ranked.*,
                 si.FullName,
-                si.Sector,
-                latest.Close,
-                latest.Volume,
-                latest.Ticker_RSI,
-                latest.Ticker_MACD,
-                latest.Ticker_MACD_Signal,
-                latest.Ticker_Tech_Score,
-                latest.prev_rsi,
-                latest.prev_macd,
-                latest.prev_macd_signal,
-                latest.prev_tech_score
-            FROM latest
-            LEFT JOIN stock_information si ON si.Ticker = latest.Ticker
-            WHERE latest.rn = 1
+                si.Sector
+            FROM ranked
+            LEFT JOIN stock_information si ON si.Ticker = ranked.Ticker
+            WHERE ranked.rn <= 2
+            ORDER BY ranked.Ticker, ranked.Date
         """).df()
+    if universe:
+        allowed = {ticker.upper() for ticker in universe}
+        frame = frame[frame["Ticker"].isin(allowed)].copy()
+    return frame
 
 
 def _resolve_threshold(
@@ -137,17 +127,62 @@ def _evaluate_leg(
 def _evaluate_strategy_matches(
     frame: pd.DataFrame, strategy: StrategyDefinition
 ) -> list[StrategyMatch]:
-    threshold = _resolve_threshold(
-        frame,
-        strategy.entry.compare_to_metric,
-        strategy.entry.threshold,
-    )
-    matches = _evaluate_leg(frame, strategy.entry.metric, strategy.entry.condition, threshold)
-    matched = frame.loc[matches].copy()
-    if matched.empty:
+    if frame.empty:
         return []
 
-    matched = matched.sort_values(["Ticker_Tech_Score", "Volume"], ascending=[False, False])
+    ordered = frame.sort_values(["Ticker", "Date"]).copy()
+    candidates: list[dict[str, object]] = []
+
+    for ticker, ticker_frame in ordered.groupby("Ticker", sort=False):
+        if ticker_frame.empty:
+            continue
+
+        entry_threshold = _resolve_threshold(
+            ticker_frame,
+            strategy.entry.compare_to_metric,
+            strategy.entry.threshold,
+        )
+        entry_signal = _evaluate_leg(
+            ticker_frame, strategy.entry.metric, strategy.entry.condition, entry_threshold
+        ).fillna(False)
+        if not bool(entry_signal.iloc[-1]):
+            continue
+
+        signal_state = "entry"
+        exit_threshold = _resolve_threshold(
+            ticker_frame,
+            strategy.exit.compare_to_metric,
+            strategy.exit.threshold,
+        )
+        exit_signal = _evaluate_leg(
+            ticker_frame, strategy.exit.metric, strategy.exit.condition, exit_threshold
+        ).fillna(False)
+        if bool(exit_signal.iloc[-1]):
+            signal_state = "entry / exit overlap"
+
+        latest_row = ticker_frame.iloc[-1]
+        candidates.append(
+            {
+                "Ticker": ticker,
+                "FullName": latest_row.get("FullName"),
+                "Sector": latest_row.get("Sector"),
+                "Close": latest_row.get("Close"),
+                "Ticker_RSI": latest_row.get("Ticker_RSI"),
+                "Ticker_Tech_Score": latest_row.get("Ticker_Tech_Score"),
+                "Ticker_Return_20D": latest_row.get("Ticker_Return_20D"),
+                "Volume": latest_row.get("Volume"),
+                "signal_state": signal_state,
+            }
+        )
+
+    if not candidates:
+        return []
+
+    matched = pd.DataFrame(candidates).sort_values(
+        ["Ticker_Return_20D", "Ticker_Tech_Score", "Volume"],
+        ascending=[False, False, False],
+        na_position="last",
+    )
     result: list[StrategyMatch] = []
     for _, row in matched.iterrows():
         result.append(
@@ -158,7 +193,7 @@ def _evaluate_strategy_matches(
                 last_price=_to_float(row.get("Close")),
                 rsi=_to_float(row.get("Ticker_RSI")),
                 tech_score=_to_float(row.get("Ticker_Tech_Score")),
-                signal_state="entry",
+                signal_state=str(row.get("signal_state") or "entry"),
             )
         )
     return result
@@ -179,9 +214,15 @@ def _load_security_bars(ticker: str, limit: int = 180) -> pd.DataFrame:
                     Close,
                     Volume,
                     Ticker_SMA_10,
-                    Ticker_EMA_10,
                     Ticker_SMA_30,
-                    Ticker_EMA_30,
+                    Ticker_SMA_50,
+                    Ticker_SMA_100,
+                    Ticker_SMA_200,
+                    Ticker_SMA_250,
+                    Ticker_EMA_10,
+                    Ticker_EMA_50,
+                    Ticker_EMA_100,
+                    Ticker_EMA_200,
                     Ticker_RSI,
                     Ticker_MACD,
                     Ticker_MACD_Signal,
@@ -213,6 +254,8 @@ def get_security_overview(ticker: str, limit: int = 180) -> SecurityOverview:
                     td.Volume,
                     td.Ticker_SMA_10,
                     td.Ticker_SMA_30,
+                    td.Ticker_SMA_200,
+                    td.Ticker_SMA_250,
                     td.Ticker_EMA_10,
                     td.Ticker_RSI,
                     td.Ticker_MACD,
@@ -237,6 +280,8 @@ def get_security_overview(ticker: str, limit: int = 180) -> SecurityOverview:
                 r.Ticker_MACD_Signal,
                 r.Ticker_SMA_10,
                 r.Ticker_SMA_30,
+                r.Ticker_SMA_200,
+                r.Ticker_SMA_250,
                 CASE WHEN r.prev_close IS NULL OR r.prev_close = 0 THEN NULL
                      ELSE ((r.Close / r.prev_close) - 1) * 100
                 END AS change_pct
@@ -260,7 +305,6 @@ def get_security_overview(ticker: str, limit: int = 180) -> SecurityOverview:
                     td.Close,
                     td.Volume,
                     td.Ticker_Tech_Score,
-                    td.Ticker_RSI,
                     ((td.Close / NULLIF(LAG(td.Close) OVER (PARTITION BY td.Ticker ORDER BY td.Date), 0)) - 1) * 100 AS change_pct,
                     ROW_NUMBER() OVER (PARTITION BY td.Ticker ORDER BY td.Date DESC) AS rn
                 FROM ticker_data td
@@ -293,6 +337,8 @@ def get_security_overview(ticker: str, limit: int = 180) -> SecurityOverview:
         macd_signal,
         sma_10,
         sma_30,
+        sma_200,
+        sma_250,
         change_pct,
     ) = snapshot
     bars_frame = _load_security_bars(symbol, limit=limit)
@@ -306,7 +352,14 @@ def get_security_overview(ticker: str, limit: int = 180) -> SecurityOverview:
             volume=float(row["Volume"] or 0),
             sma_10=_to_float(row.get("Ticker_SMA_10")),
             sma_30=_to_float(row.get("Ticker_SMA_30")),
+            sma_50=_to_float(row.get("Ticker_SMA_50")),
+            sma_100=_to_float(row.get("Ticker_SMA_100")),
+            sma_200=_to_float(row.get("Ticker_SMA_200")),
+            sma_250=_to_float(row.get("Ticker_SMA_250")),
             ema_10=_to_float(row.get("Ticker_EMA_10")),
+            ema_50=_to_float(row.get("Ticker_EMA_50")),
+            ema_100=_to_float(row.get("Ticker_EMA_100")),
+            ema_200=_to_float(row.get("Ticker_EMA_200")),
             tech_score=_to_float(row.get("Ticker_Tech_Score")),
             rsi=_to_float(row.get("Ticker_RSI")),
             macd=_to_float(row.get("Ticker_MACD")),
@@ -332,6 +385,12 @@ def get_security_overview(ticker: str, limit: int = 180) -> SecurityOverview:
         ),
         above_sma_30=bool(
             close is not None and sma_30 is not None and float(close) > float(sma_30)
+        ),
+        above_sma_200=bool(
+            close is not None and sma_200 is not None and float(close) > float(sma_200)
+        ),
+        above_sma_250=bool(
+            close is not None and sma_250 is not None and float(close) > float(sma_250)
         ),
     )
     signals = [
@@ -364,11 +423,11 @@ def get_security_overview(ticker: str, limit: int = 180) -> SecurityOverview:
         ),
         SecuritySignal(
             label="Trend",
-            value="Above 10 / 30 DMA"
-            if snapshot_model.above_sma_10 and snapshot_model.above_sma_30
-            else "Below trend filters",
+            value="Above 200 / 250 DMA"
+            if snapshot_model.above_sma_200 and snapshot_model.above_sma_250
+            else "Below long-term trend",
             tone="positive"
-            if snapshot_model.above_sma_10 and snapshot_model.above_sma_30
+            if snapshot_model.above_sma_200 and snapshot_model.above_sma_250
             else "warning",
         ),
     ]
@@ -382,126 +441,78 @@ def get_security_overview(ticker: str, limit: int = 180) -> SecurityOverview:
 
 
 def get_terminal_overview(focus_ticker: str) -> TerminalOverview:
-    with duckdb_connection(read_only=True) as conn:
-        stats_row = conn.execute("""
-            WITH latest AS (
-                SELECT *,
-                    ROW_NUMBER() OVER (PARTITION BY Ticker ORDER BY Date DESC) AS rn
-                FROM ticker_data
-            ),
-            prior AS (
-                SELECT *,
-                    ROW_NUMBER() OVER (PARTITION BY Ticker ORDER BY Date DESC) AS rn
-                FROM ticker_data
-            )
-            SELECT
-                COUNT(*) FILTER (WHERE l.Close > p.Close) AS advancers,
-                COUNT(*) FILTER (WHERE l.Close < p.Close) AS decliners,
-                AVG(l.Ticker_RSI) AS avg_rsi,
-                AVG(l.Ticker_Tech_Score) AS avg_score
-            FROM latest l
-            JOIN prior p ON p.Ticker = l.Ticker AND p.rn = 2
-            WHERE l.rn = 1
-        """).fetchone()
+    market_frame = _load_screen_frame()
+    if market_frame.empty:
+        raise ValueError("No market data available for terminal overview")
 
-        leaders = conn.execute("""
-            WITH ranked AS (
-                SELECT
-                    td.Ticker,
-                    si.FullName,
-                    td.Close,
-                    td.Volume,
-                    td.Ticker_RSI,
-                    td.Ticker_Tech_Score,
-                    ((td.Close / NULLIF(LAG(td.Close) OVER (PARTITION BY td.Ticker ORDER BY td.Date), 0)) - 1) * 100 AS change_pct,
-                    ROW_NUMBER() OVER (PARTITION BY td.Ticker ORDER BY td.Date DESC) AS rn
-                FROM ticker_data td
-                LEFT JOIN stock_information si ON si.Ticker = td.Ticker
-            )
-            SELECT *
-            FROM ranked
-            WHERE rn = 1
-            ORDER BY Ticker_Tech_Score DESC NULLS LAST, change_pct DESC NULLS LAST
-            LIMIT 8
-        """).df()
+    market_frame = market_frame.sort_values(["Ticker", "Date"]).copy()
+    market_frame["change_pct"] = market_frame.groupby("Ticker")["Close"].pct_change() * 100
+    latest = market_frame.groupby("Ticker", group_keys=False).tail(1).copy()
+    universe_size = len(latest)
 
-        reversals = conn.execute("""
-            WITH ranked AS (
-                SELECT
-                    td.Ticker,
-                    si.FullName,
-                    td.Close,
-                    td.Volume,
-                    td.Ticker_RSI,
-                    td.Ticker_Tech_Score,
-                    ((td.Close / NULLIF(LAG(td.Close) OVER (PARTITION BY td.Ticker ORDER BY td.Date), 0)) - 1) * 100 AS change_pct,
-                    ROW_NUMBER() OVER (PARTITION BY td.Ticker ORDER BY td.Date DESC) AS rn
-                FROM ticker_data td
-                LEFT JOIN stock_information si ON si.Ticker = td.Ticker
-            )
-            SELECT *
-            FROM ranked
-            WHERE rn = 1 AND Ticker_RSI BETWEEN 25 AND 45
-            ORDER BY change_pct DESC NULLS LAST, Volume DESC NULLS LAST
-            LIMIT 8
-        """).df()
+    advancers = int((latest["change_pct"] > 0).sum())
+    decliners = int((latest["change_pct"] < 0).sum())
+    avg_rsi = latest["Ticker_RSI"].dropna().mean()
+    pct_above_200 = (
+        ((latest["Close"] > latest["Ticker_SMA_200"]).fillna(False).mean()) * 100
+        if not latest.empty
+        else 0.0
+    )
+    pct_above_250 = (
+        ((latest["Close"] > latest["Ticker_SMA_250"]).fillna(False).mean()) * 100
+        if not latest.empty
+        else 0.0
+    )
 
-        breakouts = conn.execute("""
-            WITH ranked AS (
-                SELECT
-                    td.Ticker,
-                    si.FullName,
-                    td.Close,
-                    td.Volume,
-                    td.Ticker_RSI,
-                    td.Ticker_Tech_Score,
-                    ((td.Close / NULLIF(LAG(td.Close) OVER (PARTITION BY td.Ticker ORDER BY td.Date), 0)) - 1) * 100 AS change_pct,
-                    ROW_NUMBER() OVER (PARTITION BY td.Ticker ORDER BY td.Date DESC) AS rn
-                FROM ticker_data td
-                LEFT JOIN stock_information si ON si.Ticker = td.Ticker
-            )
-            SELECT *
-            FROM ranked
-            WHERE rn = 1 AND Ticker_RSI >= 60 AND Ticker_Tech_Score >= 65
-            ORDER BY change_pct DESC NULLS LAST, Ticker_Tech_Score DESC NULLS LAST
-            LIMIT 8
-        """).df()
+    leaders = latest.sort_values(
+        ["Ticker_Return_20D", "Ticker_Tech_Score", "Volume"],
+        ascending=[False, False, False],
+        na_position="last",
+    ).head(8)
+    reversals = latest[
+        (latest["Ticker_RSI"].between(25, 45, inclusive="both"))
+        & (latest["Close"] > latest["Ticker_SMA_200"])
+    ].sort_values(
+        ["change_pct", "Volume"],
+        ascending=[False, False],
+        na_position="last",
+    ).head(8)
+    breakouts = latest[
+        (latest["Close"] >= latest["Ticker_SMA_250"])
+        & (latest["Ticker_52W_Range_Pct"] >= 85)
+    ].sort_values(
+        ["Ticker_52W_Range_Pct", "Ticker_Return_20D", "Ticker_Tech_Score"],
+        ascending=[False, False, False],
+        na_position="last",
+    ).head(8)
 
-        focus = conn.execute(
-            """
-            WITH ranked AS (
-                SELECT
-                    td.Date,
-                    td.Ticker,
-                    td.Close,
-                    td.Ticker_RSI,
-                    td.Ticker_MACD,
-                    td.Ticker_MACD_Signal,
-                    td.Ticker_Tech_Score,
-                    LAG(td.Close) OVER (PARTITION BY td.Ticker ORDER BY td.Date) AS prev_close,
-                    ROW_NUMBER() OVER (PARTITION BY td.Ticker ORDER BY td.Date DESC) AS rn
-                FROM ticker_data td
-                WHERE td.Ticker = ?
-            )
-            SELECT *
-            FROM ranked
-            WHERE rn = 1
-        """,
-            [focus_ticker.upper()],
-        ).fetchone()
+    sector_lead = (
+        latest.dropna(subset=["Sector"])
+        .groupby("Sector", as_index=False)
+        .agg(
+            avg_return_20d=("Ticker_Return_20D", "mean"),
+            constituents=("Ticker", "count"),
+        )
+        .sort_values("avg_return_20d", ascending=False, na_position="last")
+    )
+    strongest_sector = None if sector_lead.empty else sector_lead.iloc[0]
 
-    advancers, decliners, avg_rsi, avg_score = stats_row or (0, 0, None, None)
+    focus_frame = _load_focus_frame(focus_ticker)
     focus_change = None
     focus_price = None
     focus_score = None
     focus_rsi = None
-    if focus:
-        _, _, close, rsi, macd, macd_signal, tech_score, prev_close, _ = focus
-        focus_price = _to_float(close)
-        focus_rsi = _to_float(rsi)
-        focus_score = _to_float(tech_score)
-        if prev_close not in (None, 0):
-            focus_change = ((float(close) / float(prev_close)) - 1) * 100
+    if not focus_frame.empty:
+        focus = focus_frame.iloc[-1]
+        focus_price = _to_float(focus["Close"])
+        focus_rsi = _to_float(focus.get("Ticker_RSI"))
+        focus_score = _to_float(focus.get("Ticker_Tech_Score"))
+        if len(focus_frame) > 1:
+            prev_close = focus_frame.iloc[-2]["Close"]
+            if prev_close not in (None, 0):
+                focus_change = ((float(focus["Close"]) / float(prev_close)) - 1) * 100
+        macd = focus.get("Ticker_MACD")
+        macd_signal = focus.get("Ticker_MACD_Signal")
         macd_bias = (
             "Bullish MACD"
             if _to_float(macd) and _to_float(macd_signal) and float(macd) > float(macd_signal)
@@ -511,8 +522,13 @@ def get_terminal_overview(focus_ticker: str) -> TerminalOverview:
         macd_bias = "No focus signal"
 
     stats = [
-        TerminalStat(label="Advancers", value=str(int(advancers or 0)), tone="positive"),
-        TerminalStat(label="Decliners", value=str(int(decliners or 0)), tone="negative"),
+        TerminalStat(label="Advancers", value=str(advancers), tone="positive"),
+        TerminalStat(label="Decliners", value=str(decliners), tone="negative"),
+        TerminalStat(
+            label="Above 200D",
+            value=f"{pct_above_200:.0f}%",
+            tone="positive" if pct_above_200 >= 50 else "warning",
+        ),
         TerminalStat(
             label=f"{focus_ticker.upper()} PX",
             value="—" if focus_price is None else f"{focus_price:,.2f}",
@@ -525,46 +541,77 @@ def get_terminal_overview(focus_ticker: str) -> TerminalOverview:
             tone="neutral",
         ),
         TerminalStat(
-            label=f"{focus_ticker.upper()} Score",
-            value="—" if focus_score is None else f"{focus_score:.0f}",
-            change=None if focus_rsi is None else f"RSI {focus_rsi:.1f}",
-            tone="positive" if (focus_score or 0) >= 65 else "warning",
-        ),
-        TerminalStat(
-            label="Composite",
-            value="—" if avg_score is None else f"{float(avg_score):.0f}",
+            label="Above 250D",
+            value=f"{pct_above_250:.0f}%",
             change=macd_bias,
-            tone="positive" if (avg_score or 0) >= 60 else "neutral",
+            tone="positive" if pct_above_250 >= 50 else "warning",
         ),
     ]
+    if strongest_sector is not None:
+        stats.append(
+            TerminalStat(
+                label="Lead Sector",
+                value=str(strongest_sector["Sector"])[:12],
+                change=f"{float(strongest_sector['avg_return_20d'] or 0):+.1f}% / 20D",
+                tone="positive",
+            )
+        )
+    else:
+        stats.append(
+            TerminalStat(
+                label=f"{focus_ticker.upper()} Score",
+                value="—" if focus_score is None else f"{focus_score:.0f}",
+                change=None if focus_rsi is None else f"RSI {focus_rsi:.1f}",
+                tone="positive" if (focus_score or 0) >= 65 else "warning",
+            )
+        )
 
     def _movers(frame: pd.DataFrame) -> list[TerminalMover]:
         return [_row_to_mover(row) for _, row in frame.iterrows()]
 
+    lead_ticker = leaders.iloc[0] if not leaders.empty else None
+    breakout_ticker = breakouts.iloc[0] if not breakouts.empty else None
     headlines = [
         TerminalHeadline(
-            ticker=focus_ticker.upper(),
-            headline=f"{focus_ticker.upper()} remains the active focus instrument",
-            detail="Security monitor, chart history, and signal panels are keyed off the live terminal universe.",
+            ticker="BREADTH",
+            headline=f"{advancers} advancers versus {decliners} decliners across the tracked market",
+            detail=f"{pct_above_200:.0f}% of the universe is above the 200-day average and {pct_above_250:.0f}% is above the 250-day average.",
+            tone="positive" if advancers >= decliners else "negative",
+        ),
+        TerminalHeadline(
+            ticker=str(strongest_sector["Sector"])[:12].upper() if strongest_sector is not None else "SECTOR",
+            headline=(
+                f"{strongest_sector['Sector']} is leading on intermediate-term momentum"
+                if strongest_sector is not None
+                else "Sector leadership will appear once enough market data is loaded"
+            ),
+            detail=(
+                f"Average 20-day return is {float(strongest_sector['avg_return_20d'] or 0):+.2f}% across {int(strongest_sector['constituents'])} names."
+                if strongest_sector is not None
+                else "Sync the full market universe to unlock sector-relative trend analysis."
+            ),
             tone="positive",
         ),
         TerminalHeadline(
-            ticker="SCREEN",
-            headline="Strategy screening is now directly coupled to the backtest engine",
-            detail="Same strategy definition powers both historical simulation and live candidate selection.",
-            tone="warning",
-        ),
-        TerminalHeadline(
-            ticker="BREADTH",
-            headline="Market breadth is computed from the current local universe snapshot",
-            detail=f"{int(advancers or 0)} advancers versus {int(decliners or 0)} decliners on the latest bar.",
-            tone="positive" if (advancers or 0) >= (decliners or 0) else "negative",
+            ticker=(str(lead_ticker["Ticker"]) if lead_ticker is not None else focus_ticker.upper()),
+            headline=(
+                f"{lead_ticker['Ticker']} is the strongest current leader by 20-day trend"
+                if lead_ticker is not None
+                else f"{focus_ticker.upper()} remains the active focus instrument"
+            ),
+            detail=(
+                f"{float(lead_ticker['Ticker_Return_20D'] or 0):+.2f}% over 20 sessions with a technical score of {float(lead_ticker['Ticker_Tech_Score'] or 0):.0f}. {breakout_ticker['Ticker']} is nearest its 52-week high."
+                if lead_ticker is not None and breakout_ticker is not None
+                else "Leaders and breakout candidates are derived from the tracked market, not a hand-picked watchlist."
+            ),
+            tone="positive",
         ),
     ]
 
     return TerminalOverview(
         generated_at=_utc_now(),
         focus_ticker=focus_ticker.upper(),
+        universe_size=universe_size,
         stats=stats,
         momentum_leaders=_movers(leaders),
         reversal_candidates=_movers(reversals),
@@ -703,7 +750,10 @@ def run_strategy_backtest(request: StrategyBacktestRequest) -> StrategyBacktestR
         sharpe_ratio=None if sharpe is None else round(sharpe, 2),
     )
 
-    screen_matches = _evaluate_strategy_matches(_load_screen_frame(), request.strategy)
+    screen_matches = _evaluate_strategy_matches(
+        _load_screen_frame(request.strategy.universe),
+        request.strategy,
+    )
     return StrategyBacktestResponse(
         ticker=request.ticker.upper(),
         strategy_name=request.strategy.name,
@@ -715,5 +765,4 @@ def run_strategy_backtest(request: StrategyBacktestRequest) -> StrategyBacktestR
 
 
 def screen_strategy(strategy: StrategyDefinition):
-    matches = _evaluate_strategy_matches(_load_screen_frame(), strategy)
-    return matches
+    return _evaluate_strategy_matches(_load_screen_frame(strategy.universe), strategy)

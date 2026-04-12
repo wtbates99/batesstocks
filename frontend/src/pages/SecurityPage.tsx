@@ -31,6 +31,11 @@ function signalToneColor(tone: string) {
   return 'var(--text-primary)'
 }
 
+function priceToneClass(value: number | null | undefined) {
+  if (value == null) return 'flat'
+  return value >= 0 ? 'up' : 'down'
+}
+
 export default function SecurityPage() {
   const navigate = useNavigate()
   const params = useParams<{ ticker: string }>()
@@ -142,7 +147,7 @@ export default function SecurityPage() {
             <div className="metric-card">
               <div className="metric-label">Last</div>
               <div className="metric-value">{fmt(data.snapshot.close)}</div>
-              <div className={data.snapshot.change_pct != null && data.snapshot.change_pct >= 0 ? 'up' : 'down'}>
+              <div className={priceToneClass(data.snapshot.change_pct)}>
                 {fmtPct(data.snapshot.change_pct)}
               </div>
             </div>
@@ -165,7 +170,7 @@ export default function SecurityPage() {
             <div className="metric-card">
               <div className="metric-label">Trend</div>
               <div className="metric-value" style={{ fontSize: 'var(--text-sm)' }}>
-                {data.snapshot.above_sma_10 && data.snapshot.above_sma_30 ? '10/30 Up' : 'Mixed'}
+                {data.snapshot.above_sma_200 && data.snapshot.above_sma_250 ? '200/250 Up' : 'Mixed'}
               </div>
             </div>
           </div>
@@ -208,7 +213,7 @@ export default function SecurityPage() {
                       <td className="col-ticker">{row.ticker}</td>
                       <td className="col-name">{row.name ?? '—'}</td>
                       <td style={{ textAlign: 'right' }}>{fmt(row.last_price)}</td>
-                      <td style={{ textAlign: 'right' }} className={row.change_pct != null && row.change_pct >= 0 ? 'up' : 'down'}>
+                      <td style={{ textAlign: 'right' }} className={priceToneClass(row.change_pct)}>
                         {fmtPct(row.change_pct)}
                       </td>
                     </tr>

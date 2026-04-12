@@ -103,6 +103,26 @@ def ensure_schema() -> None:
                     Ticker_Tech_Score DOUBLE
                 )
             """)
+            for column_name in (
+                "Ticker_SMA_50",
+                "Ticker_SMA_100",
+                "Ticker_SMA_200",
+                "Ticker_SMA_250",
+                "Ticker_EMA_50",
+                "Ticker_EMA_100",
+                "Ticker_EMA_200",
+                "Ticker_Return_20D",
+                "Ticker_Return_63D",
+                "Ticker_Return_126D",
+                "Ticker_Return_252D",
+                "Ticker_52W_High",
+                "Ticker_52W_Low",
+                "Ticker_52W_Range_Pct",
+                "Ticker_Avg_Volume_20D",
+            ):
+                conn.execute(
+                    f"ALTER TABLE ticker_data ADD COLUMN IF NOT EXISTS {column_name} DOUBLE"
+                )
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_ticker_data_ticker_date ON ticker_data (Ticker, Date)"
             )

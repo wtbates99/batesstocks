@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, useId } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Search } from 'lucide-react'
 import { api } from '../api/client'
@@ -18,6 +18,8 @@ export default function SearchBar({ placeholder = 'Search ticker or company…',
   const navigate = useNavigate()
   const inputRef = useRef<HTMLInputElement>(null)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const requestIdRef = useRef(0)
+  const resultsId = useId()
 
   useEffect(() => {
     if (autoFocus) inputRef.current?.focus()
@@ -26,16 +28,29 @@ export default function SearchBar({ placeholder = 'Search ticker or company…',
   const search = useCallback((q: string) => {
     if (debounceRef.current) clearTimeout(debounceRef.current)
     if (!q.trim()) { setResults([]); setOpen(false); return }
+    const requestId = ++requestIdRef.current
     debounceRef.current = setTimeout(async () => {
       try {
         const res = await api.search(q.trim(), 10)
+        if (requestId !== requestIdRef.current) return
         setResults(res)
         setOpen(res.length > 0)
         setActive(0)
       } catch {
+        if (requestId !== requestIdRef.current) return
         setResults([])
+        setOpen(false)
       }
     }, 150)
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current)
+      }
+      requestIdRef.current += 1
+    }
   }, [])
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -73,6 +88,7 @@ export default function SearchBar({ placeholder = 'Search ticker or company…',
       <input
         ref={inputRef}
         className="search-input"
+        type="search"
         value={query}
         onChange={handleChange}
         onKeyDown={handleKeyDown}
@@ -80,16 +96,24 @@ export default function SearchBar({ placeholder = 'Search ticker or company…',
         onFocus={() => results.length > 0 && setOpen(true)}
         placeholder={placeholder}
         autoComplete="off"
+        aria-label="Search securities"
+        aria-expanded={open}
+        aria-controls={resultsId}
+        aria-activedescendant={open ? `${resultsId}-option-${active}` : undefined}
+        role="combobox"
         spellCheck={false}
       />
       {open && (
-        <div className="search-dropdown">
+        <div id={resultsId} className="search-dropdown" role="listbox">
           {results.map((r, i) => (
             <div
               key={r.ticker}
+              id={`${resultsId}-option-${i}`}
               className={`search-item${i === active ? ' active' : ''}`}
               onMouseDown={() => handleSelect(r.ticker)}
               onMouseEnter={() => setActive(i)}
+              role="option"
+              aria-selected={i === active}
             >
               <span className="search-item-ticker">{r.ticker}</span>
               <span className="search-item-name">{r.name}</span>

@@ -10,24 +10,11 @@ import yfinance as yf
 
 from backend.core.duckdb import duckdb_connection
 from backend.models import SyncResponse
-
-DEFAULT_UNIVERSE = [
-    "SPY",
-    "QQQ",
-    "IWM",
-    "AAPL",
-    "MSFT",
-    "NVDA",
-    "AMZN",
-    "META",
-    "GOOGL",
-    "TSLA",
-    "JPM",
-    "XOM",
-]
+from backend.services.market_universe import normalize_universe
 
 LOOKBACK_BUFFER_DAYS = 60
 YFINANCE_CACHE_DIR = Path("/tmp/yfinance-cache")
+DEFAULT_UNIVERSE_MIN_SIZE = 400
 
 if hasattr(yf, "set_tz_cache_location"):
     YFINANCE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -39,14 +26,19 @@ def _utc_now() -> datetime:
 
 
 def _normalize_tickers(tickers: list[str] | None) -> list[str]:
-    values = tickers or DEFAULT_UNIVERSE
-    return sorted({ticker.strip().upper() for ticker in values if ticker.strip()})
+    return normalize_universe(tickers)
 
 
 def has_market_data() -> bool:
     with duckdb_connection(read_only=True) as conn:
         row = conn.execute("SELECT COUNT(*) FROM ticker_data").fetchone()
     return bool(row and row[0] > 0)
+
+
+def get_tracked_ticker_count() -> int:
+    with duckdb_connection(read_only=True) as conn:
+        row = conn.execute("SELECT COUNT(DISTINCT Ticker) FROM ticker_data").fetchone()
+    return int(row[0]) if row and row[0] is not None else 0
 
 
 def get_missing_tickers(tickers: list[str] | None = None) -> list[str]:
@@ -73,6 +65,12 @@ def ensure_market_data(tickers: list[str] | None = None, years: int = 5) -> Sync
     if not missing:
         return None
     return sync_market_data(missing, years=years)
+
+
+def ensure_default_universe_data(years: int = 5) -> SyncResponse | None:
+    if get_tracked_ticker_count() >= DEFAULT_UNIVERSE_MIN_SIZE:
+        return None
+    return ensure_market_data(None, years=years)
 
 
 def _download_ohlcv(tickers: list[str], years: int) -> pd.DataFrame:
@@ -140,6 +138,10 @@ def _compute_indicator_frame(frame: pd.DataFrame) -> pd.DataFrame:
         rsi = 100 - (100 / (1 + rs))
 
         ema_10 = close.ewm(span=10, adjust=False).mean()
+        ema_30 = close.ewm(span=30, adjust=False).mean()
+        ema_50 = close.ewm(span=50, adjust=False).mean()
+        ema_100 = close.ewm(span=100, adjust=False).mean()
+        ema_200 = close.ewm(span=200, adjust=False).mean()
         ema_12 = close.ewm(span=12, adjust=False).mean()
         ema_26 = close.ewm(span=26, adjust=False).mean()
         macd = ema_12 - ema_26
@@ -148,6 +150,10 @@ def _compute_indicator_frame(frame: pd.DataFrame) -> pd.DataFrame:
 
         sma_10 = close.rolling(window=10, min_periods=10).mean()
         sma_30 = close.rolling(window=30, min_periods=30).mean()
+        sma_50 = close.rolling(window=50, min_periods=50).mean()
+        sma_100 = close.rolling(window=100, min_periods=100).mean()
+        sma_200 = close.rolling(window=200, min_periods=200).mean()
+        sma_250 = close.rolling(window=250, min_periods=250).mean()
         bb_mid = close.rolling(window=20, min_periods=20).mean()
         bb_std = close.rolling(window=20, min_periods=20).std()
         bb_high = bb_mid + (bb_std * 2)
@@ -168,18 +174,37 @@ def _compute_indicator_frame(frame: pd.DataFrame) -> pd.DataFrame:
             min_periods=1,
         ).sum().replace(0, np.nan)
 
+        avg_volume_20 = volume.rolling(window=20, min_periods=20).mean()
+        return_20d = close.pct_change(periods=20) * 100
+        return_63d = close.pct_change(periods=63) * 100
+        return_126d = close.pct_change(periods=126) * 100
+        return_252d = close.pct_change(periods=252) * 100
+        high_52w = high.rolling(window=252, min_periods=20).max()
+        low_52w = low.rolling(window=252, min_periods=20).min()
+        range_52w = (close - low_52w) / (high_52w - low_52w)
+
         tech_score = (
             rsi.clip(0, 100).fillna(50) * 0.30
-            + ((macd > macd_signal).astype(float) * 100) * 0.25
-            + ((close > sma_10).astype(float) * 100) * 0.20
-            + bb_pband.clip(0, 1).fillna(0.5) * 100 * 0.15
-            + mfi.clip(0, 100).fillna(50) * 0.10
+            + ((macd > macd_signal).astype(float) * 100) * 0.20
+            + ((close > sma_50).astype(float) * 100) * 0.15
+            + ((close > sma_200).astype(float) * 100) * 0.15
+            + bb_pband.clip(0, 1).fillna(0.5) * 100 * 0.10
+            + mfi.clip(0, 100).fillna(50) * 0.05
+            + return_63d.clip(-25, 25).fillna(0).add(25) * 2
+            + range_52w.clip(0, 1).fillna(0.5) * 5
         )
 
         ordered["Ticker_SMA_10"] = sma_10
         ordered["Ticker_EMA_10"] = ema_10
         ordered["Ticker_SMA_30"] = sma_30
-        ordered["Ticker_EMA_30"] = close.ewm(span=30, adjust=False).mean()
+        ordered["Ticker_SMA_50"] = sma_50
+        ordered["Ticker_SMA_100"] = sma_100
+        ordered["Ticker_SMA_200"] = sma_200
+        ordered["Ticker_SMA_250"] = sma_250
+        ordered["Ticker_EMA_30"] = ema_30
+        ordered["Ticker_EMA_50"] = ema_50
+        ordered["Ticker_EMA_100"] = ema_100
+        ordered["Ticker_EMA_200"] = ema_200
         ordered["Ticker_RSI"] = rsi
         ordered["Ticker_MACD"] = macd
         ordered["Ticker_MACD_Signal"] = macd_signal
@@ -187,6 +212,14 @@ def _compute_indicator_frame(frame: pd.DataFrame) -> pd.DataFrame:
         ordered["Ticker_Bollinger_PBand"] = bb_pband
         ordered["Ticker_MFI"] = mfi
         ordered["Ticker_VWAP"] = vwap
+        ordered["Ticker_Return_20D"] = return_20d
+        ordered["Ticker_Return_63D"] = return_63d
+        ordered["Ticker_Return_126D"] = return_126d
+        ordered["Ticker_Return_252D"] = return_252d
+        ordered["Ticker_52W_High"] = high_52w
+        ordered["Ticker_52W_Low"] = low_52w
+        ordered["Ticker_52W_Range_Pct"] = range_52w * 100
+        ordered["Ticker_Avg_Volume_20D"] = avg_volume_20
         ordered["Ticker_Tech_Score"] = tech_score.round(2)
         return ordered
 
@@ -268,7 +301,14 @@ def sync_market_data(tickers: list[str] | None = None, years: int = 5) -> SyncRe
                     "Ticker_SMA_10",
                     "Ticker_EMA_10",
                     "Ticker_SMA_30",
+                    "Ticker_SMA_50",
+                    "Ticker_SMA_100",
+                    "Ticker_SMA_200",
+                    "Ticker_SMA_250",
                     "Ticker_EMA_30",
+                    "Ticker_EMA_50",
+                    "Ticker_EMA_100",
+                    "Ticker_EMA_200",
                     "Ticker_RSI",
                     "Ticker_MACD",
                     "Ticker_MACD_Signal",
@@ -276,6 +316,14 @@ def sync_market_data(tickers: list[str] | None = None, years: int = 5) -> SyncRe
                     "Ticker_Bollinger_PBand",
                     "Ticker_MFI",
                     "Ticker_VWAP",
+                    "Ticker_Return_20D",
+                    "Ticker_Return_63D",
+                    "Ticker_Return_126D",
+                    "Ticker_Return_252D",
+                    "Ticker_52W_High",
+                    "Ticker_52W_Low",
+                    "Ticker_52W_Range_Pct",
+                    "Ticker_Avg_Volume_20D",
                     "Ticker_Tech_Score",
                 ]
             ].copy()

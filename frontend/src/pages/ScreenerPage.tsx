@@ -2,37 +2,23 @@ import { useEffect, useState } from 'react'
 import { RefreshCw, ScanSearch } from 'lucide-react'
 import { api } from '../api/client'
 import { useAiContext } from '../contexts/AiContext'
-import type { StrategyDefinition, StrategyScreenResponse } from '../api/types'
+import { STRATEGY_CONDITIONS, STRATEGY_METRICS } from '../features/strategies/config'
+import type { StrategyDefinition, StrategyLeg, StrategyScreenResponse } from '../api/types'
 
-const METRICS = [
-  'Ticker_Tech_Score',
-  'Ticker_RSI',
-  'Ticker_MACD',
-  'Ticker_MACD_Diff',
-  'Ticker_MFI',
-  'Ticker_Bollinger_PBand',
-  'Close',
-]
-
-const CONDITIONS: Array<StrategyDefinition['entry']['condition']> = [
-  'above',
-  'below',
-  'crosses_above',
-  'crosses_below',
-]
+type ThresholdMode = 'value' | 'metric'
 
 function defaultStrategy(): StrategyDefinition {
   return {
-    name: 'Realtime Opportunity Scan',
+    name: 'SP500 Trend Leadership Scan',
     entry: {
-      metric: 'Ticker_Tech_Score',
+      metric: 'Close',
       condition: 'above',
-      threshold: 70,
+      compare_to_metric: 'Ticker_SMA_250',
     },
     exit: {
-      metric: 'Ticker_Tech_Score',
+      metric: 'Close',
       condition: 'below',
-      threshold: 45,
+      compare_to_metric: 'Ticker_SMA_100',
     },
     initial_capital: 100000,
     position_size_pct: 100,
@@ -41,9 +27,96 @@ function defaultStrategy(): StrategyDefinition {
   }
 }
 
+function legMode(leg: StrategyLeg): ThresholdMode {
+  return leg.compare_to_metric ? 'metric' : 'value'
+}
+
+function updateLeg(
+  strategy: StrategyDefinition,
+  legKey: 'entry' | 'exit',
+  updater: (leg: StrategyLeg) => StrategyLeg,
+) {
+  return {
+    ...strategy,
+    [legKey]: updater(strategy[legKey]),
+  }
+}
+
+function LegEditor({
+  title,
+  leg,
+  onChange,
+}: {
+  title: string
+  leg: StrategyLeg
+  onChange: (nextLeg: StrategyLeg) => void
+}) {
+  const mode = legMode(leg)
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ color: 'var(--orange)', fontSize: 'var(--text-xs)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+        {title}
+      </div>
+      <div>
+        <label style={{ display: 'block', fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginBottom: 4 }}>Metric</label>
+        <select className="term-select" value={leg.metric} onChange={(e) => onChange({ ...leg, metric: e.target.value })}>
+          {STRATEGY_METRICS.map((metric) => <option key={metric.value} value={metric.value}>{metric.label}</option>)}
+        </select>
+      </div>
+      <div>
+        <label style={{ display: 'block', fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginBottom: 4 }}>Condition</label>
+        <select className="term-select" value={leg.condition} onChange={(e) => onChange({ ...leg, condition: e.target.value as StrategyDefinition['entry']['condition'] })}>
+          {STRATEGY_CONDITIONS.map((condition) => <option key={condition} value={condition}>{condition}</option>)}
+        </select>
+      </div>
+      <div>
+        <label style={{ display: 'block', fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginBottom: 4 }}>Threshold Type</label>
+        <select
+          className="term-select"
+          value={mode}
+          onChange={(e) => {
+            const nextMode = e.target.value as ThresholdMode
+            if (nextMode === 'metric') {
+              onChange({
+                ...leg,
+                threshold: null,
+                compare_to_metric: leg.compare_to_metric ?? 'Ticker_SMA_250',
+              })
+            } else {
+              onChange({
+                ...leg,
+                compare_to_metric: null,
+                threshold: leg.threshold ?? 0,
+              })
+            }
+          }}
+        >
+          <option value="metric">Metric</option>
+          <option value="value">Numeric value</option>
+        </select>
+      </div>
+      {mode === 'metric' ? (
+        <div>
+          <label style={{ display: 'block', fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginBottom: 4 }}>Compare To Metric</label>
+          <select className="term-select" value={leg.compare_to_metric ?? 'Ticker_SMA_250'} onChange={(e) => onChange({ ...leg, compare_to_metric: e.target.value, threshold: null })}>
+            {STRATEGY_METRICS.map((metric) => <option key={metric.value} value={metric.value}>{metric.label}</option>)}
+          </select>
+        </div>
+      ) : (
+        <div>
+          <label style={{ display: 'block', fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginBottom: 4 }}>Threshold Value</label>
+          <input className="term-input" type="number" value={leg.threshold ?? ''} onChange={(e) => onChange({ ...leg, threshold: e.target.value === '' ? null : parseFloat(e.target.value), compare_to_metric: null })} />
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function ScreenerPage() {
   const { setContext } = useAiContext()
   const [strategy, setStrategy] = useState<StrategyDefinition>(defaultStrategy)
+  const [universeInput, setUniverseInput] = useState('')
   const [result, setResult] = useState<StrategyScreenResponse | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -52,7 +125,12 @@ export default function ScreenerPage() {
     setLoading(true)
     setError(null)
     try {
-      const response = await api.strategies.screen(strategy)
+      const response = await api.strategies.screen({
+        ...strategy,
+        universe: universeInput
+          ? universeInput.split(',').map((ticker) => ticker.trim().toUpperCase()).filter(Boolean)
+          : null,
+      })
       setResult(response)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -66,12 +144,14 @@ export default function ScreenerPage() {
       page: 'screener',
       strategy: strategy.name,
       entryMetric: strategy.entry.metric,
+      exitMetric: strategy.exit.metric,
+      universe: universeInput || 'SP500 + major ETFs',
       matches: result?.matches?.slice(0, 10) ?? [],
     })
-  }, [result, setContext, strategy.entry.metric, strategy.name])
+  }, [result, setContext, strategy.entry.metric, strategy.exit.metric, strategy.name, universeInput])
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '300px 1fr', gap: 8, height: '100%', minHeight: 0 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: '340px 1fr', gap: 8, height: '100%', minHeight: 0 }}>
       <div className="panel">
         <div className="panel-header">
           <span className="panel-title">Screener</span>
@@ -81,35 +161,44 @@ export default function ScreenerPage() {
             <label style={{ display: 'block', fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginBottom: 4 }}>Strategy Name</label>
             <input className="term-input" value={strategy.name} onChange={(e) => setStrategy((prev) => ({ ...prev, name: e.target.value }))} />
           </div>
+
           <div>
-            <label style={{ display: 'block', fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginBottom: 4 }}>Entry Metric</label>
-            <select className="term-select" value={strategy.entry.metric} onChange={(e) => setStrategy((prev) => ({ ...prev, entry: { ...prev.entry, metric: e.target.value } }))}>
-              {METRICS.map((metric) => <option key={metric} value={metric}>{metric}</option>)}
-            </select>
+            <label style={{ display: 'block', fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginBottom: 4 }}>Universe Override</label>
+            <input
+              className="term-input"
+              value={universeInput}
+              onChange={(e) => setUniverseInput(e.target.value)}
+              placeholder="Leave blank for S&P 500 + major index/sector ETFs"
+            />
           </div>
-          <div>
-            <label style={{ display: 'block', fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginBottom: 4 }}>Condition</label>
-            <select className="term-select" value={strategy.entry.condition} onChange={(e) => setStrategy((prev) => ({ ...prev, entry: { ...prev.entry, condition: e.target.value as StrategyDefinition['entry']['condition'] } }))}>
-              {CONDITIONS.map((condition) => <option key={condition} value={condition}>{condition}</option>)}
-            </select>
-          </div>
-          <div>
-            <label style={{ display: 'block', fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginBottom: 4 }}>Threshold</label>
-            <input className="term-input" type="number" value={strategy.entry.threshold ?? ''} onChange={(e) => setStrategy((prev) => ({ ...prev, entry: { ...prev.entry, threshold: e.target.value === '' ? null : parseFloat(e.target.value) } }))} />
-          </div>
+
+          <LegEditor
+            title="Entry"
+            leg={strategy.entry}
+            onChange={(nextLeg) => setStrategy((prev) => updateLeg(prev, 'entry', () => nextLeg))}
+          />
+
+          <div style={{ height: 1, background: 'var(--border)' }} />
+
+          <LegEditor
+            title="Exit"
+            leg={strategy.exit}
+            onChange={(nextLeg) => setStrategy((prev) => updateLeg(prev, 'exit', () => nextLeg))}
+          />
+
           <div style={{ display: 'flex', gap: 6 }}>
             <button className="term-btn primary" style={{ flex: 1, justifyContent: 'center' }} onClick={run} disabled={loading}>
               <ScanSearch size={11} />
               {loading ? 'Scanning…' : 'Run Scan'}
             </button>
-            <button className="term-btn" onClick={() => { setStrategy(defaultStrategy()); setResult(null); setError(null) }}>
+            <button className="term-btn" onClick={() => { setStrategy(defaultStrategy()); setUniverseInput(''); setResult(null); setError(null) }}>
               <RefreshCw size={11} />
               Reset
             </button>
           </div>
           {error && <div style={{ color: 'var(--red)', fontSize: 'var(--text-xs)' }}>{error}</div>}
           <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', lineHeight: 1.5 }}>
-            The screener uses the same strategy definition model as the backtest engine.
+            Default scan universe is the S&amp;P 500 plus major broad-market, sector, and macro ETFs.
           </div>
         </div>
       </div>
