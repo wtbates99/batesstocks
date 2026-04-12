@@ -8,16 +8,21 @@ import { api } from '../../api/client'
 import { useAiContext } from '../../contexts/AiContext'
 
 const NAV = [
-  { key: 'F1', label: 'DASH',   path: '/' },
-  { key: 'F2', label: 'SCRN',   path: '/screener' },
-  { key: 'F3', label: 'BKTS',   path: '/backtest' },
-  { key: 'F4', label: 'SECR',   path: '/security/SPY' },
+  { key: 'F1', label: 'DASH', path: '/', matchPath: '/' },
+  { key: 'F2', label: 'SCRN', path: '/screener', matchPath: '/screener' },
+  { key: 'F3', label: 'BKTS', path: '/backtest', matchPath: '/backtest' },
+  { key: 'F4', label: 'SECR', path: '/security/SPY', matchPath: '/security' },
 ]
 
 const INDEX_TICKERS = ['SPY', 'QQQ', 'IWM', '^VIX']
 
 interface Props {
   children: React.ReactNode
+}
+
+function isNavActive(pathname: string, matchPath: string) {
+  if (matchPath === '/') return pathname === '/'
+  return pathname === matchPath || pathname.startsWith(`${matchPath}/`)
 }
 
 function Clock() {
@@ -69,14 +74,17 @@ export default function TerminalShell({ children }: Props) {
   const [aiOpen, setAiOpen] = useState(false)
   const [cmdOpen, setCmdOpen] = useState(false)
   const [aiPrefill, setAiPrefill] = useState<string | undefined>()
-  const { context: aiCtx, _register } = useAiContext()
+  const { context: aiCtx, registerOpenHandler } = useAiContext()
 
   // Register the open+prefill handler so pages can call openAi(msg)
   const openAiWithPrefill = useCallback((prefill?: string) => {
     setAiPrefill(prefill)
     setAiOpen(true)
   }, [])
-  useEffect(() => { _register(openAiWithPrefill) }, [_register, openAiWithPrefill])
+  useEffect(() => {
+    registerOpenHandler(openAiWithPrefill)
+    return () => registerOpenHandler(null)
+  }, [openAiWithPrefill, registerOpenHandler])
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -135,21 +143,22 @@ export default function TerminalShell({ children }: Props) {
           <Link
             key={n.path}
             to={n.path}
-            className={`fn-key${location.pathname === n.path ? ' active' : ''}`}
+            className={`fn-key${isNavActive(location.pathname, n.matchPath) ? ' active' : ''}`}
           >
             <span className="fn-num">{n.key}</span>
             <span className="fn-label">{n.label}</span>
           </Link>
         ))}
         <div className="fn-spacer" />
-        <div
+        <button
+          type="button"
           className="fn-key"
           onClick={() => setAiOpen(o => !o)}
-          style={{ cursor: 'pointer' }}
+          style={{ cursor: 'pointer', background: 'transparent' }}
         >
           <span className="fn-num" style={{ color: 'var(--blue)' }}>F0</span>
           <span className="fn-label">AI</span>
-        </div>
+        </button>
       </div>
 
       {/* Content */}
@@ -184,20 +193,26 @@ export default function TerminalShell({ children }: Props) {
 
       {/* Command palette */}
       {cmdOpen && (
-        <CommandPalette onClose={() => setCmdOpen(false)} />
+        <CommandPalette
+          onClose={() => setCmdOpen(false)}
+          onOpenAi={() => {
+            setCmdOpen(false)
+            setAiOpen(true)
+          }}
+        />
       )}
     </div>
   )
 }
 
-function CommandPalette({ onClose }: { onClose: () => void }) {
+function CommandPalette({ onClose, onOpenAi }: { onClose: () => void; onOpenAi: () => void }) {
   const [q, setQ] = useState('')
   const navigate = useNavigate()
   const [active, setActive] = useState(0)
 
   const items = [
     ...NAV.map((n, i) => ({ label: n.label, action: () => navigate(n.path), shortcut: `Ctrl+${i + 1}` })),
-    { label: 'AI Assistant', action: () => { /* handled via parent */ onClose() }, shortcut: 'Ctrl+0' },
+    { label: 'AI Assistant', action: onOpenAi, shortcut: 'Ctrl+0' },
   ].filter(item => !q || item.label.toLowerCase().includes(q.toLowerCase()))
 
   useEffect(() => {

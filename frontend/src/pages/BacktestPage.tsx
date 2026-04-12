@@ -11,30 +11,10 @@ import {
 } from 'recharts'
 import { api } from '../api/client'
 import { useAiContext } from '../contexts/AiContext'
-import type { StrategyBacktestResponse, StrategyDefinition } from '../api/types'
+import { STRATEGY_CONDITIONS, STRATEGY_METRICS } from '../features/strategies/config'
+import type { StrategyBacktestResponse, StrategyDefinition, StrategyLeg } from '../api/types'
 
-const METRICS = [
-  'Close',
-  'Ticker_RSI',
-  'Ticker_MACD',
-  'Ticker_MACD_Signal',
-  'Ticker_MACD_Diff',
-  'Ticker_SMA_10',
-  'Ticker_SMA_30',
-  'Ticker_EMA_10',
-  'Ticker_EMA_30',
-  'Ticker_Tech_Score',
-  'Ticker_Bollinger_PBand',
-  'Ticker_MFI',
-  'Ticker_VWAP',
-]
-
-const CONDITIONS: Array<StrategyDefinition['entry']['condition']> = [
-  'above',
-  'below',
-  'crosses_above',
-  'crosses_below',
-]
+type ThresholdMode = 'value' | 'metric'
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -58,16 +38,16 @@ function StatCard({ label, value, tone = 'var(--text-primary)' }: { label: strin
 
 function buildDefaultStrategy(): StrategyDefinition {
   return {
-    name: 'Terminal Momentum Stack',
+    name: 'Terminal Long-Term Trend',
     entry: {
-      metric: 'Ticker_Tech_Score',
-      condition: 'crosses_above',
-      threshold: 65,
+      metric: 'Close',
+      condition: 'above',
+      compare_to_metric: 'Ticker_SMA_250',
     },
     exit: {
-      metric: 'Ticker_Tech_Score',
-      condition: 'crosses_below',
-      threshold: 45,
+      metric: 'Close',
+      condition: 'below',
+      compare_to_metric: 'Ticker_SMA_100',
     },
     initial_capital: 100000,
     position_size_pct: 100,
@@ -76,9 +56,87 @@ function buildDefaultStrategy(): StrategyDefinition {
   }
 }
 
+function legMode(leg: StrategyLeg): ThresholdMode {
+  return leg.compare_to_metric ? 'metric' : 'value'
+}
+
+function LegEditor({
+  label,
+  tone,
+  leg,
+  onChange,
+}: {
+  label: string
+  tone: string
+  leg: StrategyLeg
+  onChange: (nextLeg: StrategyLeg) => void
+}) {
+  const mode = legMode(leg)
+
+  return (
+    <>
+      <div style={{ color: tone, fontSize: 'var(--text-xs)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+        {label}
+      </div>
+      <Field label="Metric">
+        <select className="term-select" value={leg.metric} onChange={(e) => onChange({ ...leg, metric: e.target.value })}>
+          {STRATEGY_METRICS.map((metric) => <option key={metric.value} value={metric.value}>{metric.label}</option>)}
+        </select>
+      </Field>
+      <Field label="Condition">
+        <select className="term-select" value={leg.condition} onChange={(e) => onChange({ ...leg, condition: e.target.value as StrategyDefinition['entry']['condition'] })}>
+          {STRATEGY_CONDITIONS.map((condition) => <option key={condition} value={condition}>{condition}</option>)}
+        </select>
+      </Field>
+      <Field label="Threshold Type">
+        <select
+          className="term-select"
+          value={mode}
+          onChange={(e) => {
+            const nextMode = e.target.value as ThresholdMode
+            if (nextMode === 'metric') {
+              onChange({
+                ...leg,
+                threshold: null,
+                compare_to_metric: leg.compare_to_metric ?? 'Ticker_SMA_250',
+              })
+            } else {
+              onChange({
+                ...leg,
+                compare_to_metric: null,
+                threshold: leg.threshold ?? 0,
+              })
+            }
+          }}
+        >
+          <option value="metric">Metric</option>
+          <option value="value">Numeric value</option>
+        </select>
+      </Field>
+      {mode === 'metric' ? (
+        <Field label="Compare To Metric">
+          <select className="term-select" value={leg.compare_to_metric ?? 'Ticker_SMA_250'} onChange={(e) => onChange({ ...leg, compare_to_metric: e.target.value, threshold: null })}>
+            {STRATEGY_METRICS.map((metric) => <option key={metric.value} value={metric.value}>{metric.label}</option>)}
+          </select>
+        </Field>
+      ) : (
+        <Field label="Threshold Value">
+          <input
+            className="term-input"
+            type="number"
+            value={leg.threshold ?? ''}
+            onChange={(e) => onChange({ ...leg, threshold: e.target.value === '' ? null : parseFloat(e.target.value), compare_to_metric: null })}
+          />
+        </Field>
+      )}
+    </>
+  )
+}
+
 export default function BacktestPage() {
   const { setContext } = useAiContext()
   const [ticker, setTicker] = useState('SPY')
+  const [universeInput, setUniverseInput] = useState('')
   const [strategy, setStrategy] = useState<StrategyDefinition>(buildDefaultStrategy)
   const [result, setResult] = useState<StrategyBacktestResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -91,7 +149,12 @@ export default function BacktestPage() {
     try {
       const response = await api.strategies.backtest({
         ticker: ticker.toUpperCase(),
-        strategy,
+        strategy: {
+          ...strategy,
+          universe: universeInput
+            ? universeInput.split(',').map((value) => value.trim().toUpperCase()).filter(Boolean)
+            : null,
+        },
       })
       setResult(response)
     } catch (err) {
@@ -105,7 +168,12 @@ export default function BacktestPage() {
     setScreening(true)
     setError(null)
     try {
-      const response = await api.strategies.screen(strategy)
+      const response = await api.strategies.screen({
+        ...strategy,
+        universe: universeInput
+          ? universeInput.split(',').map((value) => value.trim().toUpperCase()).filter(Boolean)
+          : null,
+      })
       setResult((current) => current ? { ...current, current_matches: response.matches } : null)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -128,13 +196,14 @@ export default function BacktestPage() {
       page: 'backtest',
       ticker,
       strategy: strategy.name,
+      universe: universeInput || 'SP500 + major ETFs',
       summary: result?.summary ?? null,
       currentMatches: result?.current_matches?.slice(0, 10) ?? [],
     })
-  }, [result, setContext, strategy.name, ticker])
+  }, [result, setContext, strategy.name, ticker, universeInput])
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '320px 1fr', gap: 8, height: '100%', minHeight: 0 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: '340px 1fr', gap: 8, height: '100%', minHeight: 0 }}>
       <div className="panel">
         <div className="panel-header">
           <span className="panel-title">Strategy Builder</span>
@@ -150,52 +219,30 @@ export default function BacktestPage() {
               onChange={(e) => setStrategy((prev) => ({ ...prev, name: e.target.value }))}
             />
           </Field>
+          <Field label="Universe Override">
+            <input
+              className="term-input"
+              value={universeInput}
+              onChange={(e) => setUniverseInput(e.target.value)}
+              placeholder="Leave blank for S&P 500 + major index/sector ETFs"
+            />
+          </Field>
 
           <div style={{ height: 1, background: 'var(--border)' }} />
 
-          <div style={{ color: 'var(--green)', fontSize: 'var(--text-xs)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-            Entry Leg
-          </div>
-          <Field label="Metric">
-            <select className="term-select" value={strategy.entry.metric} onChange={(e) => setStrategy((prev) => ({ ...prev, entry: { ...prev.entry, metric: e.target.value } }))}>
-              {METRICS.map((metric) => <option key={metric} value={metric}>{metric}</option>)}
-            </select>
-          </Field>
-          <Field label="Condition">
-            <select className="term-select" value={strategy.entry.condition} onChange={(e) => setStrategy((prev) => ({ ...prev, entry: { ...prev.entry, condition: e.target.value as StrategyDefinition['entry']['condition'] } }))}>
-              {CONDITIONS.map((condition) => <option key={condition} value={condition}>{condition}</option>)}
-            </select>
-          </Field>
-          <Field label="Threshold">
-            <input
-              className="term-input"
-              type="number"
-              value={strategy.entry.threshold ?? ''}
-              onChange={(e) => setStrategy((prev) => ({ ...prev, entry: { ...prev.entry, threshold: e.target.value === '' ? null : parseFloat(e.target.value) } }))}
-            />
-          </Field>
+          <LegEditor
+            label="Entry Leg"
+            tone="var(--green)"
+            leg={strategy.entry}
+            onChange={(nextLeg) => setStrategy((prev) => ({ ...prev, entry: nextLeg }))}
+          />
 
-          <div style={{ color: 'var(--red)', fontSize: 'var(--text-xs)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-            Exit Leg
-          </div>
-          <Field label="Metric">
-            <select className="term-select" value={strategy.exit.metric} onChange={(e) => setStrategy((prev) => ({ ...prev, exit: { ...prev.exit, metric: e.target.value } }))}>
-              {METRICS.map((metric) => <option key={metric} value={metric}>{metric}</option>)}
-            </select>
-          </Field>
-          <Field label="Condition">
-            <select className="term-select" value={strategy.exit.condition} onChange={(e) => setStrategy((prev) => ({ ...prev, exit: { ...prev.exit, condition: e.target.value as StrategyDefinition['exit']['condition'] } }))}>
-              {CONDITIONS.map((condition) => <option key={condition} value={condition}>{condition}</option>)}
-            </select>
-          </Field>
-          <Field label="Threshold">
-            <input
-              className="term-input"
-              type="number"
-              value={strategy.exit.threshold ?? ''}
-              onChange={(e) => setStrategy((prev) => ({ ...prev, exit: { ...prev.exit, threshold: e.target.value === '' ? null : parseFloat(e.target.value) } }))}
-            />
-          </Field>
+          <LegEditor
+            label="Exit Leg"
+            tone="var(--red)"
+            leg={strategy.exit}
+            onChange={(nextLeg) => setStrategy((prev) => ({ ...prev, exit: nextLeg }))}
+          />
 
           <div className="grid-2">
             <Field label="Capital">

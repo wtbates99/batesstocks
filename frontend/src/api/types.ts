@@ -55,6 +55,7 @@ export interface TerminalHeadline {
 export interface TerminalOverview {
   generated_at: string
   focus_ticker: string
+  universe_size: number
   stats: TerminalStat[]
   momentum_leaders: TerminalMover[]
   reversal_candidates: TerminalMover[]
@@ -70,8 +71,15 @@ export interface SecurityBar {
   close: number
   volume: number
   sma_10?: number | null
+  sma_50?: number | null
+  sma_100?: number | null
+  sma_200?: number | null
+  sma_250?: number | null
   sma_30?: number | null
   ema_10?: number | null
+  ema_50?: number | null
+  ema_100?: number | null
+  ema_200?: number | null
   tech_score?: number | null
   rsi?: number | null
   macd?: number | null
@@ -99,6 +107,8 @@ export interface SecuritySnapshot {
   macd_signal?: number | null
   above_sma_10: boolean
   above_sma_30: boolean
+  above_sma_200: boolean
+  above_sma_250: boolean
 }
 
 export interface SecurityOverview {

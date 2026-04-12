@@ -10,7 +10,7 @@ export interface AiContextValue {
   /** Open the AI panel, optionally with a pre-seeded message */
   openAi: (prefill?: string) => void
   /** Register a handler from TerminalShell for opening + prefilling AI */
-  _register: (handler: (prefill?: string) => void) => void
+  registerOpenHandler: (handler: ((prefill?: string) => void) | null) => void
 }
 
 const Ctx = createContext<AiContextValue>({
@@ -18,7 +18,7 @@ const Ctx = createContext<AiContextValue>({
   setContext: () => {},
   mergeContext: () => {},
   openAi: () => {},
-  _register: () => {},
+  registerOpenHandler: () => {},
 })
 
 export function AiContextProvider({ children }: { children: React.ReactNode }) {
@@ -37,12 +37,12 @@ export function AiContextProvider({ children }: { children: React.ReactNode }) {
     handlerRef.current?.(prefill)
   }, [])
 
-  const _register = useCallback((handler: (prefill?: string) => void) => {
+  const registerOpenHandler = useCallback((handler: ((prefill?: string) => void) | null) => {
     handlerRef.current = handler
   }, [])
 
   return (
-    <Ctx.Provider value={{ context, setContext, mergeContext, openAi, _register }}>
+    <Ctx.Provider value={{ context, setContext, mergeContext, openAi, registerOpenHandler }}>
       {children}
     </Ctx.Provider>
   )

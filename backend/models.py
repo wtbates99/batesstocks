@@ -46,6 +46,7 @@ class TerminalHeadline(BaseModel):
 class TerminalOverview(BaseModel):
     generated_at: str
     focus_ticker: str
+    universe_size: int = 0
     stats: list[TerminalStat]
     momentum_leaders: list[TerminalMover]
     reversal_candidates: list[TerminalMover]
@@ -123,8 +124,15 @@ class SecurityBar(BaseModel):
     close: float
     volume: float
     sma_10: float | None = None
+    sma_50: float | None = None
+    sma_100: float | None = None
+    sma_200: float | None = None
+    sma_250: float | None = None
     sma_30: float | None = None
     ema_10: float | None = None
+    ema_50: float | None = None
+    ema_100: float | None = None
+    ema_200: float | None = None
     tech_score: float | None = None
     rsi: float | None = None
     macd: float | None = None
@@ -152,6 +160,8 @@ class SecuritySnapshot(BaseModel):
     macd_signal: float | None = None
     above_sma_10: bool = False
     above_sma_30: bool = False
+    above_sma_200: bool = False
+    above_sma_250: bool = False
 
 
 class SecurityOverview(BaseModel):

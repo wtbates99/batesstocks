@@ -20,7 +20,11 @@ from backend.models import (
     TerminalOverview,
 )
 from backend.services.backup_service import create_backup, list_backups
-from backend.services.data_sync_service import ensure_market_data, sync_market_data
+from backend.services.data_sync_service import (
+    ensure_default_universe_data,
+    ensure_market_data,
+    sync_market_data,
+)
 from backend.services.terminal_service import (
     get_security_overview,
     get_terminal_overview,
@@ -38,6 +42,7 @@ def _utc_now() -> str:
 @router.get("/terminal/workspace", response_model=TerminalOverview)
 def terminal_workspace(ticker: str = Query("SPY", min_length=1, max_length=10)) -> TerminalOverview:
     ensure_schema()
+    ensure_default_universe_data()
     ensure_market_data([ticker])
     return get_terminal_overview(ticker)
 
@@ -58,6 +63,7 @@ def terminal_security(
 @router.post("/strategies/backtest", response_model=StrategyBacktestResponse)
 def strategy_backtest(request: StrategyBacktestRequest) -> StrategyBacktestResponse:
     ensure_schema()
+    ensure_default_universe_data()
     try:
         response = run_strategy_backtest(request)
     except ValueError as exc:
@@ -82,6 +88,7 @@ def strategy_backtest(request: StrategyBacktestRequest) -> StrategyBacktestRespo
 @router.post("/strategies/screen", response_model=StrategyScreenResponse)
 def strategy_screen(strategy: StrategyDefinition) -> StrategyScreenResponse:
     ensure_schema()
+    ensure_default_universe_data()
     try:
         matches = screen_strategy(strategy)
     except ValueError as exc:
