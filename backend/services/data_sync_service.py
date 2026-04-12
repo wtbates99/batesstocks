@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import numpy as np
 import pandas as pd
@@ -29,7 +29,7 @@ LOOKBACK_BUFFER_DAYS = 60
 
 
 def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _normalize_tickers(tickers: list[str] | None) -> list[str]:
@@ -56,7 +56,11 @@ def _download_ohlcv(tickers: list[str], years: int) -> pd.DataFrame:
         flat = frame.reset_index()
         flat.insert(1, "Ticker", ticker)
     else:
-        flat = frame.stack(level=0, future_stack=True).reset_index().rename(columns={"level_1": "Ticker"})
+        flat = (
+            frame.stack(level=0, future_stack=True)
+            .reset_index()
+            .rename(columns={"level_1": "Ticker"})
+        )
 
     rename_map = {
         "Date": "Date",
@@ -207,7 +211,10 @@ def sync_market_data(tickers: list[str] | None = None, years: int = 5) -> SyncRe
             raw_subset = raw[(raw["Ticker"] == ticker) & (raw["Date"] >= cutoff)].copy()
 
             conn.register("raw_subset", raw_subset)
-            conn.execute("DELETE FROM ohlcv_daily WHERE Ticker = ? AND Date >= ?", [ticker, cutoff.to_pydatetime()])
+            conn.execute(
+                "DELETE FROM ohlcv_daily WHERE Ticker = ? AND Date >= ?",
+                [ticker, cutoff.to_pydatetime()],
+            )
             conn.execute("INSERT INTO ohlcv_daily SELECT * FROM raw_subset")
             conn.unregister("raw_subset")
 
@@ -235,7 +242,10 @@ def sync_market_data(tickers: list[str] | None = None, years: int = 5) -> SyncRe
                 ]
             ].copy()
             conn.register("ticker_subset", write_subset)
-            conn.execute("DELETE FROM ticker_data WHERE Ticker = ? AND Date >= ?", [ticker, cutoff.to_pydatetime()])
+            conn.execute(
+                "DELETE FROM ticker_data WHERE Ticker = ? AND Date >= ?",
+                [ticker, cutoff.to_pydatetime()],
+            )
             conn.execute("INSERT INTO ticker_data SELECT * FROM ticker_subset")
             conn.unregister("ticker_subset")
             rows_written += len(write_subset)

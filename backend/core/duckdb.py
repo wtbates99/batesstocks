@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator
 
 import duckdb
 
@@ -89,9 +89,7 @@ def ensure_schema() -> None:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_ticker_data_ticker_date ON ticker_data (Ticker, Date)"
         )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_ticker_data_date ON ticker_data (Date)"
-        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_ticker_data_date ON ticker_data (Date)")
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_ohlcv_daily_ticker_date ON ohlcv_daily (Ticker, Date)"
         )

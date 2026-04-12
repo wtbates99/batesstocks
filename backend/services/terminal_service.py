@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pandas as pd
 
@@ -22,7 +22,6 @@ from backend.models import (
     TerminalStat,
 )
 
-
 SUPPORTED_CONDITIONS = {"above", "below", "crosses_above", "crosses_below"}
 
 
@@ -31,7 +30,7 @@ def _to_float(value: float | int | None) -> float | None:
 
 
 def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _row_to_mover(row: pd.Series) -> TerminalMover:
@@ -45,7 +44,9 @@ def _row_to_mover(row: pd.Series) -> TerminalMover:
     )
 
 
-def _load_focus_frame(ticker: str, start_date: str | None = None, end_date: str | None = None) -> pd.DataFrame:
+def _load_focus_frame(
+    ticker: str, start_date: str | None = None, end_date: str | None = None
+) -> pd.DataFrame:
     filters = ["Ticker = ?"]
     params: list[str] = [ticker.upper()]
     if start_date:
@@ -99,7 +100,9 @@ def _load_screen_frame() -> pd.DataFrame:
         """).df()
 
 
-def _resolve_threshold(frame: pd.DataFrame, metric: str | None, threshold: float | None) -> pd.Series:
+def _resolve_threshold(
+    frame: pd.DataFrame, metric: str | None, threshold: float | None
+) -> pd.Series:
     if metric:
         if metric not in frame.columns:
             raise ValueError(f"Unsupported comparison metric: {metric}")
@@ -109,7 +112,9 @@ def _resolve_threshold(frame: pd.DataFrame, metric: str | None, threshold: float
     return pd.Series(threshold, index=frame.index, dtype="float64")
 
 
-def _evaluate_leg(frame: pd.DataFrame, metric: str, condition: str, threshold: pd.Series) -> pd.Series:
+def _evaluate_leg(
+    frame: pd.DataFrame, metric: str, condition: str, threshold: pd.Series
+) -> pd.Series:
     if metric not in frame.columns:
         raise ValueError(f"Unsupported metric: {metric}")
     if condition not in SUPPORTED_CONDITIONS:
@@ -129,7 +134,9 @@ def _evaluate_leg(frame: pd.DataFrame, metric: str, condition: str, threshold: p
     return (left < right) & (prev_left >= prev_right)
 
 
-def _evaluate_strategy_matches(frame: pd.DataFrame, strategy: StrategyDefinition) -> list[StrategyMatch]:
+def _evaluate_strategy_matches(
+    frame: pd.DataFrame, strategy: StrategyDefinition
+) -> list[StrategyMatch]:
     threshold = _resolve_threshold(
         frame,
         strategy.entry.compare_to_metric,
@@ -320,8 +327,12 @@ def get_security_overview(ticker: str, limit: int = 180) -> SecurityOverview:
         tech_score=_to_float(tech_score),
         macd=_to_float(macd),
         macd_signal=_to_float(macd_signal),
-        above_sma_10=bool(close is not None and sma_10 is not None and float(close) > float(sma_10)),
-        above_sma_30=bool(close is not None and sma_30 is not None and float(close) > float(sma_30)),
+        above_sma_10=bool(
+            close is not None and sma_10 is not None and float(close) > float(sma_10)
+        ),
+        above_sma_30=bool(
+            close is not None and sma_30 is not None and float(close) > float(sma_30)
+        ),
     )
     signals = [
         SecuritySignal(
@@ -332,17 +343,33 @@ def get_security_overview(ticker: str, limit: int = 180) -> SecurityOverview:
         SecuritySignal(
             label="RSI",
             value="—" if snapshot_model.rsi is None else f"{snapshot_model.rsi:.1f}",
-            tone="negative" if (snapshot_model.rsi or 50) >= 70 else "positive" if (snapshot_model.rsi or 50) <= 30 else "neutral",
+            tone="negative"
+            if (snapshot_model.rsi or 50) >= 70
+            else "positive"
+            if (snapshot_model.rsi or 50) <= 30
+            else "neutral",
         ),
         SecuritySignal(
             label="MACD Bias",
-            value="Bullish" if snapshot_model.macd is not None and snapshot_model.macd_signal is not None and snapshot_model.macd > snapshot_model.macd_signal else "Bearish",
-            tone="positive" if snapshot_model.macd is not None and snapshot_model.macd_signal is not None and snapshot_model.macd > snapshot_model.macd_signal else "negative",
+            value="Bullish"
+            if snapshot_model.macd is not None
+            and snapshot_model.macd_signal is not None
+            and snapshot_model.macd > snapshot_model.macd_signal
+            else "Bearish",
+            tone="positive"
+            if snapshot_model.macd is not None
+            and snapshot_model.macd_signal is not None
+            and snapshot_model.macd > snapshot_model.macd_signal
+            else "negative",
         ),
         SecuritySignal(
             label="Trend",
-            value="Above 10 / 30 DMA" if snapshot_model.above_sma_10 and snapshot_model.above_sma_30 else "Below trend filters",
-            tone="positive" if snapshot_model.above_sma_10 and snapshot_model.above_sma_30 else "warning",
+            value="Above 10 / 30 DMA"
+            if snapshot_model.above_sma_10 and snapshot_model.above_sma_30
+            else "Below trend filters",
+            tone="positive"
+            if snapshot_model.above_sma_10 and snapshot_model.above_sma_30
+            else "warning",
         ),
     ]
     return SecurityOverview(
@@ -440,7 +467,8 @@ def get_terminal_overview(focus_ticker: str) -> TerminalOverview:
             LIMIT 8
         """).df()
 
-        focus = conn.execute("""
+        focus = conn.execute(
+            """
             WITH ranked AS (
                 SELECT
                     td.Date,
@@ -458,7 +486,9 @@ def get_terminal_overview(focus_ticker: str) -> TerminalOverview:
             SELECT *
             FROM ranked
             WHERE rn = 1
-        """, [focus_ticker.upper()]).fetchone()
+        """,
+            [focus_ticker.upper()],
+        ).fetchone()
 
     advancers, decliners, avg_rsi, avg_score = stats_row or (0, 0, None, None)
     focus_change = None
@@ -472,7 +502,11 @@ def get_terminal_overview(focus_ticker: str) -> TerminalOverview:
         focus_score = _to_float(tech_score)
         if prev_close not in (None, 0):
             focus_change = ((float(close) / float(prev_close)) - 1) * 100
-        macd_bias = "Bullish MACD" if _to_float(macd) and _to_float(macd_signal) and float(macd) > float(macd_signal) else "Weak MACD"
+        macd_bias = (
+            "Bullish MACD"
+            if _to_float(macd) and _to_float(macd_signal) and float(macd) > float(macd_signal)
+            else "Weak MACD"
+        )
     else:
         macd_bias = "No focus signal"
 
@@ -596,7 +630,9 @@ def run_strategy_backtest(request: StrategyBacktestRequest) -> StrategyBacktestR
             pnl = (close - entry_price) * shares
             trades.append(
                 {
-                    "entry_date": entry_date.date().isoformat() if entry_date is not None else date.date().isoformat(),
+                    "entry_date": entry_date.date().isoformat()
+                    if entry_date is not None
+                    else date.date().isoformat(),
                     "entry_price": entry_price,
                     "exit_date": date.date().isoformat(),
                     "exit_price": close,
@@ -628,7 +664,9 @@ def run_strategy_backtest(request: StrategyBacktestRequest) -> StrategyBacktestR
         pnl = (close - entry_price) * shares
         trades.append(
             {
-                "entry_date": entry_date.date().isoformat() if entry_date is not None else frame.iloc[-1]["Date"].date().isoformat(),
+                "entry_date": entry_date.date().isoformat()
+                if entry_date is not None
+                else frame.iloc[-1]["Date"].date().isoformat(),
                 "entry_price": entry_price,
                 "exit_date": frame.iloc[-1]["Date"].date().isoformat(),
                 "exit_price": close,
@@ -638,7 +676,9 @@ def run_strategy_backtest(request: StrategyBacktestRequest) -> StrategyBacktestR
         )
 
     total_return_pct = ((cash / initial_capital) - 1) * 100
-    buy_hold_return_pct = ((float(frame.iloc[-1]["Close"]) / float(frame.iloc[0]["Close"])) - 1) * 100
+    buy_hold_return_pct = (
+        (float(frame.iloc[-1]["Close"]) / float(frame.iloc[0]["Close"])) - 1
+    ) * 100
     trade_returns = [trade["return_pct"] for trade in trades]
     wins = [r for r in trade_returns if r > 0]
     avg_return = sum(trade_returns) / len(trade_returns) if trade_returns else 0.0
