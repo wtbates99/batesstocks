@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { Plus, Star, StarOff } from 'lucide-react'
+import { useShallow } from 'zustand/react/shallow'
 import TerminalChart from '../components/charts/TerminalChart'
 import NewsPanel from '../components/news/NewsPanel'
 import { useLivePricesQuery, useNewsQuery, useSecurityQuery } from '../api/query'
@@ -44,7 +45,7 @@ export default function SecurityPage() {
     addRecentTicker,
     toggleWatchlist,
     toggleCompareTicker,
-  } = useTerminalStore((state) => ({
+  } = useTerminalStore(useShallow((state) => ({
     compareTickers: state.compareTickers,
     watchlist: getActiveWatchlist(state)?.symbols ?? [],
     setActiveTicker: state.setActiveTicker,
@@ -53,7 +54,7 @@ export default function SecurityPage() {
     addRecentTicker: state.addRecentTicker,
     toggleWatchlist: state.toggleWatchlist,
     toggleCompareTicker: state.toggleCompareTicker,
-  }))
+  })))
   const security = useSecurityQuery(ticker, 260)
   const news = useNewsQuery([ticker, ...relatedTickers(compareTickers, ticker)], 'security', 10)
   const compareUniverse = Array.from(new Set([ticker, ...compareTickers])).slice(0, 6)

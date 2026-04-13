@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { Play, Save, ScanSearch } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'
+import { useShallow } from 'zustand/react/shallow'
 import NewsPanel from '../components/news/NewsPanel'
 import StrategyWorkbench from '../components/strategy/StrategyWorkbench'
 import { useBacktestMutation, useNewsQuery, useScreenMutation } from '../api/query'
@@ -33,12 +34,12 @@ export default function BacktestPage() {
     saveBacktestDraft,
     savedBacktests,
     toggleWatchlist,
-  } = useTerminalStore((state) => ({
+  } = useTerminalStore(useShallow((state) => ({
     setAiContext: state.setAiContext,
     saveBacktestDraft: state.saveBacktestDraft,
     savedBacktests: state.savedBacktests,
     toggleWatchlist: state.toggleWatchlist,
-  }))
+  })))
 
   useEffect(() => {
     const ticker = params.get('ticker')

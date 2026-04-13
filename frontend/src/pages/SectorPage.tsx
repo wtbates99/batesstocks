@@ -1,4 +1,5 @@
 import { Link, useNavigate, useParams } from 'react-router-dom'
+import { useShallow } from 'zustand/react/shallow'
 import NewsPanel from '../components/news/NewsPanel'
 import { useNewsQuery, useSectorQuery } from '../api/query'
 import type { SecurityListItem } from '../api/types'
@@ -52,10 +53,10 @@ export default function SectorPage() {
   const { sector: routeSector } = useParams<{ sector: string }>()
   const sector = decodeURIComponent(routeSector ?? '')
   const data = useSectorQuery(sector, Boolean(sector))
-  const { toggleWatchlist, setCompareTickers } = useTerminalStore((state) => ({
+  const { toggleWatchlist, setCompareTickers } = useTerminalStore(useShallow((state) => ({
     toggleWatchlist: state.toggleWatchlist,
     setCompareTickers: state.setCompareTickers,
-  }))
+  })))
 
   const newsUniverse = data.data?.members.slice(0, 8).map((item) => item.ticker) ?? []
   const news = useNewsQuery(newsUniverse, `sector-${sector}`, 14, newsUniverse.length > 0)

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Bot, Send, X } from 'lucide-react'
+import { useShallow } from 'zustand/react/shallow'
 import { useChatMutation } from '../api/query'
 import type { AiMessage } from '../api/types'
 import { useTerminalStore } from '../state/terminalStore'
@@ -55,11 +56,11 @@ export default function AiPanel({ open, onClose }: Props) {
   const [input, setInput] = useState('')
   const scrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
-  const { aiContext, aiDraft, mergeAiContext } = useTerminalStore((state) => ({
+  const { aiContext, aiDraft, mergeAiContext } = useTerminalStore(useShallow((state) => ({
     aiContext: state.aiContext,
     aiDraft: state.aiDraft,
     mergeAiContext: state.mergeAiContext,
-  }))
+  })))
   const chat = useChatMutation()
   const suggestions = promptSuggestions(aiContext)
 

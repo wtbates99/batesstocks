@@ -1,14 +1,15 @@
 import { useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import NewsPanel from '../components/news/NewsPanel'
 import { useNewsQuery } from '../api/query'
 import { getActiveWatchlist, useTerminalStore } from '../state/terminalStore'
 
 export default function NewsMonitorPage() {
-  const { activeTicker, watchlist, recentTickers } = useTerminalStore((state) => ({
+  const { activeTicker, watchlist, recentTickers } = useTerminalStore(useShallow((state) => ({
     activeTicker: state.activeTicker,
     watchlist: getActiveWatchlist(state)?.symbols ?? [],
     recentTickers: state.recentTickers,
-  }))
+  })))
   const [scope, setScope] = useState<'focus' | 'watchlist' | 'recent' | 'market'>('watchlist')
 
   const tickers =

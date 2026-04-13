@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Play, RotateCcw, Save } from 'lucide-react'
 import { Link, useNavigate } from 'react-router-dom'
+import { useShallow } from 'zustand/react/shallow'
 import NewsPanel from '../components/news/NewsPanel'
 import StrategyWorkbench from '../components/strategy/StrategyWorkbench'
 import { useNewsQuery, useScreenMutation } from '../api/query'
@@ -19,13 +20,13 @@ export default function ScreenerPage() {
     savedScreens,
     toggleWatchlist,
     setCompareTickers,
-  } = useTerminalStore((state) => ({
+  } = useTerminalStore(useShallow((state) => ({
     setAiContext: state.setAiContext,
     saveScreenDraft: state.saveScreenDraft,
     savedScreens: state.savedScreens,
     toggleWatchlist: state.toggleWatchlist,
     setCompareTickers: state.setCompareTickers,
-  }))
+  })))
 
   const result = screen.data
   const newsTicker = result?.matches[0]?.ticker ?? 'SPY'

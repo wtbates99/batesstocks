@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Activity, Bot, ChevronRight, DatabaseZap, Radio, RefreshCw } from 'lucide-react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { useShallow } from 'zustand/react/shallow'
 import { useHealthQuery, useLivePricesQuery, useSyncStatusQuery } from '../../api/query'
 import CommandBar from '../command/CommandBar'
 import AiPanel from '../AiPanel'
@@ -45,7 +46,7 @@ export default function TerminalShell() {
     focusCommandBar,
     recentTickers,
     setLastRoute,
-  } = useTerminalStore((state) => ({
+  } = useTerminalStore(useShallow((state) => ({
     aiOpen: state.aiOpen,
     closeAi: state.closeAi,
     openAi: state.openAi,
@@ -53,7 +54,7 @@ export default function TerminalShell() {
     focusCommandBar: state.focusCommandBar,
     recentTickers: state.recentTickers,
     setLastRoute: state.setLastRoute,
-  }))
+  })))
 
   useEffect(() => {
     setLastRoute(location.pathname)
