@@ -1,3 +1,7 @@
+export type Tone = 'positive' | 'negative' | 'warning' | 'neutral'
+export type StrategyCondition = 'above' | 'below' | 'crosses_above' | 'crosses_below'
+export type StrategyOperator = 'and' | 'or'
+
 export interface SearchResult {
   ticker: string
   name: string
@@ -33,7 +37,7 @@ export interface TerminalStat {
   label: string
   value: string
   change?: string | null
-  tone: 'positive' | 'negative' | 'warning' | 'neutral'
+  tone: Tone
 }
 
 export interface TerminalMover {
@@ -45,11 +49,21 @@ export interface TerminalMover {
   tech_score?: number | null
 }
 
-export interface TerminalHeadline {
-  ticker: string
-  headline: string
-  detail: string
-  tone: 'positive' | 'negative' | 'warning' | 'neutral'
+export interface NewsItem {
+  id: string
+  ticker?: string | null
+  title: string
+  summary?: string | null
+  publisher?: string | null
+  link: string
+  published_at?: string | null
+  related_tickers: string[]
+}
+
+export interface NewsResponse {
+  generated_at: string
+  scope: string
+  items: NewsItem[]
 }
 
 export interface TerminalOverview {
@@ -60,7 +74,6 @@ export interface TerminalOverview {
   momentum_leaders: TerminalMover[]
   reversal_candidates: TerminalMover[]
   breakouts: TerminalMover[]
-  headlines: TerminalHeadline[]
 }
 
 export interface SecurityBar {
@@ -71,11 +84,11 @@ export interface SecurityBar {
   close: number
   volume: number
   sma_10?: number | null
+  sma_30?: number | null
   sma_50?: number | null
   sma_100?: number | null
   sma_200?: number | null
   sma_250?: number | null
-  sma_30?: number | null
   ema_10?: number | null
   ema_50?: number | null
   ema_100?: number | null
@@ -89,7 +102,7 @@ export interface SecurityBar {
 export interface SecuritySignal {
   label: string
   value: string
-  tone: 'positive' | 'negative' | 'warning' | 'neutral'
+  tone: Tone
 }
 
 export interface SecuritySnapshot {
@@ -121,7 +134,7 @@ export interface SecurityOverview {
 
 export interface StrategyLeg {
   metric: string
-  condition: 'above' | 'below' | 'crosses_above' | 'crosses_below'
+  condition: StrategyCondition
   threshold?: number | null
   compare_to_metric?: string | null
 }
@@ -130,12 +143,18 @@ export interface StrategyDefinition {
   name: string
   entry: StrategyLeg
   exit: StrategyLeg
+  entry_filters?: StrategyLeg[]
+  exit_filters?: StrategyLeg[]
+  entry_operator?: StrategyOperator
+  exit_operator?: StrategyOperator
   universe?: string[] | null
   start_date?: string | null
   end_date?: string | null
   initial_capital: number
   position_size_pct: number
   stop_loss_pct?: number | null
+  fee_bps?: number
+  slippage_bps?: number
   max_open_positions: number
 }
 
@@ -146,6 +165,8 @@ export interface StrategyBacktestRequest {
 
 export interface StrategyBacktestSummary {
   total_return_pct: number
+  gross_return_pct: number
+  cost_drag_pct: number
   buy_hold_return_pct: number
   max_drawdown_pct: number
   win_rate: number
@@ -153,6 +174,9 @@ export interface StrategyBacktestSummary {
   avg_return_pct: number
   annualized_return_pct?: number | null
   sharpe_ratio?: number | null
+  sortino_ratio?: number | null
+  beta?: number | null
+  total_fees_paid: number
 }
 
 export interface StrategyBacktestPoint {

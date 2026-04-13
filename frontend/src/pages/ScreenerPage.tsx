@@ -1,251 +1,162 @@
 import { useEffect, useState } from 'react'
-import { RefreshCw, ScanSearch } from 'lucide-react'
-import { api } from '../api/client'
-import { useAiContext } from '../contexts/AiContext'
-import { STRATEGY_CONDITIONS, STRATEGY_METRICS } from '../features/strategies/config'
-import type { StrategyDefinition, StrategyLeg, StrategyScreenResponse } from '../api/types'
-
-type ThresholdMode = 'value' | 'metric'
-
-function defaultStrategy(): StrategyDefinition {
-  return {
-    name: 'SP500 Trend Leadership Scan',
-    entry: {
-      metric: 'Close',
-      condition: 'above',
-      compare_to_metric: 'Ticker_SMA_250',
-    },
-    exit: {
-      metric: 'Close',
-      condition: 'below',
-      compare_to_metric: 'Ticker_SMA_100',
-    },
-    initial_capital: 100000,
-    position_size_pct: 100,
-    stop_loss_pct: 8,
-    max_open_positions: 1,
-  }
-}
-
-function legMode(leg: StrategyLeg): ThresholdMode {
-  return leg.compare_to_metric ? 'metric' : 'value'
-}
-
-function updateLeg(
-  strategy: StrategyDefinition,
-  legKey: 'entry' | 'exit',
-  updater: (leg: StrategyLeg) => StrategyLeg,
-) {
-  return {
-    ...strategy,
-    [legKey]: updater(strategy[legKey]),
-  }
-}
-
-function LegEditor({
-  title,
-  leg,
-  onChange,
-}: {
-  title: string
-  leg: StrategyLeg
-  onChange: (nextLeg: StrategyLeg) => void
-}) {
-  const mode = legMode(leg)
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <div style={{ color: 'var(--orange)', fontSize: 'var(--text-xs)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-        {title}
-      </div>
-      <div>
-        <label style={{ display: 'block', fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginBottom: 4 }}>Metric</label>
-        <select className="term-select" value={leg.metric} onChange={(e) => onChange({ ...leg, metric: e.target.value })}>
-          {STRATEGY_METRICS.map((metric) => <option key={metric.value} value={metric.value}>{metric.label}</option>)}
-        </select>
-      </div>
-      <div>
-        <label style={{ display: 'block', fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginBottom: 4 }}>Condition</label>
-        <select className="term-select" value={leg.condition} onChange={(e) => onChange({ ...leg, condition: e.target.value as StrategyDefinition['entry']['condition'] })}>
-          {STRATEGY_CONDITIONS.map((condition) => <option key={condition} value={condition}>{condition}</option>)}
-        </select>
-      </div>
-      <div>
-        <label style={{ display: 'block', fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginBottom: 4 }}>Threshold Type</label>
-        <select
-          className="term-select"
-          value={mode}
-          onChange={(e) => {
-            const nextMode = e.target.value as ThresholdMode
-            if (nextMode === 'metric') {
-              onChange({
-                ...leg,
-                threshold: null,
-                compare_to_metric: leg.compare_to_metric ?? 'Ticker_SMA_250',
-              })
-            } else {
-              onChange({
-                ...leg,
-                compare_to_metric: null,
-                threshold: leg.threshold ?? 0,
-              })
-            }
-          }}
-        >
-          <option value="metric">Metric</option>
-          <option value="value">Numeric value</option>
-        </select>
-      </div>
-      {mode === 'metric' ? (
-        <div>
-          <label style={{ display: 'block', fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginBottom: 4 }}>Compare To Metric</label>
-          <select className="term-select" value={leg.compare_to_metric ?? 'Ticker_SMA_250'} onChange={(e) => onChange({ ...leg, compare_to_metric: e.target.value, threshold: null })}>
-            {STRATEGY_METRICS.map((metric) => <option key={metric.value} value={metric.value}>{metric.label}</option>)}
-          </select>
-        </div>
-      ) : (
-        <div>
-          <label style={{ display: 'block', fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginBottom: 4 }}>Threshold Value</label>
-          <input className="term-input" type="number" value={leg.threshold ?? ''} onChange={(e) => onChange({ ...leg, threshold: e.target.value === '' ? null : parseFloat(e.target.value), compare_to_metric: null })} />
-        </div>
-      )}
-    </div>
-  )
-}
+import { Play, RotateCcw, Save } from 'lucide-react'
+import { Link, useNavigate } from 'react-router-dom'
+import NewsPanel from '../components/news/NewsPanel'
+import StrategyWorkbench from '../components/strategy/StrategyWorkbench'
+import { useNewsQuery, useScreenMutation } from '../api/query'
+import { buildStrategyDefinition, createDefaultStrategyDraft, type StrategyDraft } from '../lib/strategy'
+import { formatNumber, formatTimestamp } from '../lib/formatters'
+import { loadJsonState, saveJsonState } from '../lib/storage'
+import { useTerminalStore } from '../state/terminalStore'
 
 export default function ScreenerPage() {
-  const { setContext } = useAiContext()
-  const [strategy, setStrategy] = useState<StrategyDefinition>(defaultStrategy)
-  const [universeInput, setUniverseInput] = useState('')
-  const [result, setResult] = useState<StrategyScreenResponse | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const navigate = useNavigate()
+  const [draft, setDraft] = useState<StrategyDraft>(() => loadJsonState('batesstocks:screener-draft', createDefaultStrategyDraft()))
+  const screen = useScreenMutation()
+  const {
+    setAiContext,
+    saveScreenDraft,
+    savedScreens,
+    toggleWatchlist,
+  } = useTerminalStore((state) => ({
+    setAiContext: state.setAiContext,
+    saveScreenDraft: state.saveScreenDraft,
+    savedScreens: state.savedScreens,
+    toggleWatchlist: state.toggleWatchlist,
+  }))
 
-  const run = async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const response = await api.strategies.screen({
-        ...strategy,
-        universe: universeInput
-          ? universeInput.split(',').map((ticker) => ticker.trim().toUpperCase()).filter(Boolean)
-          : null,
-      })
-      setResult(response)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setLoading(false)
-    }
-  }
+  const result = screen.data
+  const newsTicker = result?.matches[0]?.ticker ?? 'SPY'
+  const news = useNewsQuery([newsTicker], 'screener', 6, Boolean(newsTicker))
 
   useEffect(() => {
-    setContext({
-      page: 'screener',
-      strategy: strategy.name,
-      entryMetric: strategy.entry.metric,
-      exitMetric: strategy.exit.metric,
-      universe: universeInput || 'SP500 + major ETFs',
-      matches: result?.matches?.slice(0, 10) ?? [],
-    })
-  }, [result, setContext, strategy.entry.metric, strategy.exit.metric, strategy.name, universeInput])
+    saveJsonState('batesstocks:screener-draft', draft)
+  }, [draft])
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '340px 1fr', gap: 8, height: '100%', minHeight: 0 }}>
-      <div className="panel">
+    <div className="workbench-grid">
+      <section className="terminal-panel">
         <div className="panel-header">
-          <span className="panel-title">Screener</span>
+          <div className="panel-title">Screener Builder</div>
+          <div className="panel-meta">COMPOSITE RULE STACKS</div>
         </div>
-        <div className="panel-body" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <div>
-            <label style={{ display: 'block', fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginBottom: 4 }}>Strategy Name</label>
-            <input className="term-input" value={strategy.name} onChange={(e) => setStrategy((prev) => ({ ...prev, name: e.target.value }))} />
-          </div>
-
-          <div>
-            <label style={{ display: 'block', fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginBottom: 4 }}>Universe Override</label>
-            <input
-              className="term-input"
-              value={universeInput}
-              onChange={(e) => setUniverseInput(e.target.value)}
-              placeholder="Leave blank for S&P 500 + major index/sector ETFs"
-            />
-          </div>
-
-          <LegEditor
-            title="Entry"
-            leg={strategy.entry}
-            onChange={(nextLeg) => setStrategy((prev) => updateLeg(prev, 'entry', () => nextLeg))}
-          />
-
-          <div style={{ height: 1, background: 'var(--border)' }} />
-
-          <LegEditor
-            title="Exit"
-            leg={strategy.exit}
-            onChange={(nextLeg) => setStrategy((prev) => updateLeg(prev, 'exit', () => nextLeg))}
-          />
-
-          <div style={{ display: 'flex', gap: 6 }}>
-            <button className="term-btn primary" style={{ flex: 1, justifyContent: 'center' }} onClick={run} disabled={loading}>
-              <ScanSearch size={11} />
-              {loading ? 'Scanning…' : 'Run Scan'}
+        <div className="panel-body-pad">
+          <StrategyWorkbench draft={draft} includeTicker={false} onChange={(updater) => setDraft((current) => updater(current))} />
+          <div className="action-row">
+            <button
+              type="button"
+              className="terminal-button"
+              onClick={async () => {
+                const strategy = buildStrategyDefinition(draft)
+                setAiContext({
+                  page: 'screener',
+                  strategy,
+                })
+                await screen.mutateAsync(strategy)
+              }}
+            >
+              <Play size={12} />
+              {screen.isPending ? 'SCANNING' : 'RUN SCREEN'}
             </button>
-            <button className="term-btn" onClick={() => { setStrategy(defaultStrategy()); setUniverseInput(''); setResult(null); setError(null) }}>
-              <RefreshCw size={11} />
-              Reset
+            <button
+              type="button"
+              className="terminal-button terminal-button-ghost"
+              onClick={() => {
+                setDraft(createDefaultStrategyDraft())
+                screen.reset()
+              }}
+            >
+              <RotateCcw size={12} />
+              RESET
+            </button>
+            <button
+              type="button"
+              className="terminal-button terminal-button-ghost"
+              onClick={() => saveScreenDraft(draft.name, draft)}
+            >
+              <Save size={12} />
+              SAVE
             </button>
           </div>
-          {error && <div style={{ color: 'var(--red)', fontSize: 'var(--text-xs)' }}>{error}</div>}
-          <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', lineHeight: 1.5 }}>
-            Default scan universe is the S&amp;P 500 plus major broad-market, sector, and macro ETFs.
-          </div>
-        </div>
-      </div>
-
-      <div className="panel" style={{ minHeight: 0 }}>
-        <div className="panel-header">
-          <span className="panel-title">Live Matches</span>
-          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
-            {result?.generated_at ? result.generated_at.slice(0, 19).replace('T', ' ') : 'Awaiting scan'}
-          </span>
-        </div>
-        <div className="panel-body no-pad">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Ticker</th>
-                <th>Company</th>
-                <th>Sector</th>
-                <th style={{ textAlign: 'right' }}>Px</th>
-                <th style={{ textAlign: 'right' }}>RSI</th>
-                <th style={{ textAlign: 'right' }}>Score</th>
-                <th>State</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(result?.matches ?? []).map((match) => (
-                <tr key={match.ticker}>
-                  <td className="col-ticker">{match.ticker}</td>
-                  <td className="col-name">{match.name ?? '—'}</td>
-                  <td>{match.sector ?? '—'}</td>
-                  <td style={{ textAlign: 'right' }}>{match.last_price?.toFixed(2) ?? '—'}</td>
-                  <td style={{ textAlign: 'right' }}>{match.rsi?.toFixed(1) ?? '—'}</td>
-                  <td style={{ textAlign: 'right' }}>{match.tech_score?.toFixed(0) ?? '—'}</td>
-                  <td><span className="badge badge-orange">{match.signal_state}</span></td>
-                </tr>
+          {savedScreens.length > 0 && (
+            <div className="saved-inline-list">
+              {savedScreens.slice(0, 4).map((item) => (
+                <button key={item.id} type="button" className="saved-inline-button" onClick={() => setDraft(item.draft)}>
+                  <span>{item.name}</span>
+                  <span>{formatTimestamp(item.createdAt)}</span>
+                </button>
               ))}
-              {result && result.matches.length === 0 && (
-                <tr>
-                  <td colSpan={7}>
-                    <div className="empty-state" style={{ padding: 18 }}>No current matches for this strategy.</div>
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+            </div>
+          )}
+          {screen.isError && (
+            <div className="inline-error">
+              {screen.error instanceof Error ? screen.error.message : 'Screen request failed.'}
+            </div>
+          )}
         </div>
-      </div>
+      </section>
+
+      <section className="terminal-panel">
+        <div className="panel-header">
+          <div className="panel-title">Matches</div>
+          <div className="panel-meta">{result?.generated_at ?? 'Awaiting execution'}</div>
+        </div>
+        {result ? (
+          <div className="panel-table-wrap">
+            <table className="terminal-table">
+              <thead>
+                <tr>
+                  <th>Ticker</th>
+                  <th>Name</th>
+                  <th>Sector</th>
+                  <th className="align-right">Px</th>
+                  <th className="align-right">RSI</th>
+                  <th className="align-right">Score</th>
+                  <th>State</th>
+                  <th>Flow</th>
+                </tr>
+              </thead>
+              <tbody>
+                {result.matches.map((match) => (
+                  <tr key={match.ticker}>
+                    <td><Link to={`/security/${match.ticker}`} className="ticker-link">{match.ticker}</Link></td>
+                    <td>{match.name ?? '—'}</td>
+                    <td>{match.sector ?? '—'}</td>
+                    <td className="align-right">{formatNumber(match.last_price)}</td>
+                    <td className="align-right">{formatNumber(match.rsi, 1)}</td>
+                    <td className="align-right">{formatNumber(match.tech_score, 0)}</td>
+                    <td>{match.signal_state}</td>
+                    <td>
+                      <div className="table-actions">
+                        <button type="button" className="table-action" onClick={() => toggleWatchlist(match.ticker)}>WATCH</button>
+                        <button type="button" className="table-action" onClick={() => navigate(`/backtest?ticker=${match.ticker}`)}>BT</button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {result.matches.length === 0 && (
+                  <tr>
+                    <td colSpan={8}>
+                      <div className="empty-block">
+                        <div className="empty-title">No active matches.</div>
+                        <div className="empty-copy">The current rule stack did not produce a live signal in the tracked universe.</div>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="state-panel">Run the screener to populate live matches.</div>
+        )}
+      </section>
+
+      <NewsPanel
+        title={`News ${newsTicker}`}
+        items={news.data?.items ?? []}
+        empty="Run a screen and the top candidate's news tape will populate here for triage."
+      />
     </div>
   )
 }

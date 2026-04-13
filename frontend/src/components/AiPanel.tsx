@@ -1,236 +1,174 @@
-import { useState, useRef, useEffect } from 'react'
-import { X, Send, Bot, Loader, Zap } from 'lucide-react'
-import { api } from '../api/client'
+import { useEffect, useRef, useState } from 'react'
+import { Bot, Send, X } from 'lucide-react'
+import { useChatMutation } from '../api/query'
 import type { AiMessage } from '../api/types'
+import { useTerminalStore } from '../state/terminalStore'
 
 interface Props {
   open: boolean
   onClose: () => void
-  context?: Record<string, unknown>
-  /** If set, panel auto-sends this message when opened */
-  prefill?: string
 }
 
-// Quick-action suggestions vary by page context
-function getSuggestions(ctx: Record<string, unknown>): string[] {
-  const ticker = ctx.ticker as string | undefined
-  const page   = ctx.page   as string | undefined
+function contextLabel(context: Record<string, unknown>) {
+  const page = typeof context.page === 'string' ? context.page.toUpperCase() : 'GLOBAL'
+  const ticker = typeof context.ticker === 'string' ? context.ticker.toUpperCase() : ''
+  return ticker ? `${page} ${ticker}` : page
+}
 
-  if (ticker && page === 'security') {
+function promptSuggestions(context: Record<string, unknown>) {
+  const ticker = typeof context.ticker === 'string' ? context.ticker.toUpperCase() : undefined
+  const page = typeof context.page === 'string' ? context.page : undefined
+
+  if (page === 'security' && ticker) {
     return [
-      `Analyze ${ticker} technically — is it a buy or sell?`,
-      `What is the current trend for ${ticker}?`,
-      `Is ${ticker} overbought or oversold?`,
-      `What are key support and resistance levels for ${ticker}?`,
+      `Summarize ${ticker}'s technical posture in operator terms.`,
+      `Compare ${ticker} to ${Array.isArray(context.compareTickers) ? (context.compareTickers as string[]).slice(0, 3).join(', ') : 'SPY'}.`,
+      `Turn ${ticker}'s signal stack into a trading checklist.`,
     ]
   }
-  if (page === 'backtest') {
-    const strat = ctx.strategy as string | undefined
-    return [
-      strat ? `Explain these backtest results for ${strat}` : 'Explain these backtest results',
-      'How can I improve this strategy?',
-      'What are the risks of this approach?',
-      'Compare this to a buy-and-hold strategy',
-    ]
-  }
+
   if (page === 'screener') {
     return [
-      'Which screener results look most promising?',
-      'What do these technical scores mean?',
-      'Which sectors are showing strength?',
-      'Explain what RSI below 30 means for trading',
+      'Explain what this screen is actually selecting for.',
+      'Suggest one stricter and one looser version of this screen.',
+      'Rank the current matches by quality and explain why.',
     ]
   }
+
+  if (page === 'backtest') {
+    return [
+      'Interpret this backtest like a PM review.',
+      'Explain the cost drag and what parameter matters most.',
+      'Give two realistic improvements without curve-fitting.',
+    ]
+  }
+
   return [
-    'What stocks have RSI below 30?',
-    'Which sectors are outperforming this week?',
-    'Explain the MACD indicator',
-    'What is a good entry strategy for trending stocks?',
+    'Summarize the market pulse from this workspace.',
+    'What should I look at next?',
+    'Explain the highest-signal names on screen.',
   ]
 }
 
-export default function AiPanel({ open, onClose, context = {}, prefill }: Props) {
+export default function AiPanel({ open, onClose }: Props) {
   const [messages, setMessages] = useState<AiMessage[]>([])
-  const [input, setInput]       = useState('')
-  const [loading, setLoading]   = useState(false)
-  const scrollRef  = useRef<HTMLDivElement>(null)
-  const inputRef   = useRef<HTMLTextAreaElement>(null)
-  const prefillSent = useRef<string | undefined>(undefined)
-  const messagesRef = useRef<AiMessage[]>([])
-  const loadingRef = useRef(false)
-  const requestIdRef = useRef(0)
+  const [input, setInput] = useState('')
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
+  const { aiContext, aiDraft, mergeAiContext } = useTerminalStore((state) => ({
+    aiContext: state.aiContext,
+    aiDraft: state.aiDraft,
+    mergeAiContext: state.mergeAiContext,
+  }))
+  const chat = useChatMutation()
+  const suggestions = promptSuggestions(aiContext)
 
   useEffect(() => {
-    messagesRef.current = messages
-  }, [messages])
-
-  useEffect(() => {
-    loadingRef.current = loading
-  }, [loading])
-
-  // Auto-focus when opened
-  useEffect(() => {
-    if (open) inputRef.current?.focus()
-  }, [open])
-
-  // Auto-scroll to bottom on new messages
-  useEffect(() => {
-    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
-  }, [messages])
-
-  // Auto-send prefill message when panel opens with a new prefill
-  useEffect(() => {
-    if (open && prefill && prefill !== prefillSent.current) {
-      prefillSent.current = prefill
-      void sendMessage(prefill)
+    if (open) {
+      inputRef.current?.focus()
     }
-  }, [open, prefill])
-
-  // Reset prefill tracker when panel closes
-  useEffect(() => {
-    if (!open) prefillSent.current = undefined
   }, [open])
 
-  const sendMessage = async (text: string) => {
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+    }
+  }, [messages, chat.isPending])
+
+  useEffect(() => {
+    if (open && aiDraft) {
+      setInput(aiDraft)
+      mergeAiContext({ lastPromptSeed: aiDraft })
+    }
+  }, [aiDraft, mergeAiContext, open])
+
+  async function submit(text: string) {
     const trimmed = text.trim()
-    if (!trimmed || loadingRef.current) return
+    if (!trimmed || chat.isPending) return
 
-    const userMsg: AiMessage = { role: 'user', content: text.trim() }
-    const newMessages = [...messagesRef.current, userMsg]
-    const requestId = ++requestIdRef.current
-
-    messagesRef.current = newMessages
-    setMessages(newMessages)
+    const nextMessages = [...messages, { role: 'user', content: trimmed } as const]
+    setMessages(nextMessages)
     setInput('')
-    setLoading(true)
+
     try {
-      const res = await api.chat({
-        messages: newMessages,
-        context,
+      const response = await chat.mutateAsync({
+        messages: nextMessages,
+        context: aiContext,
       })
-      if (requestId !== requestIdRef.current) return
-      setMessages([...newMessages, { role: 'assistant', content: res.content }])
-    } catch (e) {
-      if (requestId !== requestIdRef.current) return
-      setMessages([...newMessages, {
-        role: 'assistant',
-        content: `Error: ${e instanceof Error ? e.message : 'Request failed'}`,
-      }])
-    } finally {
-      if (requestId === requestIdRef.current) {
-        setLoading(false)
-      }
+      setMessages((current) => [...current, { role: 'assistant', content: response.content }])
+    } catch (error) {
+      setMessages((current) => [
+        ...current,
+        { role: 'assistant', content: error instanceof Error ? error.message : 'AI request failed.' },
+      ])
     }
   }
-
-  const handleKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(input) }
-  }
-
-  const suggestions = getSuggestions(context)
-
-  // Build a readable context summary for the panel header
-  const ctxLabel = (() => {
-    const ticker = context.ticker as string | undefined
-    const page   = (context.page as string | undefined)?.toUpperCase()
-    if (ticker && page) return `${page} · ${ticker}`
-    if (page) return page
-    return 'GLOBAL'
-  })()
 
   return (
-    <div className={`ai-panel${open ? '' : ' collapsed'}`}>
-      {/* Header */}
-      <div className="ai-header">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <Bot size={12} style={{ color: 'var(--orange)' }} />
-          <span className="ai-title">AI ANALYST</span>
-          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--text-muted)', paddingLeft: 4, borderLeft: '1px solid var(--border)' }}>
-            {ctxLabel}
-          </span>
+    <aside className={`ai-drawer${open ? ' is-open' : ''}`}>
+      <div className="drawer-header">
+        <div className="drawer-title">
+          <Bot size={13} />
+          <span>AI ANALYST</span>
+          <span className="drawer-context">{contextLabel(aiContext)}</span>
         </div>
-        <div style={{ display: 'flex', gap: 4 }}>
-          {messages.length > 0 && (
-            <button
-              className="term-btn"
-              style={{ padding: '2px 6px', fontSize: 'var(--text-xs)' }}
-              onClick={() => setMessages([])}
-            >
-              Clear
-            </button>
-          )}
-          <button className="term-btn" onClick={onClose} style={{ padding: '2px 4px' }}>
-            <X size={11} />
-          </button>
-        </div>
+        <button type="button" className="terminal-icon-button" onClick={onClose}>
+          <X size={12} />
+        </button>
       </div>
 
-      {/* Messages */}
-      <div className="ai-messages" ref={scrollRef}>
-        {messages.length === 0 && !loading && (
-          <div style={{ padding: '8px 0' }}>
-            <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginBottom: 8 }}>
-              Ask about market data, strategies, or technical analysis.
+      <div className="drawer-body" ref={scrollRef}>
+        {messages.length === 0 && !chat.isPending ? (
+          <div className="empty-block">
+            <div className="empty-title">Integrated analyst is idle.</div>
+            <div className="empty-copy">
+              Use it for market context, strategy critique, or single-name analysis without leaving the workspace.
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-              {suggestions.map(s => (
-                <button
-                  key={s}
-                  className="term-btn"
-                  style={{ justifyContent: 'flex-start', textAlign: 'left', fontSize: 'var(--text-xs)', padding: '3px 6px' }}
-                  onClick={() => sendMessage(s)}
-                >
-                  <Zap size={9} style={{ flexShrink: 0, color: 'var(--orange)' }} />
-                  {s}
+            <div className="saved-inline-list">
+              {suggestions.map((suggestion) => (
+                <button key={suggestion} type="button" className="saved-inline-button" onClick={() => void submit(suggestion)}>
+                  <span>{suggestion}</span>
                 </button>
               ))}
             </div>
           </div>
+        ) : (
+          messages.map((message, index) => (
+            <div key={`${message.role}-${index}`} className={`chat-message ${message.role}`}>
+              <div className="chat-role">{message.role === 'user' ? 'YOU' : 'AI'}</div>
+              <div className="chat-content selectable">{message.content}</div>
+            </div>
+          ))
         )}
 
-        {messages.map((message, index) => (
-          <div key={`${message.role}-${index}-${message.content.slice(0, 24)}`} className={`ai-msg ${message.role}`}>
-            <div className="ai-msg-role">{message.role === 'user' ? 'YOU' : 'AI'}</div>
-            <div
-              className="ai-msg-content selectable"
-              style={{ whiteSpace: 'pre-wrap', lineHeight: 1.5 }}
-            >
-              {message.content}
-            </div>
-          </div>
-        ))}
-
-        {loading && (
-          <div className="ai-msg assistant">
-            <div className="ai-msg-role">AI</div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-muted)' }}>
-              <Loader size={11} style={{ animation: 'spin 0.7s linear infinite' }} />
-              <span style={{ fontSize: 'var(--text-xs)' }}>Analysing…</span>
-            </div>
+        {chat.isPending && (
+          <div className="chat-message assistant">
+            <div className="chat-role">AI</div>
+            <div className="chat-content selectable">Processing terminal context…</div>
           </div>
         )}
       </div>
 
-      {/* Input */}
-      <div className="ai-input-area">
+      <div className="drawer-input">
         <textarea
           ref={inputRef}
-          className="ai-input"
+          className="terminal-textarea"
           value={input}
-          onChange={e => setInput(e.target.value)}
-          onKeyDown={handleKey}
-          placeholder="Ask anything… (Enter to send, Shift+Enter for newline)"
-          rows={1}
+          onChange={(event) => setInput(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && !event.shiftKey) {
+              event.preventDefault()
+              void submit(input)
+            }
+          }}
+          rows={3}
+          placeholder="Ask about the active workspace..."
         />
-        <button
-          className="term-btn primary"
-          onClick={() => void sendMessage(input)}
-          disabled={!input.trim() || loading}
-          style={{ padding: '4px 8px', alignSelf: 'flex-end' }}
-        >
-          <Send size={11} />
+        <button type="button" className="terminal-button" onClick={() => void submit(input)} disabled={!input.trim()}>
+          <Send size={12} />
+          SEND
         </button>
       </div>
-    </div>
+    </aside>
   )
 }

@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class SearchResult(BaseModel):
@@ -36,11 +36,21 @@ class TerminalMover(BaseModel):
     tech_score: float | None = None
 
 
-class TerminalHeadline(BaseModel):
-    ticker: str
-    headline: str
-    detail: str
-    tone: str = "neutral"
+class NewsItem(BaseModel):
+    id: str
+    ticker: str | None = None
+    title: str
+    summary: str | None = None
+    publisher: str | None = None
+    link: str
+    published_at: str | None = None
+    related_tickers: list[str] = []
+
+
+class NewsResponse(BaseModel):
+    generated_at: str
+    scope: str
+    items: list[NewsItem]
 
 
 class TerminalOverview(BaseModel):
@@ -51,7 +61,6 @@ class TerminalOverview(BaseModel):
     momentum_leaders: list[TerminalMover]
     reversal_candidates: list[TerminalMover]
     breakouts: list[TerminalMover]
-    headlines: list[TerminalHeadline]
 
 
 class StrategyLeg(BaseModel):
@@ -65,12 +74,18 @@ class StrategyDefinition(BaseModel):
     name: str = "Custom Strategy"
     entry: StrategyLeg
     exit: StrategyLeg
+    entry_filters: list[StrategyLeg] = Field(default_factory=list)
+    exit_filters: list[StrategyLeg] = Field(default_factory=list)
+    entry_operator: str = "and"
+    exit_operator: str = "and"
     universe: list[str] | None = None
     start_date: str | None = None
     end_date: str | None = None
     initial_capital: float = 100000.0
     position_size_pct: float = 100.0
     stop_loss_pct: float | None = None
+    fee_bps: float = 0.0
+    slippage_bps: float = 0.0
     max_open_positions: int = 1
 
 
@@ -81,6 +96,8 @@ class StrategyBacktestRequest(BaseModel):
 
 class StrategyBacktestSummary(BaseModel):
     total_return_pct: float
+    gross_return_pct: float
+    cost_drag_pct: float
     buy_hold_return_pct: float
     max_drawdown_pct: float
     win_rate: float
@@ -88,6 +105,9 @@ class StrategyBacktestSummary(BaseModel):
     avg_return_pct: float
     annualized_return_pct: float | None = None
     sharpe_ratio: float | None = None
+    sortino_ratio: float | None = None
+    beta: float | None = None
+    total_fees_paid: float = 0.0
 
 
 class StrategyBacktestPoint(BaseModel):

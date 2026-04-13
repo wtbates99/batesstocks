@@ -10,6 +10,7 @@ from backend.models import (
     BackupCreateRequest,
     BackupCreateResponse,
     BackupStatus,
+    NewsResponse,
     SecurityOverview,
     StrategyBacktestRequest,
     StrategyBacktestResponse,
@@ -26,6 +27,7 @@ from backend.services.data_sync_service import (
     ensure_market_data,
     sync_market_data,
 )
+from backend.services.news_service import get_news
 from backend.services.sync_status import sync_status_tracker
 from backend.services.terminal_service import (
     get_security_overview,
@@ -130,3 +132,14 @@ def system_sync(request: SyncRequest) -> SyncResponse:
         return sync_market_data(request.tickers, years=request.years, source="manual")
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Data sync failed: {exc}") from exc
+
+
+@router.get("/news", response_model=NewsResponse)
+def terminal_news(
+    tickers: str = Query("", max_length=256),
+    scope: str = Query("terminal", min_length=1, max_length=32),
+    limit: int = Query(12, ge=1, le=40),
+) -> NewsResponse:
+    ensure_schema()
+    ticker_list = [value.strip().upper() for value in tickers.split(",") if value.strip()]
+    return get_news(scope=scope, tickers=ticker_list, limit=limit)
