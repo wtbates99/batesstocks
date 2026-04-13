@@ -13,6 +13,10 @@ export interface TerminalWatchlist {
   symbols: string[]
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
 function uniqHead(items: string[], limit: number) {
   return Array.from(new Set(items.map((item) => item.toUpperCase()))).slice(0, limit)
 }
@@ -35,6 +39,60 @@ function defaultWatchlists(): TerminalWatchlist[] {
     { id: 'core', name: 'Core', symbols: ['SPY', 'QQQ', 'AAPL', 'MSFT'] },
     { id: 'macro', name: 'Macro', symbols: ['TLT', 'GLD', 'XLF', 'IWM'] },
   ]
+}
+
+function sanitizeStringArray(value: unknown, limit: number, fallback: string[] = []) {
+  if (!Array.isArray(value)) return fallback
+  return uniqHead(
+    value.filter((item): item is string => typeof item === 'string').map((item) => item.trim()).filter(Boolean),
+    limit,
+  )
+}
+
+function sanitizeWatchlists(value: unknown): TerminalWatchlist[] {
+  if (!Array.isArray(value)) return defaultWatchlists()
+
+  const watchlists = value
+    .filter(isRecord)
+    .map((item, index) => {
+      const id = typeof item.id === 'string' && item.id.trim() ? item.id : `watchlist-${index + 1}`
+      const name = typeof item.name === 'string' && item.name.trim() ? item.name : `Watchlist ${index + 1}`
+      const symbols = sanitizeStringArray(item.symbols, 40)
+      return { id, name, symbols }
+    })
+    .filter((item) => item.symbols.length > 0)
+
+  return watchlists.length > 0 ? watchlists : defaultWatchlists()
+}
+
+function sanitizeSavedCompareSets(value: unknown): TerminalStore['savedCompareSets'] {
+  if (!Array.isArray(value)) return []
+
+  return value
+    .filter(isRecord)
+    .map((item, index) => ({
+      id: typeof item.id === 'string' && item.id.trim() ? item.id : `compare-${index + 1}`,
+      name: typeof item.name === 'string' && item.name.trim() ? item.name : 'Saved Compare',
+      tickers: sanitizeStringArray(item.tickers, 8),
+      createdAt: typeof item.createdAt === 'string' ? item.createdAt : new Date(0).toISOString(),
+    }))
+    .filter((item) => item.tickers.length > 0)
+    .slice(0, 12)
+}
+
+function sanitizeSavedDrafts<T>(value: unknown): SavedWorkspaceDraft<T>[] {
+  if (!Array.isArray(value)) return []
+
+  return value
+    .filter(isRecord)
+    .map((item, index) => ({
+      id: typeof item.id === 'string' && item.id.trim() ? item.id : `draft-${index + 1}`,
+      name: typeof item.name === 'string' && item.name.trim() ? item.name : 'Saved Draft',
+      createdAt: typeof item.createdAt === 'string' ? item.createdAt : new Date(0).toISOString(),
+      draft: item.draft as T,
+    }))
+    .filter((item) => item.draft != null)
+    .slice(0, 12)
 }
 
 interface TerminalStore {
@@ -242,11 +300,35 @@ export const useTerminalStore = create<TerminalStore>()(
         lastRoute: state.lastRoute,
       }),
       merge: (persisted, current) => {
-        const next = { ...current, ...(persisted as object) } as TerminalStore
-        if (!next.watchlists || next.watchlists.length === 0) {
-          next.watchlists = defaultWatchlists()
-          next.activeWatchlistId = next.watchlists[0].id
-        }
+        const source = isRecord(persisted) ? persisted : {}
+        const watchlists = sanitizeWatchlists(source.watchlists)
+        const activeWatchlistId = typeof source.activeWatchlistId === 'string' ? source.activeWatchlistId : ''
+
+        const next = {
+          ...current,
+          activeTicker: typeof source.activeTicker === 'string' && source.activeTicker.trim()
+            ? source.activeTicker.toUpperCase()
+            : current.activeTicker,
+          watchlists,
+          activeWatchlistId: watchlists.some((watchlist) => watchlist.id === activeWatchlistId)
+            ? activeWatchlistId
+            : watchlists[0].id,
+          recentTickers: sanitizeStringArray(source.recentTickers, 12, current.recentTickers),
+          compareTickers: sanitizeStringArray(source.compareTickers, 8, current.compareTickers),
+          savedCompareSets: sanitizeSavedCompareSets(source.savedCompareSets),
+          recentCommands: Array.isArray(source.recentCommands)
+            ? uniqCommands(
+              source.recentCommands.filter((item): item is string => typeof item === 'string'),
+              12,
+            )
+            : current.recentCommands,
+          savedScreens: sanitizeSavedDrafts<StrategyDraft>(source.savedScreens),
+          savedBacktests: sanitizeSavedDrafts<StrategyDraft>(source.savedBacktests),
+          lastRoute: typeof source.lastRoute === 'string' && source.lastRoute.startsWith('/')
+            ? source.lastRoute
+            : current.lastRoute,
+        } satisfies TerminalStore
+
         return next
       },
     },
