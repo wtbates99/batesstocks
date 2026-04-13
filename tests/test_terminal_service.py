@@ -107,9 +107,7 @@ def test_backtest_applies_composite_rules_and_cost_drag(monkeypatch, tmp_path):
         slippage_bps=5,
     )
 
-    response = run_strategy_backtest(
-        StrategyBacktestRequest(ticker="SPY", strategy=request)
-    )
+    response = run_strategy_backtest(StrategyBacktestRequest(ticker="SPY", strategy=request))
 
     assert response.summary.gross_return_pct >= response.summary.total_return_pct
     assert response.summary.cost_drag_pct >= 0
