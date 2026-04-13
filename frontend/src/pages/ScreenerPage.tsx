@@ -29,15 +29,25 @@ export default function ScreenerPage() {
         toggleWatchlist: state.toggleWatchlist,
         setCompareTickers: state.setCompareTickers,
       })),
-    )
+  )
 
   const result = screen.data
-  const newsTicker = result?.matches[0]?.ticker ?? 'SPY'
-  const news = useNewsQuery([newsTicker], 'screener', 6, Boolean(newsTicker))
+  const newsTickers = result?.matches.slice(0, 5).map((match) => match.ticker) ?? ['SPY']
+  const news = useNewsQuery(newsTickers, 'screener', 8, newsTickers.length > 0)
 
   useEffect(() => {
     saveJsonState('batesstocks:screener-draft', draft)
   }, [draft])
+
+  useEffect(() => {
+    if (!result) return
+    setAiContext({
+      page: 'screener',
+      strategy: draft,
+      matches: result.matches.slice(0, 8),
+      newsTickers,
+    })
+  }, [draft, newsTickers, result, setAiContext])
 
   const topSector = result?.matches
     .reduce(
@@ -281,9 +291,9 @@ export default function ScreenerPage() {
       </section>
 
       <NewsPanel
-        title={`News ${newsTicker}`}
+        title={`Signal News ${newsTickers.join(' · ')}`}
         items={news.data?.items ?? []}
-        empty="Run a screen and the top candidate's news tape will populate here for triage."
+        empty="Run a screen and the news tape will populate from the highest-ranked matches."
       />
     </div>
   )

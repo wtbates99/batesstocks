@@ -4,8 +4,13 @@ import { useShallow } from 'zustand/react/shallow'
 import NewsPanel from '../components/news/NewsPanel'
 import BreadthStrip from '../components/app/BreadthStrip'
 import DeltaPill from '../components/app/DeltaPill'
-import { useLivePricesQuery, useNewsQuery, useWorkspaceQuery } from '../api/query'
-import type { TerminalMover } from '../api/types'
+import {
+  useLivePricesQuery,
+  useNewsQuery,
+  useSnapshotsQuery,
+  useWorkspaceQuery,
+} from '../api/query'
+import type { SecurityListItem, TerminalMover } from '../api/types'
 import {
   formatCompactNumber,
   formatNumber,
@@ -85,6 +90,8 @@ export default function DashboardPage() {
     new Set([activeTicker, ...watchlist.slice(0, 5), ...recentTickers.slice(0, 4)]),
   ).slice(0, 6)
   const news = useNewsQuery(newsUniverse, 'dashboard', 10)
+  const watchlistBoard = useSnapshotsQuery(watchlist.slice(0, 14), watchlist.length > 0)
+  const recentBoard = useSnapshotsQuery(recentTickers.slice(0, 10), recentTickers.length > 0)
 
   const pulseUniverse = workspace.data
     ? [
@@ -124,6 +131,11 @@ export default function DashboardPage() {
 
   const overview = workspace.data
   const pulseSymbols = Array.from(new Set(pulseUniverse)).slice(0, 16)
+  const watchlistItems = watchlistBoard.data?.items ?? []
+  const recentItems = recentBoard.data?.items ?? []
+  const recentItemMap = new Map<string, SecurityListItem>(
+    recentItems.map((item) => [item.ticker, item]),
+  )
 
   // Separate breadth stats from price stats for better rendering
   const breadthStats = overview.stats.slice(0, 5)
@@ -168,28 +180,37 @@ export default function DashboardPage() {
             <thead>
               <tr>
                 <th>Ticker</th>
-                <th className="align-right">Price</th>
-                <th className="align-right">Chg</th>
+                <th className="align-right">Px</th>
+                <th className="align-right">Day</th>
+                <th className="align-right">20D</th>
+                <th className="align-right">Score</th>
               </tr>
             </thead>
             <tbody>
-              {watchlist.slice(0, 14).map((sym) => {
-                const price = live.data?.prices[sym]
-                return (
-                  <tr key={sym}>
-                    <td>
-                      <Link to={`/security/${sym}`} className="ticker-link">
-                        {sym}
-                      </Link>
-                    </td>
-                    <td className="align-right">{formatNumber(price)}</td>
-                    <td className="align-right">—</td>
-                  </tr>
-                )
-              })}
-              {watchlist.length === 0 && (
+              {watchlistItems.map((item) => (
+                <tr key={item.ticker}>
+                  <td>
+                    <Link to={`/security/${item.ticker}`} className="ticker-link">
+                      {item.ticker}
+                    </Link>
+                  </td>
+                  <td className="align-right">{formatNumber(item.close)}</td>
+                  <td className={`align-right ${toneClass(item.change_pct)}`}>
+                    {formatPercent(item.change_pct)}
+                  </td>
+                  <td className={`align-right ${toneClass(item.return_20d)}`}>
+                    {formatPercent(item.return_20d)}
+                  </td>
+                  <td
+                    className={`align-right ${(item.tech_score ?? 0) >= 65 ? 'tone-positive' : ''}`}
+                  >
+                    {formatNumber(item.tech_score, 0)}
+                  </td>
+                </tr>
+              ))}
+              {watchlistItems.length === 0 && (
                 <tr>
-                  <td colSpan={3} style={{ color: 'var(--text-dim)', padding: '12px 10px' }}>
+                  <td colSpan={5} style={{ color: 'var(--text-dim)', padding: '12px 10px' }}>
                     No watchlist symbols
                   </td>
                 </tr>
@@ -218,27 +239,42 @@ export default function DashboardPage() {
             <thead>
               <tr>
                 <th>Ticker</th>
-                <th className="align-right">Price</th>
-                <th></th>
+                <th className="align-right">Px</th>
+                <th className="align-right">Day</th>
+                <th className="align-right">RSI</th>
               </tr>
             </thead>
             <tbody>
-              {recentTickers.slice(0, 10).map((sym) => (
+              {recentTickers.slice(0, 10).map((sym) => {
+                const item = recentItemMap.get(sym)
+                return (
                 <tr key={sym}>
                   <td>
                     <Link to={`/security/${sym}`} className="ticker-link">
                       {sym}
                     </Link>
                   </td>
-                  <td className="align-right">{formatNumber(live.data?.prices[sym])}</td>
-                  <td>
-                    <DeltaPill value={null} />
+                  <td className="align-right">{formatNumber(item?.close ?? live.data?.prices[sym])}</td>
+                  <td className="align-right">
+                    <DeltaPill value={item?.change_pct ?? null} />
+                  </td>
+                  <td
+                    className={`align-right ${
+                      (item?.rsi ?? 50) >= 70
+                        ? 'tone-negative'
+                        : (item?.rsi ?? 50) <= 30
+                          ? 'tone-positive'
+                          : ''
+                    }`}
+                  >
+                    {formatNumber(item?.rsi, 1)}
                   </td>
                 </tr>
-              ))}
+                )
+              })}
               {recentTickers.length === 0 && (
                 <tr>
-                  <td colSpan={3} style={{ color: 'var(--text-dim)', padding: '12px 10px' }}>
+                  <td colSpan={4} style={{ color: 'var(--text-dim)', padding: '12px 10px' }}>
                     Navigate to symbols to build history
                   </td>
                 </tr>
