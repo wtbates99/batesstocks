@@ -426,7 +426,10 @@ def sync_market_data(
                         "DELETE FROM ohlcv_daily WHERE Ticker = ? AND Date >= ?",
                         [ticker, cutoff.to_pydatetime()],
                     )
-                    conn.execute("INSERT INTO ohlcv_daily SELECT * FROM raw_subset")
+                    conn.execute(
+                        "INSERT INTO ohlcv_daily (Date, Ticker, Open, High, Low, Close, AdjClose, Volume)"
+                        " SELECT Date, Ticker, Open, High, Low, Close, AdjClose, Volume FROM raw_subset"
+                    )
                     conn.unregister("raw_subset")
 
                     write_subset = _prepare_ticker_data_frame(subset)

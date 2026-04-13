@@ -176,3 +176,79 @@ def terminal_news(
     ensure_schema()
     ticker_list = [value.strip().upper() for value in tickers.split(",") if value.strip()]
     return get_news(scope=scope, tickers=ticker_list, limit=limit)
+
+
+@router.get("/system/freshness")
+def system_freshness() -> dict[str, object]:
+    """Return data freshness summary: latest date per ticker, stale count, total count."""
+    ensure_schema()
+    with duckdb_connection(read_only=True) as conn:
+        row = conn.execute("""
+            SELECT
+                MAX(Date)::TEXT AS latest_date,
+                MIN(Date)::TEXT AS oldest_date,
+                COUNT(DISTINCT Ticker) AS ticker_count,
+                COUNTIF(Date < CURRENT_DATE - INTERVAL '3 days') AS stale_count
+            FROM v_latest_ticker
+        """).fetchone()
+    if row is None:
+        return {
+            "generated_at": _utc_now(),
+            "latest_date": None,
+            "oldest_date": None,
+            "ticker_count": 0,
+            "stale_count": 0,
+        }
+    latest_date, oldest_date, ticker_count, stale_count = row
+    return {
+        "generated_at": _utc_now(),
+        "latest_date": latest_date,
+        "oldest_date": oldest_date,
+        "ticker_count": int(ticker_count or 0),
+        "stale_count": int(stale_count or 0),
+    }
+
+
+@router.post("/system/rebuild/indicators")
+def system_rebuild_indicators(
+    tickers: str = Query(
+        "", max_length=1024, description="Comma-separated tickers; empty = full universe"
+    ),
+) -> dict[str, object]:
+    """Trigger an indicator-only re-sync from existing raw OHLCV data.
+
+    This is a repair path — it re-fetches and rewrites ticker_data rows for
+    the specified tickers (or the full default universe if none are given).
+    Does not require external network for already-ingested tickers.
+    """
+    ensure_schema()
+    ticker_list = [v.strip().upper() for v in tickers.split(",") if v.strip()] or None
+    try:
+        result = sync_market_data(ticker_list, years=2, source="repair")
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Indicator rebuild failed: {exc}") from exc
+    return {
+        "generated_at": _utc_now(),
+        "tickers_rebuilt": result.tickers,
+        "rows_written": result.rows_written,
+        "finished_at": result.finished_at,
+    }
+
+
+@router.post("/system/rebuild/security/{ticker}")
+def system_rebuild_security(ticker: str) -> dict[str, object]:
+    """Repair a single ticker's data — re-syncs and recomputes indicators."""
+    ensure_schema()
+    symbol = ticker.strip().upper()
+    try:
+        result = sync_market_data([symbol], years=2, source="repair_single")
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502, detail=f"Single-ticker rebuild failed for {symbol}: {exc}"
+        ) from exc
+    return {
+        "generated_at": _utc_now(),
+        "ticker": symbol,
+        "rows_written": result.rows_written,
+        "finished_at": result.finished_at,
+    }

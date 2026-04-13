@@ -2,7 +2,12 @@ import { useEffect, useState } from 'react'
 import { Activity, Bot, ChevronRight, DatabaseZap, Radio, RefreshCw } from 'lucide-react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useShallow } from 'zustand/react/shallow'
-import { useHealthQuery, useLivePricesQuery, useSyncStatusQuery } from '../../api/query'
+import {
+  useFreshnessQuery,
+  useHealthQuery,
+  useLivePricesQuery,
+  useSyncStatusQuery,
+} from '../../api/query'
 import CommandBar from '../command/CommandBar'
 import AiPanel from '../AiPanel'
 import WorkspaceRail from './WorkspaceRail'
@@ -37,6 +42,7 @@ export default function TerminalShell() {
   const navigate = useNavigate()
   const { live, ready } = useHealthQuery()
   const syncStatus = useSyncStatusQuery()
+  const freshness = useFreshnessQuery()
   const strip = useLivePricesQuery(STRIP_TICKERS, true, 30_000)
   const {
     aiOpen,
@@ -45,6 +51,7 @@ export default function TerminalShell() {
     syncNotice,
     focusCommandBar,
     recentTickers,
+    activeTicker,
     setLastRoute,
   } = useTerminalStore(useShallow((state) => ({
     aiOpen: state.aiOpen,
@@ -53,6 +60,7 @@ export default function TerminalShell() {
     syncNotice: state.syncNotice,
     focusCommandBar: state.focusCommandBar,
     recentTickers: state.recentTickers,
+    activeTicker: state.activeTicker,
     setLastRoute: state.setLastRoute,
   })))
 
@@ -129,7 +137,13 @@ export default function TerminalShell() {
           <div className="brand-path">
             <span>TERMINAL</span>
             <ChevronRight size={12} />
-            <span>{location.pathname === '/' ? 'LAUNCHPAD' : location.pathname.toUpperCase()}</span>
+            <span>{location.pathname === '/' ? 'LAUNCHPAD' : location.pathname.replace(/^\//, '').toUpperCase()}</span>
+            {activeTicker && (
+              <>
+                <ChevronRight size={12} />
+                <span style={{ color: 'var(--amber-soft)' }}>{activeTicker}</span>
+              </>
+            )}
           </div>
         </div>
         <CommandBar />
@@ -194,6 +208,25 @@ export default function TerminalShell() {
           <DatabaseZap size={11} />
           <span>LAST SYNC {formatTimestamp(syncStatus.data?.last_success_at)}</span>
         </div>
+        {freshness.data && (
+          <div className="status-item">
+            <span
+              className={
+                (freshness.data.stale_count ?? 0) > 0 ? 'tone-warning' : 'tone-positive'
+              }
+            >
+              {freshness.data.latest_date ?? '—'}
+            </span>
+            {(freshness.data.stale_count ?? 0) > 0 && (
+              <span className="tone-warning">
+                {freshness.data.stale_count} STALE
+              </span>
+            )}
+            <span style={{ color: 'var(--text-dim)' }}>
+              {freshness.data.ticker_count} SYMBOLS
+            </span>
+          </div>
+        )}
         <div className={`status-item status-notice ${syncNotice ? `tone-${syncNotice.tone}` : ''}`}>
           <span>{syncNotice?.message ?? 'WATCHLIST, RECENTS, AND SAVED WORKSPACES ARE PERSISTED LOCALLY'}</span>
         </div>

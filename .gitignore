@@ -3,6 +3,7 @@ bullish_groups.json
 update_and_sync.sh
 *.csv
 *.db
+*.duckdb
 db/
 __pycache__/
 *.py[cod]
@@ -223,6 +224,11 @@ web_modules/
 
 # Optional stylelint cache
 .stylelintcache
+
+# Local agent / browser artifacts
+.codex
+frontend/test-results/
+frontend/playwright-report/
 
 # Microbundle cache
 .rpt2_cache/

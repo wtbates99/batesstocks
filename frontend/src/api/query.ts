@@ -17,6 +17,7 @@ export const terminalKeys = {
   livePrices: (tickers: string[]) => ['live-prices', ...tickers] as const,
   search: (query: string) => ['search', query] as const,
   syncStatus: () => ['sync-status'] as const,
+  freshness: () => ['freshness'] as const,
   healthLive: () => ['health-live'] as const,
   healthReady: () => ['health-ready'] as const,
 }
@@ -109,6 +110,16 @@ export function useSyncStatusQuery() {
     queryFn: api.system.syncStatus,
     staleTime: 1_000,
     refetchInterval: (query) => (query.state.data?.state === 'running' ? 2_500 : 10_000),
+    refetchOnWindowFocus: false,
+  })
+}
+
+export function useFreshnessQuery() {
+  return useQuery({
+    queryKey: terminalKeys.freshness(),
+    queryFn: api.system.freshness,
+    staleTime: 60_000,
+    refetchInterval: 300_000,
     refetchOnWindowFocus: false,
   })
 }
