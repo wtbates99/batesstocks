@@ -336,6 +336,10 @@ def get_security_overview(ticker: str, limit: int = 180) -> SecurityOverview:
                     td.Ticker_MACD,
                     td.Ticker_MACD_Signal,
                     td.Ticker_Tech_Score,
+                    td.Ticker_Return_20D,
+                    td.Ticker_Return_63D,
+                    td.Ticker_Return_126D,
+                    td.Ticker_Return_252D,
                     LAG(td.Close) OVER (PARTITION BY td.Ticker ORDER BY td.Date) AS prev_close,
                     ROW_NUMBER() OVER (PARTITION BY td.Ticker ORDER BY td.Date DESC) AS rn
                 FROM ticker_data td

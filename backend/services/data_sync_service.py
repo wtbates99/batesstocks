@@ -19,6 +19,42 @@ YFINANCE_CACHE_DIR = Path("/tmp/yfinance-cache")
 DEFAULT_UNIVERSE_MIN_SIZE = 400
 MIN_INDICATOR_LOOKBACK_YEARS = 2
 _SYNC_WRITE_LOCK = Lock()
+TICKER_DATA_COLUMNS = [
+    "Date",
+    "Ticker",
+    "Open",
+    "High",
+    "Low",
+    "Close",
+    "Volume",
+    "Ticker_SMA_10",
+    "Ticker_EMA_10",
+    "Ticker_SMA_30",
+    "Ticker_EMA_30",
+    "Ticker_RSI",
+    "Ticker_MACD",
+    "Ticker_MACD_Signal",
+    "Ticker_MACD_Diff",
+    "Ticker_Bollinger_PBand",
+    "Ticker_MFI",
+    "Ticker_VWAP",
+    "Ticker_Tech_Score",
+    "Ticker_SMA_50",
+    "Ticker_SMA_100",
+    "Ticker_SMA_200",
+    "Ticker_SMA_250",
+    "Ticker_EMA_50",
+    "Ticker_EMA_100",
+    "Ticker_EMA_200",
+    "Ticker_Return_20D",
+    "Ticker_Return_63D",
+    "Ticker_Return_126D",
+    "Ticker_Return_252D",
+    "Ticker_52W_High",
+    "Ticker_52W_Low",
+    "Ticker_52W_Range_Pct",
+    "Ticker_Avg_Volume_20D",
+]
 
 if hasattr(yf, "set_tz_cache_location"):
     YFINANCE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -238,6 +274,68 @@ def _compute_indicator_frame(frame: pd.DataFrame) -> pd.DataFrame:
     return computed.reset_index(drop=True)
 
 
+def _prepare_ticker_data_frame(frame: pd.DataFrame) -> pd.DataFrame:
+    return frame[TICKER_DATA_COLUMNS].copy()
+
+
+def rebuild_indicator_cache(tickers: list[str] | None = None) -> int:
+    universe = _normalize_tickers(tickers)
+    with duckdb_connection() as conn:
+        raw = conn.execute(
+            """
+            SELECT Date, Ticker, Open, High, Low, Close, AdjClose, Volume
+            FROM ohlcv_daily
+            ORDER BY Ticker, Date
+            """
+        ).df()
+
+        if raw.empty:
+            return 0
+        if universe:
+            raw = raw[raw["Ticker"].isin(universe)].copy()
+            if raw.empty:
+                return 0
+
+        indicator_frame = _compute_indicator_frame(raw)
+        write_frame = _prepare_ticker_data_frame(indicator_frame)
+        conn.register("rebuilt_ticker_data", write_frame)
+        if universe:
+            placeholders = ", ".join(["?"] * len(universe))
+            conn.execute("DROP TABLE IF EXISTS ticker_data_rebuilt")
+            conn.execute(
+                f"""
+                CREATE TABLE ticker_data_rebuilt AS
+                SELECT * FROM ticker_data
+                WHERE Ticker NOT IN ({placeholders})
+                """,
+                universe,
+            )
+            conn.execute(
+                f"""
+                INSERT INTO ticker_data_rebuilt ({", ".join(TICKER_DATA_COLUMNS)})
+                SELECT {", ".join(TICKER_DATA_COLUMNS)}
+                FROM rebuilt_ticker_data
+                """
+            )
+            conn.execute("DROP TABLE ticker_data")
+            conn.execute("ALTER TABLE ticker_data_rebuilt RENAME TO ticker_data")
+        else:
+            conn.execute("DROP TABLE ticker_data")
+            conn.execute(
+                f"""
+                CREATE TABLE ticker_data AS
+                SELECT {", ".join(TICKER_DATA_COLUMNS)}
+                FROM rebuilt_ticker_data
+                """
+            )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_ticker_data_ticker_date ON ticker_data (Ticker, Date)"
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_ticker_data_date ON ticker_data (Date)")
+        conn.unregister("rebuilt_ticker_data")
+    return len(write_frame)
+
+
 def _fetch_company_metadata(tickers: list[str]) -> pd.DataFrame:
     def fetch_one(ticker: str) -> dict[str, object]:
         row: dict[str, object] = {"Ticker": ticker}
@@ -331,50 +429,19 @@ def sync_market_data(
                     conn.execute("INSERT INTO ohlcv_daily SELECT * FROM raw_subset")
                     conn.unregister("raw_subset")
 
-                    write_subset = subset[
-                        [
-                            "Date",
-                            "Ticker",
-                            "Open",
-                            "High",
-                            "Low",
-                            "Close",
-                            "Volume",
-                            "Ticker_SMA_10",
-                            "Ticker_EMA_10",
-                            "Ticker_SMA_30",
-                            "Ticker_SMA_50",
-                            "Ticker_SMA_100",
-                            "Ticker_SMA_200",
-                            "Ticker_SMA_250",
-                            "Ticker_EMA_30",
-                            "Ticker_EMA_50",
-                            "Ticker_EMA_100",
-                            "Ticker_EMA_200",
-                            "Ticker_RSI",
-                            "Ticker_MACD",
-                            "Ticker_MACD_Signal",
-                            "Ticker_MACD_Diff",
-                            "Ticker_Bollinger_PBand",
-                            "Ticker_MFI",
-                            "Ticker_VWAP",
-                            "Ticker_Return_20D",
-                            "Ticker_Return_63D",
-                            "Ticker_Return_126D",
-                            "Ticker_Return_252D",
-                            "Ticker_52W_High",
-                            "Ticker_52W_Low",
-                            "Ticker_52W_Range_Pct",
-                            "Ticker_Avg_Volume_20D",
-                            "Ticker_Tech_Score",
-                        ]
-                    ].copy()
+                    write_subset = _prepare_ticker_data_frame(subset)
                     conn.register("ticker_subset", write_subset)
                     conn.execute(
                         "DELETE FROM ticker_data WHERE Ticker = ? AND Date >= ?",
                         [ticker, cutoff.to_pydatetime()],
                     )
-                    conn.execute("INSERT INTO ticker_data SELECT * FROM ticker_subset")
+                    conn.execute(
+                        f"""
+                        INSERT INTO ticker_data ({", ".join(TICKER_DATA_COLUMNS)})
+                        SELECT {", ".join(TICKER_DATA_COLUMNS)}
+                        FROM ticker_subset
+                        """
+                    )
                     conn.unregister("ticker_subset")
                     rows_written += len(write_subset)
 
