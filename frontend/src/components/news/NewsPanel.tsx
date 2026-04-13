@@ -5,11 +5,12 @@ interface Props {
   title: string
   items: NewsItem[]
   empty: string
+  className?: string
 }
 
-export default function NewsPanel({ title, items, empty }: Props) {
+export default function NewsPanel({ title, items, empty, className }: Props) {
   return (
-    <section className="terminal-panel">
+    <section className={`terminal-panel${className ? ` ${className}` : ''}`}>
       <div className="panel-header">
         <div className="panel-title">{title}</div>
       </div>

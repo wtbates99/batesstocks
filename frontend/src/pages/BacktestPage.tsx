@@ -50,7 +50,11 @@ export default function BacktestPage() {
   }, [draft])
 
   const result = backtest.data
-  const news = useNewsQuery([draft.ticker], 'backtest', 6, Boolean(draft.ticker))
+  const currentMatches = result?.current_matches ?? screen.data?.matches ?? []
+  const newsTickers = Array.from(
+    new Set([draft.ticker.toUpperCase(), ...currentMatches.slice(0, 4).map((match) => match.ticker)]),
+  ).filter(Boolean)
+  const news = useNewsQuery(newsTickers, 'backtest', 8, newsTickers.length > 0)
   const chartData = useMemo(
     () =>
       result?.equity_curve.map((point) => ({
@@ -64,6 +68,18 @@ export default function BacktestPage() {
       })) ?? [],
     [result],
   )
+
+  useEffect(() => {
+    if (!result && currentMatches.length === 0) return
+    setAiContext({
+      page: 'backtest',
+      ticker: draft.ticker,
+      strategy: draft,
+      summary: result?.summary,
+      currentMatches: currentMatches.slice(0, 8),
+      newsTickers,
+    })
+  }, [currentMatches, draft, newsTickers, result, setAiContext])
 
   return (
     <div className="workbench-grid">
@@ -402,7 +418,7 @@ export default function BacktestPage() {
           <div className="panel-header">
             <div className="panel-title">Current Matches</div>
           </div>
-          {result?.current_matches || screen.data?.matches ? (
+          {currentMatches.length > 0 ? (
             <div className="panel-table-wrap">
               <table className="terminal-table compact">
                 <thead>
@@ -416,7 +432,7 @@ export default function BacktestPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {(result?.current_matches ?? screen.data?.matches ?? []).map((match) => (
+                  {currentMatches.map((match) => (
                     <tr key={match.ticker}>
                       <td>
                         <Link to={`/security/${match.ticker}`} className="ticker-link">
@@ -463,9 +479,9 @@ export default function BacktestPage() {
         </section>
 
         <NewsPanel
-          title={`News ${draft.ticker.toUpperCase()}`}
+          title={`Research News ${newsTickers.join(' · ')}`}
           items={news.data?.items ?? []}
-          empty="The research blotter will show current ticker news alongside the backtest workspace."
+          empty="The research blotter will show current ticker and active match news alongside the backtest workspace."
         />
       </div>
     </div>
