@@ -1,24 +1,24 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { Play, Save, ScanSearch } from 'lucide-react'
-import { useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { useShallow } from 'zustand/react/shallow'
 import NewsPanel from '../components/news/NewsPanel'
 import StrategyWorkbench from '../components/strategy/StrategyWorkbench'
 import { useBacktestMutation, useNewsQuery, useScreenMutation } from '../api/query'
-import { buildStrategyDefinition, createDefaultStrategyDraft, type StrategyDraft } from '../lib/strategy'
-import { formatCurrency, formatNumber, formatPercent, formatTimestamp } from '../lib/formatters'
+import {
+  buildStrategyDefinition,
+  createDefaultStrategyDraft,
+  type StrategyDraft,
+} from '../lib/strategy'
+import {
+  formatCurrency,
+  formatNumber,
+  formatPercent,
+  formatTimestamp,
+} from '../lib/formatters'
 import { loadJsonState, saveJsonState } from '../lib/storage'
 import { useTerminalStore } from '../state/terminalStore'
-
-function ScoreCard({ label, value, tone }: { label: string; value: string; tone?: string }) {
-  return (
-    <div className="score-card">
-      <div className="score-label">{label}</div>
-      <div className={`score-value ${tone ?? ''}`}>{value}</div>
-    </div>
-  )
-}
 
 export default function BacktestPage() {
   const [params] = useSearchParams()
@@ -29,17 +29,14 @@ export default function BacktestPage() {
   })
   const backtest = useBacktestMutation()
   const screen = useScreenMutation()
-  const {
-    setAiContext,
-    saveBacktestDraft,
-    savedBacktests,
-    toggleWatchlist,
-  } = useTerminalStore(useShallow((state) => ({
-    setAiContext: state.setAiContext,
-    saveBacktestDraft: state.saveBacktestDraft,
-    savedBacktests: state.savedBacktests,
-    toggleWatchlist: state.toggleWatchlist,
-  })))
+  const { setAiContext, saveBacktestDraft, savedBacktests, toggleWatchlist } = useTerminalStore(
+    useShallow((state) => ({
+      setAiContext: state.setAiContext,
+      saveBacktestDraft: state.saveBacktestDraft,
+      savedBacktests: state.savedBacktests,
+      toggleWatchlist: state.toggleWatchlist,
+    })),
+  )
 
   useEffect(() => {
     const ticker = params.get('ticker')
@@ -55,35 +52,40 @@ export default function BacktestPage() {
   const result = backtest.data
   const news = useNewsQuery([draft.ticker], 'backtest', 6, Boolean(draft.ticker))
   const chartData = useMemo(
-    () => result?.equity_curve.map((point) => ({
-      date: point.date.slice(2),
-      equity: point.equity,
-      benchmark: point.benchmark,
-      drawdown: point.benchmark != null && point.benchmark !== 0 ? (((point.equity / point.benchmark) - 1) * 100) : null,
-    })) ?? [],
+    () =>
+      result?.equity_curve.map((point) => ({
+        date: point.date.slice(2),
+        equity: point.equity,
+        benchmark: point.benchmark,
+        edge:
+          point.benchmark != null && point.benchmark !== 0
+            ? ((point.equity / point.benchmark) - 1) * 100
+            : null,
+      })) ?? [],
     [result],
   )
 
   return (
     <div className="workbench-grid">
+      {/* ── Backtest Builder ──────────────────────────────────── */}
       <section className="terminal-panel">
         <div className="panel-header">
           <div className="panel-title">Backtest Builder</div>
           <div className="panel-meta">NET OF FEES + SLIPPAGE</div>
         </div>
         <div className="panel-body-pad">
-          <StrategyWorkbench draft={draft} includeTicker onChange={(updater) => setDraft((current) => updater(current))} />
+          <StrategyWorkbench
+            draft={draft}
+            includeTicker
+            onChange={(updater) => setDraft((current) => updater(current))}
+          />
           <div className="action-row">
             <button
               type="button"
               className="terminal-button"
               onClick={async () => {
                 const strategy = buildStrategyDefinition(draft)
-                setAiContext({
-                  page: 'backtest',
-                  ticker: draft.ticker,
-                  strategy,
-                })
+                setAiContext({ page: 'backtest', ticker: draft.ticker, strategy })
                 await backtest.mutateAsync({
                   ticker: draft.ticker.toUpperCase(),
                   strategy,
@@ -116,7 +118,12 @@ export default function BacktestPage() {
           {savedBacktests.length > 0 && (
             <div className="saved-inline-list">
               {savedBacktests.slice(0, 4).map((item) => (
-                <button key={item.id} type="button" className="saved-inline-button" onClick={() => setDraft(item.draft)}>
+                <button
+                  key={item.id}
+                  type="button"
+                  className="saved-inline-button"
+                  onClick={() => setDraft(item.draft)}
+                >
                   <span>{item.name}</span>
                   <span>{formatTimestamp(item.createdAt)}</span>
                 </button>
@@ -131,57 +138,163 @@ export default function BacktestPage() {
         </div>
       </section>
 
+      {/* ── Analytics grid ────────────────────────────────────── */}
       <div className="analytics-grid">
+        {/* Scorecard */}
         <section className="terminal-panel">
           <div className="panel-header">
             <div className="panel-title">Scorecard</div>
+            {result && (
+              <div className="panel-meta">
+                {result.summary.num_trades} trades · {formatPercent(result.summary.win_rate, 0)}{' '}
+                win rate
+              </div>
+            )}
           </div>
-          <div className="score-grid">
-            <ScoreCard label="Net Return" value={result ? formatPercent(result.summary.total_return_pct) : '—'} tone={result && result.summary.total_return_pct >= 0 ? 'tone-positive' : 'tone-negative'} />
-            <ScoreCard label="Gross Return" value={result ? formatPercent(result.summary.gross_return_pct) : '—'} />
-            <ScoreCard label="Cost Drag" value={result ? formatPercent(result.summary.cost_drag_pct) : '—'} tone="tone-warning" />
-            <ScoreCard label="CAGR" value={result ? formatPercent(result.summary.annualized_return_pct) : '—'} />
-            <ScoreCard label="Max Drawdown" value={result ? formatPercent(result.summary.max_drawdown_pct) : '—'} tone="tone-negative" />
-            <ScoreCard label="Sharpe" value={result ? formatNumber(result.summary.sharpe_ratio, 2) : '—'} />
-            <ScoreCard label="Sortino" value={result ? formatNumber(result.summary.sortino_ratio, 2) : '—'} />
-            <ScoreCard label="Beta" value={result ? formatNumber(result.summary.beta, 2) : '—'} />
-            <ScoreCard label="Fees Paid" value={result ? formatCurrency(result.summary.total_fees_paid) : '—'} />
+          <div className="stats-row" style={{ flexWrap: 'wrap' }}>
+            <div className="stats-cell">
+              <div className="stats-label">Net Return</div>
+              <div
+                className={`stats-value ${result && result.summary.total_return_pct >= 0 ? 'tone-positive' : 'tone-negative'}`}
+              >
+                {result ? formatPercent(result.summary.total_return_pct) : '—'}
+              </div>
+              {result && (
+                <div className="stats-sub">
+                  gross {formatPercent(result.summary.gross_return_pct)}
+                </div>
+              )}
+            </div>
+            <div className="stats-cell">
+              <div className="stats-label">CAGR</div>
+              <div className="stats-value">
+                {result ? formatPercent(result.summary.annualized_return_pct) : '—'}
+              </div>
+            </div>
+            <div className="stats-cell">
+              <div className="stats-label">Max DD</div>
+              <div className="stats-value tone-negative">
+                {result ? formatPercent(result.summary.max_drawdown_pct) : '—'}
+              </div>
+            </div>
+            <div className="stats-cell">
+              <div className="stats-label">Sharpe</div>
+              <div
+                className={`stats-value ${result && (result.summary.sharpe_ratio ?? 0) >= 1 ? 'tone-positive' : ''}`}
+              >
+                {result ? formatNumber(result.summary.sharpe_ratio, 2) : '—'}
+              </div>
+            </div>
+            <div className="stats-cell">
+              <div className="stats-label">Sortino</div>
+              <div className="stats-value">
+                {result ? formatNumber(result.summary.sortino_ratio, 2) : '—'}
+              </div>
+            </div>
+            <div className="stats-cell">
+              <div className="stats-label">Beta</div>
+              <div className="stats-value">
+                {result ? formatNumber(result.summary.beta, 2) : '—'}
+              </div>
+            </div>
+            <div className="stats-cell">
+              <div className="stats-label">Cost Drag</div>
+              <div className="stats-value tone-warning">
+                {result ? formatPercent(result.summary.cost_drag_pct) : '—'}
+              </div>
+              {result && (
+                <div className="stats-sub">{formatCurrency(result.summary.total_fees_paid)}</div>
+              )}
+            </div>
+            <div className="stats-cell">
+              <div className="stats-label">Buy &amp; Hold</div>
+              <div
+                className={`stats-value ${result && result.summary.buy_hold_return_pct >= 0 ? 'tone-positive' : 'tone-negative'}`}
+              >
+                {result ? formatPercent(result.summary.buy_hold_return_pct) : '—'}
+              </div>
+            </div>
           </div>
         </section>
 
+        {/* Run Assumptions */}
         <section className="terminal-panel">
           <div className="panel-header">
             <div className="panel-title">Run Assumptions</div>
           </div>
           <div className="signal-list panel-body-pad">
-            <div className="signal-row"><span>Ticker</span><span>{draft.ticker || '—'}</span></div>
-            <div className="signal-row"><span>Initial Capital</span><span>{formatCurrency(Number(draft.initialCapital || 0))}</span></div>
-            <div className="signal-row"><span>Position Size</span><span>{formatPercent(Number(draft.positionSizePct || 0))}</span></div>
-            <div className="signal-row"><span>Fee Bps</span><span>{formatNumber(Number(draft.feeBps || 0), 0)}</span></div>
-            <div className="signal-row"><span>Slippage Bps</span><span>{formatNumber(Number(draft.slippageBps || 0), 0)}</span></div>
-            <div className="signal-row"><span>Max Positions</span><span>1</span></div>
+            <div className="signal-row">
+              <span>Ticker</span>
+              <span>{draft.ticker || '—'}</span>
+            </div>
+            <div className="signal-row">
+              <span>Initial Capital</span>
+              <span>{formatCurrency(Number(draft.initialCapital || 0))}</span>
+            </div>
+            <div className="signal-row">
+              <span>Position Size</span>
+              <span>{formatPercent(Number(draft.positionSizePct || 0))}</span>
+            </div>
+            <div className="signal-row">
+              <span>Fee Bps</span>
+              <span>{formatNumber(Number(draft.feeBps || 0), 0)}</span>
+            </div>
+            <div className="signal-row">
+              <span>Slippage Bps</span>
+              <span>{formatNumber(Number(draft.slippageBps || 0), 0)}</span>
+            </div>
+            <div className="signal-row">
+              <span>Max Positions</span>
+              <span>1</span>
+            </div>
           </div>
         </section>
 
+        {/* Equity Curve */}
         <section className="terminal-panel">
           <div className="panel-header">
             <div className="panel-title">Equity Curve</div>
+            <div className="panel-meta">
+              <span style={{ color: '#f3a037' }}>■</span> strategy &nbsp;
+              <span style={{ color: '#3bb9e3' }}>■</span> benchmark
+            </div>
           </div>
           <div className="chart-panel">
             {chartData.length > 0 ? (
               <ResponsiveContainer width="100%" height={280}>
                 <LineChart data={chartData}>
-                  <XAxis dataKey="date" tick={{ fill: '#7f8b96', fontSize: 10 }} minTickGap={32} />
-                  <YAxis tick={{ fill: '#7f8b96', fontSize: 10 }} width={72} />
+                  <XAxis
+                    dataKey="date"
+                    tick={{ fill: '#7f8b96', fontSize: 10 }}
+                    minTickGap={32}
+                  />
+                  <YAxis
+                    tickFormatter={(v: number) => `$${(v / 1000).toFixed(0)}k`}
+                    tick={{ fill: '#7f8b96', fontSize: 10 }}
+                    width={54}
+                  />
                   <Tooltip
                     contentStyle={{
                       background: '#090b0d',
                       border: '1px solid #1e242d',
                       color: '#d4dae1',
                     }}
+                    formatter={(value: number) => [formatCurrency(value)]}
                   />
-                  <Line type="monotone" dataKey="benchmark" stroke="#3bb9e3" dot={false} strokeWidth={1.4} />
-                  <Line type="monotone" dataKey="equity" stroke="#f3a037" dot={false} strokeWidth={1.8} />
+                  <Line
+                    type="monotone"
+                    dataKey="benchmark"
+                    stroke="#3bb9e3"
+                    dot={false}
+                    strokeWidth={1.4}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="equity"
+                    stroke="#f3a037"
+                    dot={false}
+                    strokeWidth={1.8}
+                  />
                 </LineChart>
               </ResponsiveContainer>
             ) : (
@@ -190,24 +303,41 @@ export default function BacktestPage() {
           </div>
         </section>
 
+        {/* Relative Edge */}
         <section className="terminal-panel">
           <div className="panel-header">
             <div className="panel-title">Relative Edge</div>
+            <div className="panel-meta">strategy vs benchmark %</div>
           </div>
           <div className="chart-panel">
             {chartData.length > 0 ? (
               <ResponsiveContainer width="100%" height={180}>
                 <LineChart data={chartData}>
-                  <XAxis dataKey="date" tick={{ fill: '#7f8b96', fontSize: 10 }} minTickGap={32} />
-                  <YAxis tick={{ fill: '#7f8b96', fontSize: 10 }} width={72} />
+                  <XAxis
+                    dataKey="date"
+                    tick={{ fill: '#7f8b96', fontSize: 10 }}
+                    minTickGap={32}
+                  />
+                  <YAxis
+                    tickFormatter={(v: number) => `${v.toFixed(0)}%`}
+                    tick={{ fill: '#7f8b96', fontSize: 10 }}
+                    width={44}
+                  />
                   <Tooltip
                     contentStyle={{
                       background: '#090b0d',
                       border: '1px solid #1e242d',
                       color: '#d4dae1',
                     }}
+                    formatter={(value: number) => [`${value.toFixed(2)}%`]}
                   />
-                  <Line type="monotone" dataKey="drawdown" stroke="#3bb9e3" dot={false} strokeWidth={1.4} />
+                  <Line
+                    type="monotone"
+                    dataKey="edge"
+                    stroke="#3bb9e3"
+                    dot={false}
+                    strokeWidth={1.4}
+                  />
                 </LineChart>
               </ResponsiveContainer>
             ) : (
@@ -216,13 +346,20 @@ export default function BacktestPage() {
           </div>
         </section>
 
+        {/* Executed Trades */}
         <section className="terminal-panel">
           <div className="panel-header">
             <div className="panel-title">Executed Trades</div>
+            {result && (
+              <div className="panel-meta">
+                {result.trades.filter((t) => t.return_pct >= 0).length} wins /{' '}
+                {result.trades.filter((t) => t.return_pct < 0).length} losses
+              </div>
+            )}
           </div>
           {result ? (
             <div className="panel-table-wrap">
-              <table className="terminal-table">
+              <table className="terminal-table compact">
                 <thead>
                   <tr>
                     <th>Entry</th>
@@ -240,8 +377,16 @@ export default function BacktestPage() {
                       <td>{trade.exit_date}</td>
                       <td className="align-right">{formatNumber(trade.entry_price)}</td>
                       <td className="align-right">{formatNumber(trade.exit_price)}</td>
-                      <td className={`align-right ${trade.return_pct >= 0 ? 'tone-positive' : 'tone-negative'}`}>{formatPercent(trade.return_pct)}</td>
-                      <td className={`align-right ${trade.pnl >= 0 ? 'tone-positive' : 'tone-negative'}`}>{formatCurrency(trade.pnl)}</td>
+                      <td
+                        className={`align-right ${trade.return_pct >= 0 ? 'tone-positive' : 'tone-negative'}`}
+                      >
+                        {formatPercent(trade.return_pct)}
+                      </td>
+                      <td
+                        className={`align-right ${trade.pnl >= 0 ? 'tone-positive' : 'tone-negative'}`}
+                      >
+                        {formatCurrency(trade.pnl)}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -252,13 +397,14 @@ export default function BacktestPage() {
           )}
         </section>
 
+        {/* Current Matches */}
         <section className="terminal-panel">
           <div className="panel-header">
             <div className="panel-title">Current Matches</div>
           </div>
-          {(result?.current_matches || screen.data?.matches) ? (
+          {result?.current_matches || screen.data?.matches ? (
             <div className="panel-table-wrap">
-              <table className="terminal-table">
+              <table className="terminal-table compact">
                 <thead>
                   <tr>
                     <th>Ticker</th>
@@ -272,13 +418,39 @@ export default function BacktestPage() {
                 <tbody>
                   {(result?.current_matches ?? screen.data?.matches ?? []).map((match) => (
                     <tr key={match.ticker}>
-                      <td>{match.ticker}</td>
-                      <td>{match.sector ?? '—'}</td>
-                      <td className="align-right">{formatNumber(match.last_price)}</td>
-                      <td className="align-right">{formatNumber(match.rsi, 1)}</td>
-                      <td className="align-right">{formatNumber(match.tech_score, 0)}</td>
                       <td>
-                        <button type="button" className="table-action" onClick={() => toggleWatchlist(match.ticker)}>WATCH</button>
+                        <Link to={`/security/${match.ticker}`} className="ticker-link">
+                          {match.ticker}
+                        </Link>
+                      </td>
+                      <td style={{ color: 'var(--text-muted)', fontSize: 'var(--fs-xs)' }}>
+                        {match.sector ?? '—'}
+                      </td>
+                      <td className="align-right">{formatNumber(match.last_price)}</td>
+                      <td
+                        className={`align-right ${
+                          (match.rsi ?? 50) >= 70
+                            ? 'tone-negative'
+                            : (match.rsi ?? 50) <= 30
+                              ? 'tone-positive'
+                              : ''
+                        }`}
+                      >
+                        {formatNumber(match.rsi, 1)}
+                      </td>
+                      <td
+                        className={`align-right ${(match.tech_score ?? 0) >= 65 ? 'tone-positive' : ''}`}
+                      >
+                        {formatNumber(match.tech_score, 0)}
+                      </td>
+                      <td>
+                        <button
+                          type="button"
+                          className="table-action"
+                          onClick={() => toggleWatchlist(match.ticker)}
+                        >
+                          WATCH
+                        </button>
                       </td>
                     </tr>
                   ))}

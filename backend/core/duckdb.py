@@ -179,6 +179,95 @@ def ensure_schema() -> None:
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_news_cache_ticker_fetched_at ON news_cache (ticker, fetched_at)"
             )
+
+            # ── Serving views ─────────────────────────────────────────────────
+            # v_latest_ticker: most recent row per ticker with day-over-day change
+            conn.execute("""
+                CREATE OR REPLACE VIEW v_latest_ticker AS
+                WITH ordered AS (
+                    SELECT
+                        *,
+                        LAG(Close) OVER (PARTITION BY Ticker ORDER BY Date) AS prev_close,
+                        ROW_NUMBER() OVER (PARTITION BY Ticker ORDER BY Date DESC) AS rn
+                    FROM ticker_data
+                )
+                SELECT
+                    Ticker,
+                    Date,
+                    Open,
+                    High,
+                    Low,
+                    Close,
+                    Volume,
+                    prev_close,
+                    CASE WHEN prev_close IS NULL OR prev_close = 0 THEN NULL
+                         ELSE ((Close / prev_close) - 1) * 100
+                    END AS change_pct,
+                    Ticker_RSI,
+                    Ticker_MACD,
+                    Ticker_MACD_Signal,
+                    Ticker_Tech_Score,
+                    Ticker_SMA_10,
+                    Ticker_SMA_30,
+                    Ticker_SMA_50,
+                    Ticker_SMA_100,
+                    Ticker_SMA_200,
+                    Ticker_SMA_250,
+                    Ticker_EMA_10,
+                    Ticker_EMA_50,
+                    Ticker_EMA_100,
+                    Ticker_EMA_200,
+                    Ticker_Return_20D,
+                    Ticker_Return_63D,
+                    Ticker_Return_126D,
+                    Ticker_Return_252D,
+                    Ticker_52W_High,
+                    Ticker_52W_Low,
+                    Ticker_52W_Range_Pct,
+                    Ticker_Avg_Volume_20D,
+                    CASE WHEN Ticker_Avg_Volume_20D > 0
+                         THEN Volume / Ticker_Avg_Volume_20D
+                         ELSE NULL
+                    END AS volume_ratio
+                FROM ordered
+                WHERE rn = 1
+            """)
+
+            # v_latest_security: latest ticker snapshot joined with company info
+            conn.execute("""
+                CREATE OR REPLACE VIEW v_latest_security AS
+                SELECT
+                    t.*,
+                    si.FullName,
+                    si.ShortName,
+                    si.Sector,
+                    si.Subsector,
+                    si.MarketCap,
+                    si.Exchange,
+                    si.Currency,
+                    si.QuoteType
+                FROM v_latest_ticker t
+                LEFT JOIN stock_information si ON si.Ticker = t.Ticker
+            """)
+
+            # v_sector_breadth: sector-level aggregation from latest snapshot
+            conn.execute("""
+                CREATE OR REPLACE VIEW v_sector_breadth AS
+                SELECT
+                    si.Sector,
+                    COUNT(*) AS members,
+                    AVG(t.change_pct) AS avg_change_pct,
+                    AVG(t.Ticker_Return_20D) AS avg_return_20d,
+                    AVG(t.Ticker_RSI) AS avg_rsi,
+                    100.0 * AVG(CASE WHEN t.Close > t.Ticker_SMA_200 THEN 1.0 ELSE 0.0 END)
+                        AS pct_above_200d,
+                    MAX(t.Date) AS latest_date
+                FROM v_latest_ticker t
+                JOIN stock_information si ON si.Ticker = t.Ticker
+                WHERE si.Sector IS NOT NULL
+                GROUP BY si.Sector
+            """)
+
         _SCHEMA_READY = True
         _SCHEMA_DB_PATH = db_path
 
