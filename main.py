@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from asyncio import Lock, to_thread
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -240,20 +241,48 @@ async def _call_anthropic(payload: AiChatRequest) -> str:
 
 
 async def _call_ollama(payload: AiChatRequest) -> str:
-    host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+    host = os.getenv("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
+    if host.endswith("/api"):
+        host = host[:-4]
     model = payload.model or os.getenv("OLLAMA_MODEL", "llama3.1")
+    api_key = payload.api_key or os.getenv("OLLAMA_API_KEY", "")
+    headers: dict[str, str] = {}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
     async with httpx.AsyncClient(timeout=120.0) as client:
-        response = await client.post(
+        parts: list[str] = []
+        async with client.stream(
+            "POST",
             f"{host}/api/chat",
+            headers=headers,
             json={
                 "model": model,
-                "stream": False,
+                "stream": True,
+                "think": False,
                 "messages": [message.model_dump() for message in payload.messages],
             },
-        )
-        response.raise_for_status()
-        data = response.json()
-    return data["message"]["content"]
+        ) as response:
+            response.raise_for_status()
+            async for line in response.aiter_lines():
+                if not line:
+                    continue
+                try:
+                    chunk = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                parts.append(chunk.get("message", {}).get("content", ""))
+                if chunk.get("done"):
+                    break
+
+    raw = "".join(parts).strip()
+    if "</think>" in raw:
+        content = raw.split("</think>")[-1].strip()
+    else:
+        content = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+    if not content:
+        raise HTTPException(status_code=502, detail="Ollama returned empty response")
+    return content
 
 
 def _fallback_ai_response(payload: AiChatRequest) -> str:

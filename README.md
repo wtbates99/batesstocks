@@ -210,8 +210,9 @@ Key variables:
 | `AUTO_SYNC_ON_START` | `true` | Auto-bootstrap market data on empty boot |
 | `DUCKDB_MEMORY_LIMIT` | `2GB` | DuckDB memory cap |
 | `DUCKDB_THREADS` | `4` | DuckDB worker threads |
-| `OLLAMA_HOST` | `http://localhost:11434` | Ollama endpoint |
+| `OLLAMA_HOST` | `http://localhost:11434` | Ollama endpoint, local or cloud |
 | `OLLAMA_MODEL` | `llama3.1` | Default Ollama model |
+| `OLLAMA_API_KEY` | unset | Bearer token for Ollama cloud |
 | `OPENAI_API_KEY` | unset | Enables OpenAI chat |
 | `OPENAI_MODEL` | `gpt-5-mini` | Default OpenAI model |
 | `ANTHROPIC_API_KEY` | unset | Enables Anthropic chat |
