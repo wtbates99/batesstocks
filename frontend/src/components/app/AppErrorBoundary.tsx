@@ -9,6 +9,9 @@ interface AppErrorBoundaryState {
   message?: string
 }
 
+const LOCAL_STATE_KEY = 'batesstocks-terminal'
+const RECOVERY_FLAG = 'batesstocks-terminal-recovery-attempted'
+
 export default class AppErrorBoundary extends Component<AppErrorBoundaryProps, AppErrorBoundaryState> {
   state: AppErrorBoundaryState = {
     hasError: false,
@@ -24,11 +27,25 @@ export default class AppErrorBoundary extends Component<AppErrorBoundaryProps, A
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error('BATESSTOCKS render failure', error, errorInfo)
+
+    if (typeof window === 'undefined') return
+
+    const alreadyRetried = window.sessionStorage.getItem(RECOVERY_FLAG) === '1'
+    if (alreadyRetried) return
+
+    try {
+      window.sessionStorage.setItem(RECOVERY_FLAG, '1')
+      window.localStorage.removeItem(LOCAL_STATE_KEY)
+      window.location.replace(window.location.pathname || '/')
+    } catch {
+      // Fall through to the visible recovery UI if storage access is blocked.
+    }
   }
 
   handleReset = () => {
     try {
-      window.localStorage.removeItem('batesstocks-terminal')
+      window.sessionStorage.removeItem(RECOVERY_FLAG)
+      window.localStorage.removeItem(LOCAL_STATE_KEY)
     } catch {
       // Ignore storage cleanup failures and still attempt a reload.
     }

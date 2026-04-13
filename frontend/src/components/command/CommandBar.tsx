@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronRight, History, Terminal } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
+import { useShallow } from 'zustand/react/shallow'
 import { useSearchQuery, useSyncMutation } from '../../api/query'
 import { executeTerminalCommand, parseTerminalCommand } from '../../lib/commands'
 import { cn } from '../../lib/formatters'
@@ -48,7 +49,7 @@ export default function CommandBar() {
     toggleWatchlist,
     setCompareTickers,
     addRecentCommand,
-  } = useTerminalStore((state) => ({
+  } = useTerminalStore(useShallow((state) => ({
     commandValue: state.commandValue,
     commandFocusNonce: state.commandFocusNonce,
     setCommandValue: state.setCommandValue,
@@ -61,7 +62,7 @@ export default function CommandBar() {
     toggleWatchlist: state.toggleWatchlist,
     setCompareTickers: state.setCompareTickers,
     addRecentCommand: state.addRecentCommand,
-  }))
+  })))
   const debounced = useDebouncedValue(commandValue)
   const parsed = useMemo(() => parseTerminalCommand(commandValue), [commandValue])
   const firstToken = debounced.trim().split(/\s+/)[0]?.toUpperCase() ?? ''

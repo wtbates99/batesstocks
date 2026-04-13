@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { useShallow } from 'zustand/react/shallow'
 import NewsPanel from '../components/news/NewsPanel'
 import { useNewsQuery, useSnapshotsQuery } from '../api/query'
 import { formatCompactNumber, formatNumber, formatPercent } from '../lib/formatters'
@@ -24,7 +25,7 @@ export default function WatchlistsPage() {
     deleteWatchlist,
     toggleWatchlist,
     setCompareTickers,
-  } = useTerminalStore((state) => ({
+  } = useTerminalStore(useShallow((state) => ({
     watchlists: state.watchlists,
     activeWatchlistId: state.activeWatchlistId,
     activeWatchlist: getActiveWatchlist(state),
@@ -35,7 +36,7 @@ export default function WatchlistsPage() {
     deleteWatchlist: state.deleteWatchlist,
     toggleWatchlist: state.toggleWatchlist,
     setCompareTickers: state.setCompareTickers,
-  }))
+  })))
 
   const symbols = activeWatchlist?.symbols ?? []
   const snapshots = useSnapshotsQuery(symbols, symbols.length > 0)

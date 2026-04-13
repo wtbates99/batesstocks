@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import { useQueries } from '@tanstack/react-query'
 import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { useNavigate } from 'react-router-dom'
+import { useShallow } from 'zustand/react/shallow'
 import { api } from '../api/client'
 import { terminalKeys, useNewsQuery, useSnapshotsQuery } from '../api/query'
 import NewsPanel from '../components/news/NewsPanel'
@@ -12,12 +13,12 @@ const COLORS = ['#f3a037', '#3bb9e3', '#19b878', '#d24545', '#8b7cff', '#f08fb0'
 
 export default function ComparePage() {
   const navigate = useNavigate()
-  const { compareTickers, setCompareTickers, saveCompareSet, savedCompareSets } = useTerminalStore((state) => ({
+  const { compareTickers, setCompareTickers, saveCompareSet, savedCompareSets } = useTerminalStore(useShallow((state) => ({
     compareTickers: state.compareTickers.length > 0 ? state.compareTickers : ['SPY', 'QQQ'],
     setCompareTickers: state.setCompareTickers,
     saveCompareSet: state.saveCompareSet,
     savedCompareSets: state.savedCompareSets,
-  }))
+  })))
   const snapshots = useSnapshotsQuery(compareTickers, compareTickers.length > 0)
   const news = useNewsQuery(compareTickers, 'compare', 10, compareTickers.length > 0)
   const securities = useQueries({

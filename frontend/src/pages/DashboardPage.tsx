@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { Link } from 'react-router-dom'
+import { useShallow } from 'zustand/react/shallow'
 import NewsPanel from '../components/news/NewsPanel'
 import { useLivePricesQuery, useNewsQuery, useWorkspaceQuery } from '../api/query'
 import type { TerminalMover } from '../api/types'
@@ -51,12 +52,12 @@ function DataTable({
 }
 
 export default function DashboardPage() {
-  const { activeTicker, watchlist, recentTickers, setAiContext } = useTerminalStore((state) => ({
+  const { activeTicker, watchlist, recentTickers, setAiContext } = useTerminalStore(useShallow((state) => ({
     activeTicker: state.activeTicker,
     watchlist: getActiveWatchlist(state)?.symbols ?? [],
     recentTickers: state.recentTickers,
     setAiContext: state.setAiContext,
-  }))
+  })))
   const workspace = useWorkspaceQuery(activeTicker)
   const newsUniverse = Array.from(new Set([activeTicker, ...watchlist.slice(0, 5), ...recentTickers.slice(0, 4)])).slice(0, 6)
   const news = useNewsQuery(newsUniverse, 'dashboard', 10)

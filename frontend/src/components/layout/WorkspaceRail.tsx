@@ -1,5 +1,6 @@
 import { Clock3, FolderKanban, Star, Trash2 } from 'lucide-react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { useShallow } from 'zustand/react/shallow'
 import { formatTimestamp } from '../../lib/formatters'
 import { getActiveWatchlist, useTerminalStore } from '../../state/terminalStore'
 
@@ -20,7 +21,7 @@ export default function WorkspaceRail() {
     deleteCompareSet,
     deleteScreenDraft,
     deleteBacktestDraft,
-  } = useTerminalStore((state) => ({
+  } = useTerminalStore(useShallow((state) => ({
     watchlist: getActiveWatchlist(state)?.symbols ?? [],
     watchlists: state.watchlists,
     activeWatchlistId: state.activeWatchlistId,
@@ -34,7 +35,7 @@ export default function WorkspaceRail() {
     deleteCompareSet: state.deleteCompareSet,
     deleteScreenDraft: state.deleteScreenDraft,
     deleteBacktestDraft: state.deleteBacktestDraft,
-  }))
+  })))
 
   const isScreener = location.pathname.startsWith('/screener')
   const isBacktest = location.pathname.startsWith('/backtest')
