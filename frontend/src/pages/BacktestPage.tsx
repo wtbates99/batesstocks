@@ -58,6 +58,7 @@ export default function BacktestPage() {
       date: point.date.slice(2),
       equity: point.equity,
       benchmark: point.benchmark,
+      drawdown: point.benchmark != null && point.benchmark !== 0 ? (((point.equity / point.benchmark) - 1) * 100) : null,
     })) ?? [],
     [result],
   )
@@ -149,6 +150,20 @@ export default function BacktestPage() {
 
         <section className="terminal-panel">
           <div className="panel-header">
+            <div className="panel-title">Run Assumptions</div>
+          </div>
+          <div className="signal-list panel-body-pad">
+            <div className="signal-row"><span>Ticker</span><span>{draft.ticker || '—'}</span></div>
+            <div className="signal-row"><span>Initial Capital</span><span>{formatCurrency(Number(draft.initialCapital || 0))}</span></div>
+            <div className="signal-row"><span>Position Size</span><span>{formatPercent(Number(draft.positionSizePct || 0))}</span></div>
+            <div className="signal-row"><span>Fee Bps</span><span>{formatNumber(Number(draft.feeBps || 0), 0)}</span></div>
+            <div className="signal-row"><span>Slippage Bps</span><span>{formatNumber(Number(draft.slippageBps || 0), 0)}</span></div>
+            <div className="signal-row"><span>Max Positions</span><span>1</span></div>
+          </div>
+        </section>
+
+        <section className="terminal-panel">
+          <div className="panel-header">
             <div className="panel-title">Equity Curve</div>
           </div>
           <div className="chart-panel">
@@ -170,6 +185,32 @@ export default function BacktestPage() {
               </ResponsiveContainer>
             ) : (
               <div className="state-panel">Run a backtest to populate the equity curve.</div>
+            )}
+          </div>
+        </section>
+
+        <section className="terminal-panel">
+          <div className="panel-header">
+            <div className="panel-title">Relative Edge</div>
+          </div>
+          <div className="chart-panel">
+            {chartData.length > 0 ? (
+              <ResponsiveContainer width="100%" height={180}>
+                <LineChart data={chartData}>
+                  <XAxis dataKey="date" tick={{ fill: '#7f8b96', fontSize: 10 }} minTickGap={32} />
+                  <YAxis tick={{ fill: '#7f8b96', fontSize: 10 }} width={72} />
+                  <Tooltip
+                    contentStyle={{
+                      background: '#090b0d',
+                      border: '1px solid #1e242d',
+                      color: '#d4dae1',
+                    }}
+                  />
+                  <Line type="monotone" dataKey="drawdown" stroke="#3bb9e3" dot={false} strokeWidth={1.4} />
+                </LineChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="state-panel">Run a backtest to inspect benchmark-relative edge.</div>
             )}
           </div>
         </section>

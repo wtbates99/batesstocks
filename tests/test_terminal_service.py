@@ -1,7 +1,13 @@
 from backend.core import duckdb as duckdb_module
 from backend.core.duckdb import duckdb_connection, ensure_schema
 from backend.models import StrategyBacktestRequest, StrategyDefinition, StrategyLeg
-from backend.services.terminal_service import run_strategy_backtest, screen_strategy
+from backend.services.terminal_service import (
+    get_market_monitor,
+    get_sector_overview,
+    get_terminal_snapshots,
+    run_strategy_backtest,
+    screen_strategy,
+)
 
 
 def _reset_schema(monkeypatch, tmp_path):
@@ -108,3 +114,85 @@ def test_backtest_applies_composite_rules_and_cost_drag(monkeypatch, tmp_path):
     assert response.summary.gross_return_pct >= response.summary.total_return_pct
     assert response.summary.cost_drag_pct >= 0
     assert response.summary.total_fees_paid > 0
+
+
+def test_market_monitor_and_snapshots_return_ranked_views(monkeypatch, tmp_path):
+    _reset_schema(monkeypatch, tmp_path)
+
+    with duckdb_connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO stock_information (Ticker, FullName, Sector, MarketCap)
+            VALUES
+                ('AAPL', 'Apple Inc.', 'Technology', 3000000000000),
+                ('MSFT', 'Microsoft Corp.', 'Technology', 3100000000000),
+                ('XLF', 'Financial ETF', 'Financials', 50000000000)
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO ticker_data (
+                Date, Ticker, Open, High, Low, Close, Volume,
+                Ticker_SMA_200, Ticker_RSI, Ticker_Tech_Score,
+                Ticker_Return_20D, Ticker_Return_63D, Ticker_Return_126D, Ticker_Return_252D,
+                Ticker_Avg_Volume_20D
+            )
+            VALUES
+                ('2026-04-10', 'AAPL', 190, 193, 189, 191, 1000000, 180, 58, 67, 6, 9, 15, 23, 800000),
+                ('2026-04-11', 'AAPL', 192, 198, 191, 197, 1400000, 181, 63, 79, 9, 14, 18, 25, 850000),
+                ('2026-04-10', 'MSFT', 400, 402, 397, 399, 900000, 392, 61, 71, 4, 6, 10, 15, 880000),
+                ('2026-04-11', 'MSFT', 399, 401, 396, 394, 850000, 393, 48, 55, -1, 2, 4, 9, 870000),
+                ('2026-04-10', 'XLF', 45, 46, 44, 45, 500000, 44, 52, 60, 2, 3, 5, 8, 450000),
+                ('2026-04-11', 'XLF', 45.2, 46.4, 45, 46.1, 650000, 44.2, 57, 66, 3, 4, 6, 9, 470000)
+            """
+        )
+
+    monitor = get_market_monitor()
+    snapshots = get_terminal_snapshots(["AAPL", "MSFT"])
+
+    assert monitor.universe_size == 3
+    assert monitor.leaders[0].ticker == "AAPL"
+    assert len(monitor.sectors) >= 2
+    assert {item.ticker for item in snapshots.items} == {"AAPL", "MSFT"}
+
+
+def test_sector_overview_returns_ranked_members(monkeypatch, tmp_path):
+    _reset_schema(monkeypatch, tmp_path)
+
+    with duckdb_connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO stock_information (Ticker, FullName, Sector, MarketCap)
+            VALUES
+                ('AAPL', 'Apple Inc.', 'Technology', 3000000000000),
+                ('MSFT', 'Microsoft Corp.', 'Technology', 3100000000000),
+                ('NVDA', 'NVIDIA Corp.', 'Technology', 2800000000000),
+                ('XLF', 'Financial ETF', 'Financials', 50000000000)
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO ticker_data (
+                Date, Ticker, Open, High, Low, Close, Volume,
+                Ticker_SMA_200, Ticker_RSI, Ticker_Tech_Score,
+                Ticker_Return_20D, Ticker_Return_63D, Ticker_Return_126D, Ticker_Return_252D,
+                Ticker_Avg_Volume_20D
+            )
+            VALUES
+                ('2026-04-10', 'AAPL', 190, 193, 189, 191, 1000000, 180, 58, 67, 6, 9, 15, 23, 800000),
+                ('2026-04-11', 'AAPL', 192, 198, 191, 197, 1400000, 181, 63, 79, 9, 14, 18, 25, 850000),
+                ('2026-04-10', 'MSFT', 400, 402, 397, 399, 900000, 392, 61, 71, 4, 6, 10, 15, 880000),
+                ('2026-04-11', 'MSFT', 399, 401, 396, 394, 850000, 393, 48, 55, -1, 2, 4, 9, 870000),
+                ('2026-04-10', 'NVDA', 850, 875, 840, 870, 2200000, 760, 66, 92, 14, 22, 36, 61, 1800000),
+                ('2026-04-11', 'NVDA', 872, 905, 870, 901, 2600000, 765, 71, 95, 19, 28, 42, 66, 1850000),
+                ('2026-04-10', 'XLF', 45, 46, 44, 45, 500000, 44, 52, 60, 2, 3, 5, 8, 450000),
+                ('2026-04-11', 'XLF', 45.2, 46.4, 45, 46.1, 650000, 44.2, 57, 66, 3, 4, 6, 9, 470000)
+            """
+        )
+
+    overview = get_sector_overview("Technology")
+
+    assert overview.sector == "Technology"
+    assert overview.summary[0].value == "3"
+    assert overview.leaders[0].ticker == "NVDA"
+    assert {item.ticker for item in overview.members} == {"AAPL", "MSFT", "NVDA"}

@@ -5,7 +5,7 @@ import TerminalChart from '../components/charts/TerminalChart'
 import NewsPanel from '../components/news/NewsPanel'
 import { useLivePricesQuery, useNewsQuery, useSecurityQuery } from '../api/query'
 import { formatCompactNumber, formatNumber, formatPercent, formatTimestamp, toneClass, toneFromLabel } from '../lib/formatters'
-import { useTerminalStore } from '../state/terminalStore'
+import { getActiveWatchlist, useTerminalStore } from '../state/terminalStore'
 
 const TIMEFRAMES = [
   { label: '1M', days: 22 },
@@ -14,6 +14,21 @@ const TIMEFRAMES = [
   { label: '1Y', days: 252 },
   { label: 'ALL', days: Infinity },
 ] as const
+
+function overlayLabel(overlay: 'sma_10' | 'sma_30' | 'sma_200' | 'ema_10') {
+  switch (overlay) {
+    case 'sma_10':
+      return 'SMA 10'
+    case 'sma_30':
+      return 'SMA 30'
+    case 'sma_200':
+      return 'SMA 200'
+    case 'ema_10':
+      return 'EMA 10'
+    default:
+      return overlay
+  }
+}
 
 export default function SecurityPage() {
   const { ticker: routeTicker } = useParams<{ ticker: string }>()
@@ -31,7 +46,7 @@ export default function SecurityPage() {
     toggleCompareTicker,
   } = useTerminalStore((state) => ({
     compareTickers: state.compareTickers,
-    watchlist: state.watchlist,
+    watchlist: getActiveWatchlist(state)?.symbols ?? [],
     setActiveTicker: state.setActiveTicker,
     setAiContext: state.setAiContext,
     openAi: state.openAi,
@@ -84,7 +99,11 @@ export default function SecurityPage() {
       <section className="terminal-panel security-main">
         <div className="panel-header">
           <div>
-            <div className="security-kicker">{snapshot.sector ?? 'UNCLASSIFIED'} / {snapshot.subsector ?? 'SECURITY'}</div>
+            <div className="security-kicker">
+              {snapshot.sector ? <Link to={`/sector/${encodeURIComponent(snapshot.sector)}`} className="ticker-link">{snapshot.sector}</Link> : 'UNCLASSIFIED'}
+              {' / '}
+              {snapshot.subsector ?? 'SECURITY'}
+            </div>
             <div className="security-title">
               <span>{snapshot.ticker}</span>
               <span className="security-name">{snapshot.name ?? 'Unknown Security'}</span>
@@ -149,7 +168,7 @@ export default function SecurityPage() {
                     : [...current, overlay]
                 ))}
               >
-                {overlay.toUpperCase()}
+                {overlayLabel(overlay)}
               </button>
             ))}
           </div>
@@ -179,6 +198,13 @@ export default function SecurityPage() {
               <div className="signal-row"><span>Tech Score</span><span>{formatNumber(snapshot.tech_score, 0)}</span></div>
               <div className="signal-row"><span>MACD</span><span>{formatNumber(snapshot.macd, 2)}</span></div>
               <div className="signal-row"><span>200 / 250D</span><span>{snapshot.above_sma_200 && snapshot.above_sma_250 ? 'ABOVE' : 'MIXED'}</span></div>
+            </div>
+            <div className="subpanel-title" style={{ marginTop: 12 }}>Return Ladder</div>
+            <div className="signal-list">
+              <div className="signal-row"><span>20D</span><span>{formatPercent(snapshot.return_20d)}</span></div>
+              <div className="signal-row"><span>63D</span><span>{formatPercent(snapshot.return_63d)}</span></div>
+              <div className="signal-row"><span>126D</span><span>{formatPercent(snapshot.return_126d)}</span></div>
+              <div className="signal-row"><span>252D</span><span>{formatPercent(snapshot.return_252d)}</span></div>
             </div>
           </section>
         </div>

@@ -7,6 +7,12 @@ interface SyncNotice {
   tone: 'neutral' | 'positive' | 'negative'
 }
 
+export interface TerminalWatchlist {
+  id: string
+  name: string
+  symbols: string[]
+}
+
 function uniqHead(items: string[], limit: number) {
   return Array.from(new Set(items.map((item) => item.toUpperCase()))).slice(0, limit)
 }
@@ -24,6 +30,13 @@ function uniqCommands(items: string[], limit: number) {
   return result
 }
 
+function defaultWatchlists(): TerminalWatchlist[] {
+  return [
+    { id: 'core', name: 'Core', symbols: ['SPY', 'QQQ', 'AAPL', 'MSFT'] },
+    { id: 'macro', name: 'Macro', symbols: ['TLT', 'GLD', 'XLF', 'IWM'] },
+  ]
+}
+
 interface TerminalStore {
   activeTicker: string
   commandValue: string
@@ -32,9 +45,11 @@ interface TerminalStore {
   aiDraft?: string
   aiContext: Record<string, unknown>
   syncNotice?: SyncNotice
-  watchlist: string[]
+  watchlists: TerminalWatchlist[]
+  activeWatchlistId: string
   recentTickers: string[]
   compareTickers: string[]
+  savedCompareSets: Array<{ id: string; name: string; tickers: string[]; createdAt: string }>
   recentCommands: string[]
   savedScreens: SavedWorkspaceDraft<StrategyDraft>[]
   savedBacktests: SavedWorkspaceDraft<StrategyDraft>[]
@@ -49,10 +64,16 @@ interface TerminalStore {
   setAiContext: (context: Record<string, unknown>) => void
   mergeAiContext: (context: Record<string, unknown>) => void
   setSyncNotice: (notice?: SyncNotice) => void
-  toggleWatchlist: (ticker: string) => void
+  setActiveWatchlist: (id: string) => void
+  createWatchlist: (name: string) => void
+  renameWatchlist: (id: string, name: string) => void
+  deleteWatchlist: (id: string) => void
+  toggleWatchlist: (ticker: string, watchlistId?: string) => void
   setCompareTickers: (tickers: string[]) => void
   toggleCompareTicker: (ticker: string) => void
   removeCompareTicker: (ticker: string) => void
+  saveCompareSet: (name: string, tickers: string[]) => void
+  deleteCompareSet: (id: string) => void
   saveScreenDraft: (name: string, draft: StrategyDraft) => void
   deleteScreenDraft: (id: string) => void
   saveBacktestDraft: (name: string, draft: StrategyDraft) => void
@@ -62,7 +83,7 @@ interface TerminalStore {
 
 export const useTerminalStore = create<TerminalStore>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       activeTicker: 'SPY',
       commandValue: '',
       commandFocusNonce: 0,
@@ -70,9 +91,11 @@ export const useTerminalStore = create<TerminalStore>()(
       aiDraft: undefined,
       aiContext: {},
       syncNotice: undefined,
-      watchlist: ['SPY', 'QQQ', 'AAPL', 'MSFT'],
+      watchlists: defaultWatchlists(),
+      activeWatchlistId: 'core',
       recentTickers: ['SPY'],
-      compareTickers: ['SPY'],
+      compareTickers: ['SPY', 'QQQ'],
+      savedCompareSets: [],
       recentCommands: [],
       savedScreens: [],
       savedBacktests: [],
@@ -95,28 +118,80 @@ export const useTerminalStore = create<TerminalStore>()(
       mergeAiContext: (context) =>
         set((state) => ({ aiContext: { ...state.aiContext, ...context } })),
       setSyncNotice: (syncNotice) => set({ syncNotice }),
-      toggleWatchlist: (ticker) =>
+      setActiveWatchlist: (activeWatchlistId) => set({ activeWatchlistId }),
+      createWatchlist: (name) =>
         set((state) => {
-          const symbol = ticker.toUpperCase()
+          const id = crypto.randomUUID()
           return {
-            watchlist: state.watchlist.includes(symbol)
-              ? state.watchlist.filter((item) => item !== symbol)
-              : uniqHead([symbol, ...state.watchlist], 24),
+            watchlists: [
+              ...state.watchlists,
+              { id, name: name.trim() || `Watchlist ${state.watchlists.length + 1}`, symbols: [] },
+            ],
+            activeWatchlistId: id,
           }
         }),
-      setCompareTickers: (tickers) => set({ compareTickers: uniqHead(tickers, 6) }),
+      renameWatchlist: (id, name) =>
+        set((state) => ({
+          watchlists: state.watchlists.map((watchlist) =>
+            watchlist.id === id ? { ...watchlist, name: name.trim() || watchlist.name } : watchlist,
+          ),
+        })),
+      deleteWatchlist: (id) =>
+        set((state) => {
+          const remaining = state.watchlists.filter((watchlist) => watchlist.id !== id)
+          const next = remaining.length > 0 ? remaining : defaultWatchlists().slice(0, 1)
+          return {
+            watchlists: next,
+            activeWatchlistId: next.some((watchlist) => watchlist.id === state.activeWatchlistId)
+              ? state.activeWatchlistId
+              : next[0].id,
+          }
+        }),
+      toggleWatchlist: (ticker, watchlistId) =>
+        set((state) => {
+          const symbol = ticker.toUpperCase()
+          const targetId = watchlistId ?? state.activeWatchlistId
+          return {
+            watchlists: state.watchlists.map((watchlist) => {
+              if (watchlist.id !== targetId) return watchlist
+              return {
+                ...watchlist,
+                symbols: watchlist.symbols.includes(symbol)
+                  ? watchlist.symbols.filter((item) => item !== symbol)
+                  : uniqHead([symbol, ...watchlist.symbols], 40),
+              }
+            }),
+          }
+        }),
+      setCompareTickers: (tickers) => set({ compareTickers: uniqHead(tickers, 8) }),
       toggleCompareTicker: (ticker) =>
         set((state) => {
           const symbol = ticker.toUpperCase()
           return {
             compareTickers: state.compareTickers.includes(symbol)
               ? state.compareTickers.filter((item) => item !== symbol)
-              : uniqHead([symbol, ...state.compareTickers], 6),
+              : uniqHead([symbol, ...state.compareTickers], 8),
           }
         }),
       removeCompareTicker: (ticker) =>
         set((state) => ({
           compareTickers: state.compareTickers.filter((item) => item !== ticker.toUpperCase()),
+        })),
+      saveCompareSet: (name, tickers) =>
+        set((state) => ({
+          savedCompareSets: [
+            {
+              id: crypto.randomUUID(),
+              name: name.trim() || `Compare ${tickers.join(' / ')}`,
+              tickers: uniqHead(tickers, 8),
+              createdAt: new Date().toISOString(),
+            },
+            ...state.savedCompareSets,
+          ].slice(0, 12),
+        })),
+      deleteCompareSet: (id) =>
+        set((state) => ({
+          savedCompareSets: state.savedCompareSets.filter((item) => item.id !== id),
         })),
       saveScreenDraft: (name, draft) =>
         set((state) => ({
@@ -156,14 +231,28 @@ export const useTerminalStore = create<TerminalStore>()(
       name: 'batesstocks-terminal',
       partialize: (state) => ({
         activeTicker: state.activeTicker,
-        watchlist: state.watchlist,
+        watchlists: state.watchlists,
+        activeWatchlistId: state.activeWatchlistId,
         recentTickers: state.recentTickers,
         compareTickers: state.compareTickers,
+        savedCompareSets: state.savedCompareSets,
         recentCommands: state.recentCommands,
         savedScreens: state.savedScreens,
         savedBacktests: state.savedBacktests,
         lastRoute: state.lastRoute,
       }),
+      merge: (persisted, current) => {
+        const next = { ...current, ...(persisted as object) } as TerminalStore
+        if (!next.watchlists || next.watchlists.length === 0) {
+          next.watchlists = defaultWatchlists()
+          next.activeWatchlistId = next.watchlists[0].id
+        }
+        return next
+      },
     },
   ),
 )
+
+export function getActiveWatchlist(state: TerminalStore) {
+  return state.watchlists.find((watchlist) => watchlist.id === state.activeWatchlistId) ?? state.watchlists[0]
+}

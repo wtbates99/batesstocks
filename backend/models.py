@@ -178,6 +178,10 @@ class SecuritySnapshot(BaseModel):
     tech_score: float | None = None
     macd: float | None = None
     macd_signal: float | None = None
+    return_20d: float | None = None
+    return_63d: float | None = None
+    return_126d: float | None = None
+    return_252d: float | None = None
     above_sma_10: bool = False
     above_sma_30: bool = False
     above_sma_200: bool = False
@@ -196,6 +200,60 @@ class StrategyScreenResponse(BaseModel):
     generated_at: str
     strategy_name: str
     matches: list[StrategyMatch]
+
+
+class SecurityListItem(BaseModel):
+    ticker: str
+    name: str | None = None
+    sector: str | None = None
+    close: float | None = None
+    change_pct: float | None = None
+    volume: float | None = None
+    avg_volume_20d: float | None = None
+    rsi: float | None = None
+    tech_score: float | None = None
+    return_20d: float | None = None
+    return_63d: float | None = None
+    return_126d: float | None = None
+    return_252d: float | None = None
+    market_cap: float | None = None
+    above_sma_200: bool = False
+
+
+class SecuritySnapshotResponse(BaseModel):
+    generated_at: str
+    items: list[SecurityListItem]
+
+
+class MonitorSector(BaseModel):
+    sector: str
+    members: int
+    avg_change_pct: float | None = None
+    avg_return_20d: float | None = None
+    avg_rsi: float | None = None
+    pct_above_200d: float | None = None
+
+
+class MarketMonitorOverview(BaseModel):
+    generated_at: str
+    universe_size: int
+    breadth: list[TerminalStat]
+    sectors: list[MonitorSector]
+    leaders: list[SecurityListItem]
+    laggards: list[SecurityListItem]
+    most_active: list[SecurityListItem]
+    volume_surge: list[SecurityListItem]
+    rsi_high: list[SecurityListItem]
+    rsi_low: list[SecurityListItem]
+
+
+class SectorOverview(BaseModel):
+    generated_at: str
+    sector: str
+    summary: list[TerminalStat]
+    leaders: list[SecurityListItem]
+    laggards: list[SecurityListItem]
+    members: list[SecurityListItem]
 
 
 class BackupManifest(BaseModel):

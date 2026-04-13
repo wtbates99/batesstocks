@@ -1,35 +1,61 @@
 import { Clock3, FolderKanban, Star, Trash2 } from 'lucide-react'
-import { Link, useLocation } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { formatTimestamp } from '../../lib/formatters'
-import { useTerminalStore } from '../../state/terminalStore'
+import { getActiveWatchlist, useTerminalStore } from '../../state/terminalStore'
 
 export default function WorkspaceRail() {
   const location = useLocation()
+  const navigate = useNavigate()
   const {
     watchlist,
+    watchlists,
+    activeWatchlistId,
+    setActiveWatchlist,
+    savedCompareSets,
+    setCompareTickers,
     recentTickers,
     savedScreens,
     savedBacktests,
     toggleWatchlist,
+    deleteCompareSet,
     deleteScreenDraft,
     deleteBacktestDraft,
   } = useTerminalStore((state) => ({
-    watchlist: state.watchlist,
+    watchlist: getActiveWatchlist(state)?.symbols ?? [],
+    watchlists: state.watchlists,
+    activeWatchlistId: state.activeWatchlistId,
+    setActiveWatchlist: state.setActiveWatchlist,
+    savedCompareSets: state.savedCompareSets,
+    setCompareTickers: state.setCompareTickers,
     recentTickers: state.recentTickers,
     savedScreens: state.savedScreens,
     savedBacktests: state.savedBacktests,
     toggleWatchlist: state.toggleWatchlist,
+    deleteCompareSet: state.deleteCompareSet,
     deleteScreenDraft: state.deleteScreenDraft,
     deleteBacktestDraft: state.deleteBacktestDraft,
   }))
 
   const isScreener = location.pathname.startsWith('/screener')
   const isBacktest = location.pathname.startsWith('/backtest')
+  const isCompare = location.pathname.startsWith('/compare')
 
   return (
     <aside className="workspace-rail">
       <section className="rail-section">
         <div className="rail-title"><Star size={12} /> Watchlist</div>
+        <div className="rail-list rail-tabs">
+          {watchlists.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className={`rail-chip${item.id === activeWatchlistId ? ' is-active' : ''}`}
+              onClick={() => setActiveWatchlist(item.id)}
+            >
+              {item.name}
+            </button>
+          ))}
+        </div>
         <div className="rail-list">
           {watchlist.map((ticker) => (
             <div key={ticker} className="rail-row">
@@ -41,6 +67,33 @@ export default function WorkspaceRail() {
           ))}
         </div>
       </section>
+
+      {isCompare && (
+        <section className="rail-section">
+          <div className="rail-title"><FolderKanban size={12} /> Saved Compare</div>
+          <div className="rail-list">
+            {savedCompareSets.length === 0 && <div className="rail-empty">No saved sets</div>}
+            {savedCompareSets.map((item) => (
+              <div key={item.id} className="saved-row">
+                <button
+                  type="button"
+                  className="saved-open"
+                  onClick={() => {
+                    setCompareTickers(item.tickers)
+                    navigate('/compare')
+                  }}
+                >
+                  <div className="saved-name">{item.name}</div>
+                  <div className="saved-meta">{item.tickers.join(' · ')}</div>
+                </button>
+                <button type="button" className="terminal-icon-button" onClick={() => deleteCompareSet(item.id)}>
+                  <Trash2 size={11} />
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       <section className="rail-section">
         <div className="rail-title"><Clock3 size={12} /> Recents</div>

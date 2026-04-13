@@ -278,6 +278,11 @@ select {
   white-space: nowrap;
 }
 
+.chip-count {
+  margin-left: 6px;
+  color: var(--text-dim);
+}
+
 .function-strip {
   display: flex;
   align-items: center;
@@ -313,6 +318,47 @@ select {
   display: grid;
   grid-template-columns: 220px minmax(0, 1fr) auto;
   min-height: 0;
+}
+
+.watchlist-tabs,
+.watchlist-admin,
+.rail-tabs {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.watchlist-admin {
+  margin-top: 12px;
+  align-items: center;
+}
+
+.watchlist-admin .terminal-input {
+  width: 180px;
+}
+
+.rail-chip {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text-muted);
+  padding: 4px 6px;
+  cursor: pointer;
+}
+
+.rail-chip.is-active {
+  border-color: var(--amber);
+  color: var(--text);
+  background: rgba(243, 160, 55, 0.1);
+}
+
+.saved-open {
+  display: block;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
 }
 
 .workspace {
@@ -440,6 +486,16 @@ select {
 }
 
 .dashboard-grid {
+  display: grid;
+  grid-template-columns: 1.2fr 1.2fr 1fr;
+  gap: 10px;
+  min-height: 100%;
+}
+
+.monitor-page-grid,
+.watchlists-grid,
+.compare-grid,
+.news-monitor-grid {
   display: grid;
   grid-template-columns: 1.2fr 1.2fr 1fr;
   gap: 10px;
@@ -952,6 +1008,10 @@ select {
   }
 
   .dashboard-grid,
+  .monitor-page-grid,
+  .watchlists-grid,
+  .compare-grid,
+  .news-monitor-grid,
   .security-grid,
   .workbench-grid {
     grid-template-columns: 1fr;

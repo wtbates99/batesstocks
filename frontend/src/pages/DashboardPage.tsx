@@ -4,7 +4,7 @@ import NewsPanel from '../components/news/NewsPanel'
 import { useLivePricesQuery, useNewsQuery, useWorkspaceQuery } from '../api/query'
 import type { TerminalMover } from '../api/types'
 import { formatCompactNumber, formatNumber, formatPercent, formatTimestamp, toneFromLabel } from '../lib/formatters'
-import { useTerminalStore } from '../state/terminalStore'
+import { getActiveWatchlist, useTerminalStore } from '../state/terminalStore'
 
 function DataTable({
   title,
@@ -53,7 +53,7 @@ function DataTable({
 export default function DashboardPage() {
   const { activeTicker, watchlist, recentTickers, setAiContext } = useTerminalStore((state) => ({
     activeTicker: state.activeTicker,
-    watchlist: state.watchlist,
+    watchlist: getActiveWatchlist(state)?.symbols ?? [],
     recentTickers: state.recentTickers,
     setAiContext: state.setAiContext,
   }))

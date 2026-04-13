@@ -118,6 +118,10 @@ export interface SecuritySnapshot {
   tech_score?: number | null
   macd?: number | null
   macd_signal?: number | null
+  return_20d?: number | null
+  return_63d?: number | null
+  return_126d?: number | null
+  return_252d?: number | null
   above_sma_10: boolean
   above_sma_30: boolean
   above_sma_200: boolean
@@ -209,6 +213,69 @@ export interface StrategyScreenResponse {
   generated_at: string
   strategy_name: string
   matches: StrategyMatch[]
+}
+
+export interface SecurityListItem {
+  ticker: string
+  name?: string | null
+  sector?: string | null
+  close?: number | null
+  change_pct?: number | null
+  volume?: number | null
+  avg_volume_20d?: number | null
+  rsi?: number | null
+  tech_score?: number | null
+  return_20d?: number | null
+  return_63d?: number | null
+  return_126d?: number | null
+  return_252d?: number | null
+  market_cap?: number | null
+  above_sma_200: boolean
+}
+
+export interface SecuritySnapshotResponse {
+  generated_at: string
+  items: SecurityListItem[]
+}
+
+export interface MonitorSector {
+  sector: string
+  members: number
+  avg_change_pct?: number | null
+  avg_return_20d?: number | null
+  avg_rsi?: number | null
+  pct_above_200d?: number | null
+}
+
+export interface MarketMonitorOverview {
+  generated_at: string
+  universe_size: number
+  breadth: TerminalStat[]
+  sectors: MonitorSector[]
+  leaders: SecurityListItem[]
+  laggards: SecurityListItem[]
+  most_active: SecurityListItem[]
+  volume_surge: SecurityListItem[]
+  rsi_high: SecurityListItem[]
+  rsi_low: SecurityListItem[]
+}
+
+export interface SectorOverview {
+  generated_at: string
+  sector: string
+  summary: TerminalStat[]
+  leaders: SecurityListItem[]
+  laggards: SecurityListItem[]
+  members: SecurityListItem[]
+}
+
+export interface SectorOverview {
+  generated_at: string
+  sector: string
+  summary: TerminalStat[]
+  leaders: SecurityListItem[]
+  laggards: SecurityListItem[]
+  members: SecurityListItem[]
 }
 
 export interface BackupManifest {

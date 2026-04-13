@@ -10,6 +10,10 @@ import { useTerminalStore } from '../../state/terminalStore'
 
 const NAV_ITEMS = [
   { label: 'DASH', path: '/' },
+  { label: 'MON', path: '/monitor' },
+  { label: 'WL', path: '/watchlists' },
+  { label: 'COMP', path: '/compare' },
+  { label: 'NEWS', path: '/news' },
   { label: 'EQS', path: '/screener' },
   { label: 'PORT', path: '/backtest' },
 ]
@@ -80,9 +84,25 @@ export default function TerminalShell() {
         }
         if (event.key === '2') {
           event.preventDefault()
-          navigate('/screener')
+          navigate('/monitor')
         }
         if (event.key === '3') {
+          event.preventDefault()
+          navigate('/watchlists')
+        }
+        if (event.key === '4') {
+          event.preventDefault()
+          navigate('/compare')
+        }
+        if (event.key === '5') {
+          event.preventDefault()
+          navigate('/news')
+        }
+        if (event.key === '6') {
+          event.preventDefault()
+          navigate('/screener')
+        }
+        if (event.key === '7') {
           event.preventDefault()
           navigate('/backtest')
         }
@@ -138,7 +158,7 @@ export default function TerminalShell() {
             {item.label}
           </NavLink>
         ))}
-        <div className="function-hint">`/` focus command · `[` prior symbol · `Alt+1/2/3` modules</div>
+        <div className="function-hint">`/` focus command · `[` prior symbol · `Alt+1..7` destinations</div>
       </nav>
 
       <main className="shell-main">
