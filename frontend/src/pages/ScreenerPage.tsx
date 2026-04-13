@@ -18,11 +18,13 @@ export default function ScreenerPage() {
     saveScreenDraft,
     savedScreens,
     toggleWatchlist,
+    setCompareTickers,
   } = useTerminalStore((state) => ({
     setAiContext: state.setAiContext,
     saveScreenDraft: state.saveScreenDraft,
     savedScreens: state.savedScreens,
     toggleWatchlist: state.toggleWatchlist,
+    setCompareTickers: state.setCompareTickers,
   }))
 
   const result = screen.data
@@ -101,6 +103,27 @@ export default function ScreenerPage() {
           <div className="panel-title">Matches</div>
           <div className="panel-meta">{result?.generated_at ?? 'Awaiting execution'}</div>
         </div>
+        {result && result.matches.length > 0 && (
+          <div className="panel-body-pad">
+            <div className="quick-grid">
+              <div className="quick-card"><span>Matches</span><span>{result.matches.length}</span></div>
+              <div className="quick-card"><span>Top Score</span><span>{formatNumber(result.matches[0]?.tech_score, 0)}</span></div>
+              <div className="quick-card"><span>Lead Sector</span><span>{result.matches[0]?.sector ?? '—'}</span></div>
+            </div>
+            <div className="action-row">
+              <button
+                type="button"
+                className="terminal-button terminal-button-ghost"
+                onClick={() => {
+                  setCompareTickers(result.matches.slice(0, 5).map((match) => match.ticker))
+                  navigate('/compare')
+                }}
+              >
+                LOAD COMPARE
+              </button>
+            </div>
+          </div>
+        )}
         {result ? (
           <div className="panel-table-wrap">
             <table className="terminal-table">

@@ -10,8 +10,11 @@ from backend.models import (
     BackupCreateRequest,
     BackupCreateResponse,
     BackupStatus,
+    MarketMonitorOverview,
     NewsResponse,
+    SectorOverview,
     SecurityOverview,
+    SecuritySnapshotResponse,
     StrategyBacktestRequest,
     StrategyBacktestResponse,
     StrategyDefinition,
@@ -30,8 +33,11 @@ from backend.services.data_sync_service import (
 from backend.services.news_service import get_news
 from backend.services.sync_status import sync_status_tracker
 from backend.services.terminal_service import (
+    get_market_monitor,
+    get_sector_overview,
     get_security_overview,
     get_terminal_overview,
+    get_terminal_snapshots,
     run_strategy_backtest,
     screen_strategy,
 )
@@ -60,6 +66,33 @@ def terminal_security(
     ensure_market_data([ticker], source="security")
     try:
         return get_security_overview(ticker, limit=limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/terminal/snapshots", response_model=SecuritySnapshotResponse)
+def terminal_snapshots(
+    tickers: str = Query(..., min_length=1, max_length=512),
+) -> SecuritySnapshotResponse:
+    ensure_schema()
+    symbols = [value.strip().upper() for value in tickers.split(",") if value.strip()]
+    ensure_market_data(symbols, source="snapshots")
+    return get_terminal_snapshots(symbols)
+
+
+@router.get("/terminal/monitor", response_model=MarketMonitorOverview)
+def terminal_monitor() -> MarketMonitorOverview:
+    ensure_schema()
+    ensure_default_universe_data()
+    return get_market_monitor()
+
+
+@router.get("/terminal/sector/{sector}", response_model=SectorOverview)
+def terminal_sector(sector: str) -> SectorOverview:
+    ensure_schema()
+    ensure_default_universe_data()
+    try:
+        return get_sector_overview(sector)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 

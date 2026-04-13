@@ -6,10 +6,15 @@ import pandas as pd
 
 from backend.core.duckdb import duckdb_connection
 from backend.models import (
+    MarketMonitorOverview,
+    MonitorSector,
+    SectorOverview,
     SecurityBar,
+    SecurityListItem,
     SecurityOverview,
     SecuritySignal,
     SecuritySnapshot,
+    SecuritySnapshotResponse,
     StrategyBacktestPoint,
     StrategyBacktestRequest,
     StrategyBacktestResponse,
@@ -41,6 +46,30 @@ def _row_to_mover(row: pd.Series) -> TerminalMover:
         change_pct=_to_float(row.get("change_pct")),
         volume=_to_float(row.get("Volume")),
         tech_score=_to_float(row.get("Ticker_Tech_Score")),
+    )
+
+
+def _row_to_security_list_item(row: pd.Series) -> SecurityListItem:
+    close = _to_float(row.get("Close"))
+    sma_200 = _to_float(row.get("Ticker_SMA_200"))
+    return SecurityListItem(
+        ticker=row["Ticker"],
+        name=row.get("FullName"),
+        sector=row.get("Sector"),
+        close=close,
+        change_pct=_to_float(row.get("change_pct")),
+        volume=_to_float(row.get("Volume")),
+        avg_volume_20d=_to_float(row.get("Ticker_Avg_Volume_20D")),
+        rsi=_to_float(row.get("Ticker_RSI")),
+        tech_score=_to_float(row.get("Ticker_Tech_Score")),
+        return_20d=_to_float(row.get("Ticker_Return_20D")),
+        return_63d=_to_float(row.get("Ticker_Return_63D")),
+        return_126d=_to_float(row.get("Ticker_Return_126D")),
+        return_252d=_to_float(row.get("Ticker_Return_252D")),
+        market_cap=_to_float(row.get("MarketCap")),
+        above_sma_200=bool(
+            close is not None and sma_200 is not None and float(close) > float(sma_200)
+        ),
     )
 
 
@@ -88,6 +117,18 @@ def _load_screen_frame(universe: list[str] | None = None) -> pd.DataFrame:
         allowed = {ticker.upper() for ticker in universe}
         frame = frame[frame["Ticker"].isin(allowed)].copy()
     return frame
+
+
+def _load_latest_market_frame(universe: list[str] | None = None) -> pd.DataFrame:
+    frame = _load_screen_frame(universe)
+    if frame.empty:
+        return frame
+
+    frame = frame.sort_values(["Ticker", "Date"]).copy()
+    frame["change_pct"] = frame.groupby("Ticker")["Close"].pct_change() * 100
+    latest = frame.groupby("Ticker", group_keys=False).tail(1).copy()
+    latest["volume_ratio"] = latest["Volume"] / latest["Ticker_Avg_Volume_20D"].replace(0, pd.NA)
+    return latest
 
 
 def _resolve_threshold(
@@ -312,6 +353,10 @@ def get_security_overview(ticker: str, limit: int = 180) -> SecurityOverview:
                 r.Ticker_Tech_Score,
                 r.Ticker_MACD,
                 r.Ticker_MACD_Signal,
+                r.Ticker_Return_20D,
+                r.Ticker_Return_63D,
+                r.Ticker_Return_126D,
+                r.Ticker_Return_252D,
                 r.Ticker_SMA_10,
                 r.Ticker_SMA_30,
                 r.Ticker_SMA_200,
@@ -369,6 +414,10 @@ def get_security_overview(ticker: str, limit: int = 180) -> SecurityOverview:
         tech_score,
         macd,
         macd_signal,
+        return_20d,
+        return_63d,
+        return_126d,
+        return_252d,
         sma_10,
         sma_30,
         sma_200,
@@ -414,6 +463,10 @@ def get_security_overview(ticker: str, limit: int = 180) -> SecurityOverview:
         tech_score=_to_float(tech_score),
         macd=_to_float(macd),
         macd_signal=_to_float(macd_signal),
+        return_20d=_to_float(return_20d),
+        return_63d=_to_float(return_63d),
+        return_126d=_to_float(return_126d),
+        return_252d=_to_float(return_252d),
         above_sma_10=bool(
             close is not None and sma_10 is not None and float(close) > float(sma_10)
         ),
@@ -618,6 +671,157 @@ def get_terminal_overview(focus_ticker: str) -> TerminalOverview:
         momentum_leaders=_movers(leaders),
         reversal_candidates=_movers(reversals),
         breakouts=_movers(breakouts),
+    )
+
+
+def get_terminal_snapshots(tickers: list[str]) -> SecuritySnapshotResponse:
+    latest = _load_latest_market_frame(tickers)
+    items = [_row_to_security_list_item(row) for _, row in latest.iterrows()]
+    return SecuritySnapshotResponse(generated_at=_utc_now(), items=items)
+
+
+def get_market_monitor(universe: list[str] | None = None) -> MarketMonitorOverview:
+    latest = _load_latest_market_frame(universe)
+    if latest.empty:
+        raise ValueError("No market data available for terminal monitor")
+
+    universe_size = len(latest)
+    advancers = int((latest["change_pct"] > 0).sum())
+    decliners = int((latest["change_pct"] < 0).sum())
+    avg_rsi = latest["Ticker_RSI"].dropna().mean()
+    pct_above_200 = (
+        ((latest["Close"] > latest["Ticker_SMA_200"]).fillna(False).mean()) * 100
+        if not latest.empty
+        else 0.0
+    )
+
+    breadth = [
+        TerminalStat(label="Advancers", value=str(advancers), tone="positive"),
+        TerminalStat(label="Decliners", value=str(decliners), tone="negative"),
+        TerminalStat(
+            label="Net Breadth",
+            value=f"{advancers - decliners:+d}",
+            tone="positive" if advancers >= decliners else "negative",
+        ),
+        TerminalStat(
+            label="Above 200D",
+            value=f"{pct_above_200:.0f}%",
+            tone="positive" if pct_above_200 >= 50 else "warning",
+        ),
+        TerminalStat(
+            label="Avg RSI",
+            value="—" if avg_rsi is None else f"{float(avg_rsi):.1f}",
+            tone="neutral",
+        ),
+    ]
+
+    sectors_frame = (
+        latest.dropna(subset=["Sector"])
+        .groupby("Sector", as_index=False)
+        .agg(
+            members=("Ticker", "count"),
+            avg_change_pct=("change_pct", "mean"),
+            avg_return_20d=("Ticker_Return_20D", "mean"),
+            avg_rsi=("Ticker_RSI", "mean"),
+            pct_above_200d=("Close", lambda close: float(((close > latest.loc[close.index, "Ticker_SMA_200"]).fillna(False).mean()) * 100)),
+        )
+        .sort_values("avg_return_20d", ascending=False, na_position="last")
+    )
+
+    sectors = [
+        MonitorSector(
+            sector=str(row["Sector"]),
+            members=int(row["members"]),
+            avg_change_pct=_to_float(row.get("avg_change_pct")),
+            avg_return_20d=_to_float(row.get("avg_return_20d")),
+            avg_rsi=_to_float(row.get("avg_rsi")),
+            pct_above_200d=_to_float(row.get("pct_above_200d")),
+        )
+        for _, row in sectors_frame.head(12).iterrows()
+    ]
+
+    def _ranked(frame: pd.DataFrame) -> list[SecurityListItem]:
+        return [_row_to_security_list_item(row) for _, row in frame.head(12).iterrows()]
+
+    leaders = latest.sort_values("Ticker_Return_20D", ascending=False, na_position="last")
+    laggards = latest.sort_values("Ticker_Return_20D", ascending=True, na_position="last")
+    most_active = latest.sort_values("Volume", ascending=False, na_position="last")
+    volume_surge = latest.sort_values("volume_ratio", ascending=False, na_position="last")
+    rsi_high = latest.sort_values("Ticker_RSI", ascending=False, na_position="last")
+    rsi_low = latest.sort_values("Ticker_RSI", ascending=True, na_position="last")
+
+    return MarketMonitorOverview(
+        generated_at=_utc_now(),
+        universe_size=universe_size,
+        breadth=breadth,
+        sectors=sectors,
+        leaders=_ranked(leaders),
+        laggards=_ranked(laggards),
+        most_active=_ranked(most_active),
+        volume_surge=_ranked(volume_surge),
+        rsi_high=_ranked(rsi_high),
+        rsi_low=_ranked(rsi_low),
+    )
+
+
+def get_sector_overview(sector: str) -> SectorOverview:
+    latest = _load_latest_market_frame()
+    if latest.empty:
+        raise ValueError("No market data available for sector view")
+
+    sector_frame = latest[latest["Sector"] == sector].copy()
+    if sector_frame.empty:
+        raise ValueError(f"No data available for sector {sector}")
+
+    avg_change = sector_frame["change_pct"].dropna().mean()
+    avg_return_20d = sector_frame["Ticker_Return_20D"].dropna().mean()
+    avg_rsi = sector_frame["Ticker_RSI"].dropna().mean()
+    pct_above_200 = (
+        ((sector_frame["Close"] > sector_frame["Ticker_SMA_200"]).fillna(False).mean()) * 100
+        if not sector_frame.empty
+        else 0.0
+    )
+
+    summary = [
+        TerminalStat(label="Members", value=str(len(sector_frame)), tone="neutral"),
+        TerminalStat(
+            label="Day Avg",
+            value="—" if avg_change is None else f"{float(avg_change):+.2f}%",
+            tone="positive" if (avg_change or 0) >= 0 else "negative",
+        ),
+        TerminalStat(
+            label="20D Avg",
+            value="—" if avg_return_20d is None else f"{float(avg_return_20d):+.2f}%",
+            tone="positive" if (avg_return_20d or 0) >= 0 else "negative",
+        ),
+        TerminalStat(
+            label="Avg RSI",
+            value="—" if avg_rsi is None else f"{float(avg_rsi):.1f}",
+            tone="neutral",
+        ),
+        TerminalStat(
+            label="Above 200D",
+            value=f"{pct_above_200:.0f}%",
+            tone="positive" if pct_above_200 >= 50 else "warning",
+        ),
+    ]
+
+    leaders = sector_frame.sort_values("Ticker_Return_20D", ascending=False, na_position="last")
+    laggards = sector_frame.sort_values("Ticker_Return_20D", ascending=True, na_position="last")
+    member_sort = ["Ticker_Tech_Score", "Ticker_Return_20D"]
+    ascending = [False, False]
+    if "MarketCap" in sector_frame.columns:
+        member_sort.append("MarketCap")
+        ascending.append(False)
+    members = sector_frame.sort_values(member_sort, ascending=ascending, na_position="last")
+
+    return SectorOverview(
+        generated_at=_utc_now(),
+        sector=sector,
+        summary=summary,
+        leaders=[_row_to_security_list_item(row) for _, row in leaders.head(8).iterrows()],
+        laggards=[_row_to_security_list_item(row) for _, row in laggards.head(8).iterrows()],
+        members=[_row_to_security_list_item(row) for _, row in members.head(40).iterrows()],
     )
 
 

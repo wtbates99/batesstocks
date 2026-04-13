@@ -4,9 +4,12 @@ import type {
   BackupCreateResponse,
   BackupStatus,
   LivePrices,
+  MarketMonitorOverview,
   NewsResponse,
   SearchResult,
+  SectorOverview,
   SecurityOverview,
+  SecuritySnapshotResponse,
   StrategyBacktestRequest,
   StrategyBacktestResponse,
   StrategyDefinition,
@@ -68,8 +71,12 @@ export const api = {
 
   terminal: {
     workspace: (ticker: string) => get<TerminalOverview>('/terminal/workspace', { ticker }),
+    monitor: () => get<MarketMonitorOverview>('/terminal/monitor'),
+    sector: (sector: string) => get<SectorOverview>(`/terminal/sector/${encodeURIComponent(sector)}`),
     security: (ticker: string, limit = 260) =>
       get<SecurityOverview>(`/terminal/security/${ticker}`, { limit }),
+    snapshots: (tickers: string[]) =>
+      get<SecuritySnapshotResponse>('/terminal/snapshots', { tickers: tickers.join(',') }),
     news: (tickers: string[], scope: string, limit = 12) =>
       get<NewsResponse>('/news', { tickers: tickers.join(','), scope, limit }),
   },

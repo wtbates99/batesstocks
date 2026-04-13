@@ -9,7 +9,10 @@ import type {
 
 export const terminalKeys = {
   workspace: (ticker: string) => ['workspace', ticker] as const,
+  monitor: () => ['monitor'] as const,
+  sector: (sector: string) => ['sector', sector] as const,
   security: (ticker: string, limit: number) => ['security', ticker, limit] as const,
+  snapshots: (tickers: string[]) => ['snapshots', ...tickers] as const,
   news: (scope: string, tickers: string[]) => ['news', scope, ...tickers] as const,
   livePrices: (tickers: string[]) => ['live-prices', ...tickers] as const,
   search: (query: string) => ['search', query] as const,
@@ -27,11 +30,42 @@ export function useWorkspaceQuery(ticker: string) {
   })
 }
 
+export function useMonitorQuery() {
+  return useQuery({
+    queryKey: terminalKeys.monitor(),
+    queryFn: api.terminal.monitor,
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+  })
+}
+
+export function useSectorQuery(sector: string, enabled = true) {
+  return useQuery({
+    queryKey: terminalKeys.sector(sector),
+    queryFn: () => api.terminal.sector(sector),
+    enabled: enabled && sector.trim().length > 0,
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+  })
+}
+
 export function useSecurityQuery(ticker: string, limit = 260) {
   return useQuery({
     queryKey: terminalKeys.security(ticker, limit),
     queryFn: () => api.terminal.security(ticker, limit),
     staleTime: 30_000,
+    refetchOnWindowFocus: false,
+  })
+}
+
+export function useSnapshotsQuery(tickers: string[], enabled = true) {
+  const clean = Array.from(new Set(tickers.filter(Boolean).map((ticker) => ticker.toUpperCase())))
+  return useQuery({
+    queryKey: terminalKeys.snapshots(clean),
+    queryFn: () => api.terminal.snapshots(clean),
+    enabled: enabled && clean.length > 0,
+    staleTime: 20_000,
+    refetchInterval: 30_000,
     refetchOnWindowFocus: false,
   })
 }

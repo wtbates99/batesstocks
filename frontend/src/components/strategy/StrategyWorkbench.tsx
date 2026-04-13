@@ -9,6 +9,21 @@ interface Props {
   includeTicker: boolean
 }
 
+function conditionLabel(condition: RuleDraft['condition']) {
+  switch (condition) {
+    case 'crosses_above':
+      return 'Crosses Above'
+    case 'crosses_below':
+      return 'Crosses Below'
+    case 'above':
+      return 'Above'
+    case 'below':
+      return 'Below'
+    default:
+      return condition
+  }
+}
+
 function updateRule(
   rules: RuleDraft[],
   id: string,
@@ -105,7 +120,7 @@ function RuleStack({
               })))}
             >
               {STRATEGY_CONDITIONS.map((condition) => (
-                <option key={condition} value={condition}>{condition.toUpperCase()}</option>
+                <option key={condition} value={condition}>{conditionLabel(condition)}</option>
               ))}
             </select>
             <select

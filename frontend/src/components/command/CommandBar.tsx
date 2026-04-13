@@ -4,14 +4,17 @@ import { useNavigate } from 'react-router-dom'
 import { useSearchQuery, useSyncMutation } from '../../api/query'
 import { executeTerminalCommand, parseTerminalCommand } from '../../lib/commands'
 import { cn } from '../../lib/formatters'
-import { useTerminalStore } from '../../state/terminalStore'
+import { getActiveWatchlist, useTerminalStore } from '../../state/terminalStore'
 
 const COMMAND_HINTS = [
   'SPY DES',
+  'MON',
+  'WL',
+  'COMP',
+  'NEWS',
   'EQS',
   'PORT',
   'SYNC NVDA',
-  'NEWS MSFT',
   'WL ADD AAPL',
   'COMP MSFT SPY QQQ',
   'LAST',
@@ -108,7 +111,8 @@ export default function CommandBar() {
       getPreviousTicker: () => recentTickers.find((ticker) => ticker !== recentTickers[0]),
       onWatchlist: (action, ticker) => {
         if (action === 'show') {
-          setSyncNotice({ message: `WATCHLIST ${useTerminalStore.getState().watchlist.join(' ') || 'EMPTY'}`, tone: 'neutral' })
+          const active = getActiveWatchlist(useTerminalStore.getState())
+          setSyncNotice({ message: `${active?.name?.toUpperCase() ?? 'WATCHLIST'} ${active?.symbols.join(' ') || 'EMPTY'}`, tone: 'neutral' })
           return
         }
         if (!ticker) return
