@@ -16,6 +16,7 @@ from backend.core.config import (
 
 _SCHEMA_LOCK = Lock()
 _SCHEMA_READY = False
+_SCHEMA_DB_PATH: Path | None = None
 
 
 def _connection_config() -> dict[str, str]:
@@ -45,12 +46,14 @@ def duckdb_connection(read_only: bool = False) -> Iterator[duckdb.DuckDBPyConnec
 
 
 def ensure_schema() -> None:
-    global _SCHEMA_READY
-    if _SCHEMA_READY:
+    global _SCHEMA_READY, _SCHEMA_DB_PATH
+    db_path = get_db_path()
+    if _SCHEMA_READY and _SCHEMA_DB_PATH == db_path:
         return
 
     with _SCHEMA_LOCK:
-        if _SCHEMA_READY:
+        db_path = get_db_path()
+        if _SCHEMA_READY and _SCHEMA_DB_PATH == db_path:
             return
 
         with duckdb_connection() as conn:
@@ -154,13 +157,30 @@ def ensure_schema() -> None:
                     compressed BOOLEAN NOT NULL
                 )
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS news_cache (
+                    id TEXT PRIMARY KEY,
+                    ticker TEXT,
+                    title TEXT NOT NULL,
+                    summary TEXT,
+                    publisher TEXT,
+                    link TEXT NOT NULL,
+                    published_at TIMESTAMP,
+                    related_tickers JSON NOT NULL,
+                    fetched_at TIMESTAMP NOT NULL
+                )
+            """)
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_strategy_runs_created_at ON strategy_runs (created_at)"
             )
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_backup_runs_created_at ON backup_runs (created_at)"
             )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_news_cache_ticker_fetched_at ON news_cache (ticker, fetched_at)"
+            )
         _SCHEMA_READY = True
+        _SCHEMA_DB_PATH = db_path
 
 
 def ensure_backup_dir() -> Path:

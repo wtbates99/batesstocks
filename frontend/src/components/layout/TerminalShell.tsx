@@ -1,258 +1,182 @@
-import { useState, useEffect, useCallback } from 'react'
-import { useLocation, useNavigate, Link } from 'react-router-dom'
-import { Bot, Activity, ChevronRight } from 'lucide-react'
-import SearchBar from '../SearchBar'
+import { useEffect, useState } from 'react'
+import { Activity, Bot, ChevronRight, DatabaseZap, Radio, RefreshCw } from 'lucide-react'
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { useHealthQuery, useLivePricesQuery, useSyncStatusQuery } from '../../api/query'
+import CommandBar from '../command/CommandBar'
 import AiPanel from '../AiPanel'
-import { usePoll } from '../../hooks/useApi'
-import { api } from '../../api/client'
-import { useAiContext } from '../../contexts/AiContext'
+import WorkspaceRail from './WorkspaceRail'
+import { formatClock, formatTimestamp } from '../../lib/formatters'
+import { useTerminalStore } from '../../state/terminalStore'
 
-const NAV = [
-  { key: 'F1', label: 'DASH', path: '/', matchPath: '/' },
-  { key: 'F2', label: 'SCRN', path: '/screener', matchPath: '/screener' },
-  { key: 'F3', label: 'BKTS', path: '/backtest', matchPath: '/backtest' },
-  { key: 'F4', label: 'SECR', path: '/security/SPY', matchPath: '/security' },
+const NAV_ITEMS = [
+  { label: 'DASH', path: '/' },
+  { label: 'EQS', path: '/screener' },
+  { label: 'PORT', path: '/backtest' },
 ]
 
-const INDEX_TICKERS = ['SPY', 'QQQ', 'IWM', '^VIX']
+const STRIP_TICKERS = ['SPY', 'QQQ', 'IWM', '^VIX']
 
-interface Props {
-  children: React.ReactNode
-}
+function ClockStrip() {
+  const [clock, setClock] = useState(() => formatClock())
 
-function isNavActive(pathname: string, matchPath: string) {
-  if (matchPath === '/') return pathname === '/'
-  return pathname === matchPath || pathname.startsWith(`${matchPath}/`)
-}
-
-function Clock() {
-  const [time, setTime] = useState(() => new Date())
   useEffect(() => {
-    const id = setInterval(() => setTime(new Date()), 1000)
-    return () => clearInterval(id)
+    const id = window.setInterval(() => setClock(formatClock()), 1000)
+    return () => window.clearInterval(id)
   }, [])
-  const et = time.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour12: false })
-  const dateStr = time.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-  return (
-    <div className="topbar-clock">
-      <span>{dateStr}</span>
-      <span style={{ color: 'var(--orange)', marginLeft: 6 }}>{et} ET</span>
-    </div>
-  )
+
+  return <div className="shell-clock">{clock} ET</div>
 }
 
-function IndexBar() {
-  const { data } = usePoll(
-    () => api.market.livePrices(INDEX_TICKERS),
-    30000,
-  )
-
-  const LABELS: Record<string, string> = { SPY: 'SPY', QQQ: 'QQQ', IWM: 'IWM', '^VIX': 'VIX' }
-
-  if (!data) return null
-
-  return (
-    <div className="topbar-indices">
-      {INDEX_TICKERS.map(t => {
-        const price = data.prices[t]
-        return (
-          <div key={t} className="idx-item">
-            <span className="idx-label">{LABELS[t]}</span>
-            <span className="idx-value num">
-              {price != null ? price.toFixed(2) : '—'}
-            </span>
-          </div>
-        )
-      })}
-    </div>
-  )
-}
-
-export default function TerminalShell({ children }: Props) {
+export default function TerminalShell() {
   const location = useLocation()
   const navigate = useNavigate()
-  const [aiOpen, setAiOpen] = useState(false)
-  const [cmdOpen, setCmdOpen] = useState(false)
-  const [aiPrefill, setAiPrefill] = useState<string | undefined>()
-  const { context: aiCtx, registerOpenHandler } = useAiContext()
+  const { live, ready } = useHealthQuery()
+  const syncStatus = useSyncStatusQuery()
+  const strip = useLivePricesQuery(STRIP_TICKERS, true, 30_000)
+  const {
+    aiOpen,
+    closeAi,
+    openAi,
+    syncNotice,
+    focusCommandBar,
+    recentTickers,
+    setLastRoute,
+  } = useTerminalStore((state) => ({
+    aiOpen: state.aiOpen,
+    closeAi: state.closeAi,
+    openAi: state.openAi,
+    syncNotice: state.syncNotice,
+    focusCommandBar: state.focusCommandBar,
+    recentTickers: state.recentTickers,
+    setLastRoute: state.setLastRoute,
+  }))
 
-  // Register the open+prefill handler so pages can call openAi(msg)
-  const openAiWithPrefill = useCallback((prefill?: string) => {
-    setAiPrefill(prefill)
-    setAiOpen(true)
-  }, [])
   useEffect(() => {
-    registerOpenHandler(openAiWithPrefill)
-    return () => registerOpenHandler(null)
-  }, [openAiWithPrefill, registerOpenHandler])
+    setLastRoute(location.pathname)
+  }, [location.pathname, setLastRoute])
 
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'k' && (e.ctrlKey || e.metaKey)) {
-        e.preventDefault()
-        setCmdOpen(o => !o)
+    const handler = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null
+      const typing = target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)
+
+      if ((event.key === '/' || (event.key.toLowerCase() === 'l' && (event.metaKey || event.ctrlKey))) && !typing) {
+        event.preventDefault()
+        focusCommandBar()
         return
       }
-      if (e.key === '`' && (e.ctrlKey || e.metaKey)) {
-        e.preventDefault()
-        setAiOpen(o => !o)
+
+      if (event.key === '`' && (event.metaKey || event.ctrlKey)) {
+        event.preventDefault()
+        if (aiOpen) closeAi()
+        else openAi()
         return
       }
-      if (e.ctrlKey || e.metaKey) {
-        // Ctrl+1-9 → NAV[0-8]; Ctrl+0 → AI panel
-        if (e.key === '0') {
-          e.preventDefault()
-          setAiOpen(o => !o)
-          return
+
+      if (event.altKey && !typing) {
+        if (event.key === '1') {
+          event.preventDefault()
+          navigate('/')
         }
-        const idx = parseInt(e.key, 10) - 1
-        if (idx >= 0 && idx < NAV.length) {
-          e.preventDefault()
-          navigate(NAV[idx].path)
+        if (event.key === '2') {
+          event.preventDefault()
+          navigate('/screener')
+        }
+        if (event.key === '3') {
+          event.preventDefault()
+          navigate('/backtest')
+        }
+      }
+
+      if (!typing && event.key === '[') {
+        const previous = recentTickers.find((ticker) => ticker !== recentTickers[0])
+        if (previous) {
+          event.preventDefault()
+          navigate(`/security/${previous}`)
         }
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [navigate])
+  }, [aiOpen, closeAi, focusCommandBar, navigate, openAi, recentTickers])
 
   return (
     <div className="terminal-shell">
-      {/* Top bar */}
-      <div className="topbar">
-        <div className="topbar-brand">BATESSTOCKS</div>
-        <div className="topbar-search">
-          <SearchBar />
-        </div>
-        <IndexBar />
-        <button
-          className="term-btn"
-          onClick={() => setAiOpen(o => !o)}
-          style={{ marginLeft: 'auto' }}
-          data-tooltip="AI Assistant (Ctrl+`)"
-        >
-          <Bot size={12} />
-          <span>AI</span>
-        </button>
-        <Clock />
-      </div>
-
-      {/* Function key bar */}
-      <div className="fnbar">
-        {NAV.map((n) => (
-          <Link
-            key={n.path}
-            to={n.path}
-            className={`fn-key${isNavActive(location.pathname, n.matchPath) ? ' active' : ''}`}
-          >
-            <span className="fn-num">{n.key}</span>
-            <span className="fn-label">{n.label}</span>
-          </Link>
-        ))}
-        <div className="fn-spacer" />
-        <button
-          type="button"
-          className="fn-key"
-          onClick={() => setAiOpen(o => !o)}
-          style={{ cursor: 'pointer', background: 'transparent' }}
-        >
-          <span className="fn-num" style={{ color: 'var(--blue)' }}>F0</span>
-          <span className="fn-label">AI</span>
-        </button>
-      </div>
-
-      {/* Content */}
-      <div className="terminal-content">
-        <div className="page-area">
-          {children}
-        </div>
-        <AiPanel
-          open={aiOpen}
-          onClose={() => { setAiOpen(false); setAiPrefill(undefined) }}
-          context={aiCtx}
-          prefill={aiPrefill}
-        />
-      </div>
-
-      {/* Status bar */}
-      <div className="statusbar">
-        <div className="statusbar-item">
-          <div className="status-dot live" />
-          <span>LIVE</span>
-        </div>
-        <div className="statusbar-item">
-          <Activity size={9} />
-          <span>S&amp;P 500</span>
-        </div>
-        <div className="statusbar-item" style={{ marginLeft: 'auto' }}>
-          <span>Ctrl+K — command palette</span>
-          <ChevronRight size={9} />
-          <span>Ctrl+` — AI</span>
-        </div>
-      </div>
-
-      {/* Command palette */}
-      {cmdOpen && (
-        <CommandPalette
-          onClose={() => setCmdOpen(false)}
-          onOpenAi={() => {
-            setCmdOpen(false)
-            setAiOpen(true)
-          }}
-        />
-      )}
-    </div>
-  )
-}
-
-function CommandPalette({ onClose, onOpenAi }: { onClose: () => void; onOpenAi: () => void }) {
-  const [q, setQ] = useState('')
-  const navigate = useNavigate()
-  const [active, setActive] = useState(0)
-
-  const items = [
-    ...NAV.map((n, i) => ({ label: n.label, action: () => navigate(n.path), shortcut: `Ctrl+${i + 1}` })),
-    { label: 'AI Assistant', action: onOpenAi, shortcut: 'Ctrl+0' },
-  ].filter(item => !q || item.label.toLowerCase().includes(q.toLowerCase()))
-
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-      if (e.key === 'ArrowDown') setActive(a => Math.min(a + 1, items.length - 1))
-      if (e.key === 'ArrowUp') setActive(a => Math.max(a - 1, 0))
-      if (e.key === 'Enter') { items[active]?.action(); onClose() }
-    }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  }, [items, active, onClose])
-
-  return (
-    <div className="cmd-backdrop" onClick={onClose}>
-      <div className="cmd-box" onClick={e => e.stopPropagation()}>
-        <input
-          className="cmd-input"
-          placeholder="Type a command or navigate…"
-          value={q}
-          onChange={e => { setQ(e.target.value); setActive(0) }}
-          autoFocus
-        />
-        <div className="cmd-results">
-          <div className="cmd-section">
-            <div className="cmd-section-label">Navigation</div>
-            {items.map((item, i) => (
-              <div
-                key={item.label}
-                className={`cmd-item${i === active ? ' active' : ''}`}
-                onClick={() => { item.action(); onClose() }}
-                onMouseEnter={() => setActive(i)}
-              >
-                <span className="cmd-item-label">{item.label}</span>
-                {item.shortcut && <span className="cmd-item-shortcut">{item.shortcut}</span>}
-              </div>
-            ))}
+      <header className="shell-header">
+        <div className="brand-strip">
+          <div className="brand-mark">BATESSTOCKS</div>
+          <div className="brand-path">
+            <span>TERMINAL</span>
+            <ChevronRight size={12} />
+            <span>{location.pathname === '/' ? 'LAUNCHPAD' : location.pathname.toUpperCase()}</span>
           </div>
         </div>
-      </div>
+        <CommandBar />
+        <div className="ticker-strip">
+          {STRIP_TICKERS.map((ticker) => (
+            <div key={ticker} className="strip-cell">
+              <span className="strip-label">{ticker === '^VIX' ? 'VIX' : ticker}</span>
+              <span className="strip-value">{strip.data?.prices[ticker]?.toFixed(2) ?? '—'}</span>
+            </div>
+          ))}
+          <button type="button" className="terminal-button terminal-button-ghost" onClick={() => openAi()}>
+            <Bot size={12} />
+            AI
+          </button>
+          <ClockStrip />
+        </div>
+      </header>
+
+      <nav className="function-strip">
+        {NAV_ITEMS.map((item) => (
+          <NavLink
+            key={item.path}
+            to={item.path}
+            end={item.path === '/'}
+            className={({ isActive }) => `function-key${isActive ? ' is-active' : ''}`}
+          >
+            {item.label}
+          </NavLink>
+        ))}
+        <div className="function-hint">`/` focus command · `[` prior symbol · `Alt+1/2/3` modules</div>
+      </nav>
+
+      <main className="shell-main">
+        <WorkspaceRail />
+        <div className="workspace">
+          <Outlet />
+        </div>
+        <AiPanel open={aiOpen} onClose={closeAi} />
+      </main>
+
+      <footer className="status-strip">
+        <div className="status-item">
+          <Radio size={11} />
+          <span className={live.data?.status === 'ok' ? 'tone-positive' : 'tone-negative'}>
+            {live.data?.status === 'ok' ? 'LIVE' : 'DOWN'}
+          </span>
+        </div>
+        <div className="status-item">
+          <Activity size={11} />
+          <span className={ready.data?.status === 'ready' ? 'tone-cyan' : 'tone-warning'}>
+            {ready.data?.status === 'ready' ? 'READY' : 'BOOTSTRAP'}
+          </span>
+        </div>
+        <div className="status-item">
+          <RefreshCw size={11} />
+          <span className={syncStatus.data?.state === 'running' ? 'tone-warning' : syncStatus.data?.state === 'error' ? 'tone-negative' : 'tone-positive'}>
+            {syncStatus.data?.state?.toUpperCase() ?? 'UNKNOWN'}
+          </span>
+          <span>{syncStatus.data?.detail ?? 'Awaiting telemetry'}</span>
+        </div>
+        <div className="status-item">
+          <DatabaseZap size={11} />
+          <span>LAST SYNC {formatTimestamp(syncStatus.data?.last_success_at)}</span>
+        </div>
+        <div className={`status-item status-notice ${syncNotice ? `tone-${syncNotice.tone}` : ''}`}>
+          <span>{syncNotice?.message ?? 'WATCHLIST, RECENTS, AND SAVED WORKSPACES ARE PERSISTED LOCALLY'}</span>
+        </div>
+      </footer>
     </div>
   )
 }

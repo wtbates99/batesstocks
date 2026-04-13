@@ -1,78 +1,62 @@
 import { useEffect, useRef } from 'react'
-import {
-  createChart,
-  type IChartApi,
-} from 'lightweight-charts'
+import { ColorType, createChart, type IChartApi } from 'lightweight-charts'
 import type { SecurityBar } from '../../api/types'
 
 interface Props {
   bars: SecurityBar[]
   height?: number
+  overlays?: Array<'sma_10' | 'sma_30' | 'sma_200' | 'ema_10'>
 }
 
-export default function TerminalChart({ bars, height = 360 }: Props) {
+const OVERLAY_CONFIG = {
+  sma_10: { color: '#f6c344', label: 'SMA 10' },
+  sma_30: { color: '#3cc7f2', label: 'SMA 30' },
+  sma_200: { color: '#8c94ff', label: 'SMA 200' },
+  ema_10: { color: '#f28b39', label: 'EMA 10' },
+} as const
+
+export default function TerminalChart({ bars, height = 440, overlays = ['sma_10', 'sma_30', 'sma_200'] }: Props) {
   const hostRef = useRef<HTMLDivElement | null>(null)
   const chartRef = useRef<IChartApi | null>(null)
 
   useEffect(() => {
     const host = hostRef.current
-    if (!host) return
+    if (!host || bars.length === 0) return
 
     const chart = createChart(host, {
-      width: host.clientWidth || 900,
+      width: host.clientWidth,
       height,
       layout: {
-        background: { color: '#0f1214' },
-        textColor: '#8b949e',
+        background: { type: ColorType.Solid, color: '#050607' },
+        textColor: '#9aa4af',
+        attributionLogo: false,
       },
       grid: {
-        vertLines: { color: '#161b22' },
-        horzLines: { color: '#161b22' },
+        vertLines: { color: '#11161c' },
+        horzLines: { color: '#11161c' },
       },
       rightPriceScale: {
-        borderColor: '#21262d',
+        borderColor: '#1a2028',
+        scaleMargins: { top: 0.08, bottom: 0.24 },
       },
       timeScale: {
-        borderColor: '#21262d',
-        timeVisible: true,
+        borderColor: '#1a2028',
+        fixLeftEdge: true,
       },
       crosshair: {
-        vertLine: { color: '#30363d', labelBackgroundColor: '#141820' },
-        horzLine: { color: '#30363d', labelBackgroundColor: '#141820' },
+        vertLine: { color: '#2c333d', labelBackgroundColor: '#0f1318' },
+        horzLine: { color: '#2c333d', labelBackgroundColor: '#0f1318' },
       },
     })
 
-    const candleSeries = chart.addCandlestickSeries({
-      upColor: '#3fb950',
-      downColor: '#f85149',
-      wickUpColor: '#3fb950',
-      wickDownColor: '#f85149',
+    const candles = chart.addCandlestickSeries({
+      upColor: '#11b981',
+      downColor: '#d24545',
       borderVisible: false,
+      wickUpColor: '#11b981',
+      wickDownColor: '#d24545',
     })
-    const sma10Series = chart.addLineSeries({
-      color: '#f0883e',
-      lineWidth: 1,
-      priceLineVisible: false,
-    })
-    const sma30Series = chart.addLineSeries({
-      color: '#58a6ff',
-      lineWidth: 1,
-      priceLineVisible: false,
-    })
-    const volumeSeries = chart.addHistogramSeries({
-      color: '#30363d',
-      priceFormat: { type: 'volume' },
-      priceScaleId: '',
-    })
-
-    volumeSeries.priceScale().applyOptions({
-      scaleMargins: {
-        top: 0.78,
-        bottom: 0,
-      },
-    })
-
-    candleSeries.setData(
+    candles.setData(
       bars.map((bar) => ({
         time: bar.date,
         open: bar.open,
@@ -81,40 +65,52 @@ export default function TerminalChart({ bars, height = 360 }: Props) {
         close: bar.close,
       })),
     )
-    sma10Series.setData(
-      bars
-        .filter((bar) => bar.sma_10 != null)
-        .map((bar) => ({ time: bar.date, value: bar.sma_10 as number })),
-    )
-    sma30Series.setData(
-      bars
-        .filter((bar) => bar.sma_30 != null)
-        .map((bar) => ({ time: bar.date, value: bar.sma_30 as number })),
-    )
-    volumeSeries.setData(
+
+    overlays.forEach((overlay) => {
+      const series = chart.addLineSeries({
+        color: OVERLAY_CONFIG[overlay].color,
+        lineWidth: overlay === 'sma_200' ? 2 : 1,
+        priceLineVisible: false,
+        lastValueVisible: true,
+      })
+      series.setData(
+        bars
+          .filter((bar) => bar[overlay] != null)
+          .map((bar) => ({ time: bar.date, value: bar[overlay] as number })),
+      )
+    })
+
+    const volume = chart.addHistogramSeries({
+      priceScaleId: '',
+      priceFormat: { type: 'volume' },
+    })
+    volume.priceScale().applyOptions({
+      scaleMargins: { top: 0.78, bottom: 0 },
+    })
+    volume.setData(
       bars.map((bar) => ({
         time: bar.date,
         value: bar.volume,
-        color: bar.close >= bar.open ? '#2a7a35' : '#b33028',
+        color: bar.close >= bar.open ? '#0f6c55' : '#7e2f35',
       })),
     )
 
     chart.timeScale().fitContent()
     chartRef.current = chart
 
-    const resizeObserver = new ResizeObserver(() => {
-      if (hostRef.current && chartRef.current) {
+    const observer = new ResizeObserver(() => {
+      if (chartRef.current && hostRef.current) {
         chartRef.current.applyOptions({ width: hostRef.current.clientWidth })
       }
     })
-    resizeObserver.observe(host)
+    observer.observe(host)
 
     return () => {
-      resizeObserver.disconnect()
+      observer.disconnect()
       chart.remove()
       chartRef.current = null
     }
-  }, [bars, height])
+  }, [bars, height, overlays])
 
-  return <div ref={hostRef} style={{ width: '100%', height }} />
+  return <div ref={hostRef} className="chart-host" style={{ height }} />
 }

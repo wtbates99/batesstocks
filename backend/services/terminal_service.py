@@ -16,13 +16,13 @@ from backend.models import (
     StrategyBacktestSummary,
     StrategyDefinition,
     StrategyMatch,
-    TerminalHeadline,
     TerminalMover,
     TerminalOverview,
     TerminalStat,
 )
 
 SUPPORTED_CONDITIONS = {"above", "below", "crosses_above", "crosses_below"}
+SUPPORTED_OPERATORS = {"and", "or"}
 
 
 def _to_float(value: float | int | None) -> float | None:
@@ -124,6 +124,44 @@ def _evaluate_leg(
     return (left < right) & (prev_left >= prev_right)
 
 
+def _evaluate_rule(frame: pd.DataFrame, leg: object) -> pd.Series:
+    threshold = _resolve_threshold(
+        frame,
+        getattr(leg, "compare_to_metric", None),
+        getattr(leg, "threshold", None),
+    )
+    return _evaluate_leg(
+        frame,
+        getattr(leg, "metric"),
+        getattr(leg, "condition"),
+        threshold,
+    ).fillna(False)
+
+
+def _combine_rule_stack(
+    frame: pd.DataFrame,
+    base_leg,
+    filters,
+    operator: str,
+) -> pd.Series:
+    op = operator.lower()
+    if op not in SUPPORTED_OPERATORS:
+        raise ValueError(f"Unsupported logical operator: {operator}")
+
+    signals = [_evaluate_rule(frame, base_leg)]
+    signals.extend(_evaluate_rule(frame, rule) for rule in filters)
+    combined = signals[0].copy()
+    for signal in signals[1:]:
+        combined = combined & signal if op == "and" else combined | signal
+    return combined.fillna(False)
+
+
+def _trade_cost_rate(strategy: StrategyDefinition) -> float:
+    fee_rate = max(strategy.fee_bps, 0.0) / 10000.0
+    slippage_rate = max(strategy.slippage_bps, 0.0) / 10000.0
+    return fee_rate + slippage_rate
+
+
 def _evaluate_strategy_matches(
     frame: pd.DataFrame, strategy: StrategyDefinition
 ) -> list[StrategyMatch]:
@@ -137,26 +175,22 @@ def _evaluate_strategy_matches(
         if ticker_frame.empty:
             continue
 
-        entry_threshold = _resolve_threshold(
+        entry_signal = _combine_rule_stack(
             ticker_frame,
-            strategy.entry.compare_to_metric,
-            strategy.entry.threshold,
+            strategy.entry,
+            strategy.entry_filters,
+            strategy.entry_operator,
         )
-        entry_signal = _evaluate_leg(
-            ticker_frame, strategy.entry.metric, strategy.entry.condition, entry_threshold
-        ).fillna(False)
         if not bool(entry_signal.iloc[-1]):
             continue
 
         signal_state = "entry"
-        exit_threshold = _resolve_threshold(
+        exit_signal = _combine_rule_stack(
             ticker_frame,
-            strategy.exit.compare_to_metric,
-            strategy.exit.threshold,
+            strategy.exit,
+            strategy.exit_filters,
+            strategy.exit_operator,
         )
-        exit_signal = _evaluate_leg(
-            ticker_frame, strategy.exit.metric, strategy.exit.condition, exit_threshold
-        ).fillna(False)
         if bool(exit_signal.iloc[-1]):
             signal_state = "entry / exit overlap"
 
@@ -576,49 +610,6 @@ def get_terminal_overview(focus_ticker: str) -> TerminalOverview:
     def _movers(frame: pd.DataFrame) -> list[TerminalMover]:
         return [_row_to_mover(row) for _, row in frame.iterrows()]
 
-    lead_ticker = leaders.iloc[0] if not leaders.empty else None
-    breakout_ticker = breakouts.iloc[0] if not breakouts.empty else None
-    headlines = [
-        TerminalHeadline(
-            ticker="BREADTH",
-            headline=f"{advancers} advancers versus {decliners} decliners across the tracked market",
-            detail=f"{pct_above_200:.0f}% of the universe is above the 200-day average and {pct_above_250:.0f}% is above the 250-day average.",
-            tone="positive" if advancers >= decliners else "negative",
-        ),
-        TerminalHeadline(
-            ticker=str(strongest_sector["Sector"])[:12].upper()
-            if strongest_sector is not None
-            else "SECTOR",
-            headline=(
-                f"{strongest_sector['Sector']} is leading on intermediate-term momentum"
-                if strongest_sector is not None
-                else "Sector leadership will appear once enough market data is loaded"
-            ),
-            detail=(
-                f"Average 20-day return is {float(strongest_sector['avg_return_20d'] or 0):+.2f}% across {int(strongest_sector['constituents'])} names."
-                if strongest_sector is not None
-                else "Sync the full market universe to unlock sector-relative trend analysis."
-            ),
-            tone="positive",
-        ),
-        TerminalHeadline(
-            ticker=(
-                str(lead_ticker["Ticker"]) if lead_ticker is not None else focus_ticker.upper()
-            ),
-            headline=(
-                f"{lead_ticker['Ticker']} is the strongest current leader by 20-day trend"
-                if lead_ticker is not None
-                else f"{focus_ticker.upper()} remains the active focus instrument"
-            ),
-            detail=(
-                f"{float(lead_ticker['Ticker_Return_20D'] or 0):+.2f}% over 20 sessions with a technical score of {float(lead_ticker['Ticker_Tech_Score'] or 0):.0f}. {breakout_ticker['Ticker']} is nearest its 52-week high."
-                if lead_ticker is not None and breakout_ticker is not None
-                else "Leaders and breakout candidates are derived from the tracked market, not a hand-picked watchlist."
-            ),
-            tone="positive",
-        ),
-    ]
-
     return TerminalOverview(
         generated_at=_utc_now(),
         focus_ticker=focus_ticker.upper(),
@@ -627,7 +618,6 @@ def get_terminal_overview(focus_ticker: str) -> TerminalOverview:
         momentum_leaders=_movers(leaders),
         reversal_candidates=_movers(reversals),
         breakouts=_movers(breakouts),
-        headlines=headlines,
     )
 
 
@@ -641,33 +631,33 @@ def run_strategy_backtest(request: StrategyBacktestRequest) -> StrategyBacktestR
         raise ValueError(f"No ticker data available for {request.ticker.upper()}")
 
     frame["Date"] = pd.to_datetime(frame["Date"])
-    entry_threshold = _resolve_threshold(
+    entry_signal = _combine_rule_stack(
         frame,
-        request.strategy.entry.compare_to_metric,
-        request.strategy.entry.threshold,
+        request.strategy.entry,
+        request.strategy.entry_filters,
+        request.strategy.entry_operator,
     )
-    exit_threshold = _resolve_threshold(
+    exit_signal = _combine_rule_stack(
         frame,
-        request.strategy.exit.compare_to_metric,
-        request.strategy.exit.threshold,
+        request.strategy.exit,
+        request.strategy.exit_filters,
+        request.strategy.exit_operator,
     )
-    entry_signal = _evaluate_leg(
-        frame, request.strategy.entry.metric, request.strategy.entry.condition, entry_threshold
-    ).fillna(False)
-    exit_signal = _evaluate_leg(
-        frame, request.strategy.exit.metric, request.strategy.exit.condition, exit_threshold
-    ).fillna(False)
 
     initial_capital = max(request.strategy.initial_capital, 1.0)
     size_fraction = min(max(request.strategy.position_size_pct / 100.0, 0.01), 1.0)
     cash = initial_capital
+    gross_cash = initial_capital
     shares = 0.0
+    gross_shares = 0.0
     entry_price = 0.0
     entry_date = None
     equity_points: list[StrategyBacktestPoint] = []
     trades = []
     peak_equity = initial_capital
     max_drawdown = 0.0
+    total_fees_paid = 0.0
+    cost_rate = _trade_cost_rate(request.strategy)
 
     for idx, row in frame.iterrows():
         close = float(row["Close"])
@@ -679,12 +669,22 @@ def run_strategy_backtest(request: StrategyBacktestRequest) -> StrategyBacktestR
 
         if shares == 0 and bool(entry_signal.iloc[idx]):
             deployable_cash = cash * size_fraction
-            shares = deployable_cash / close if close > 0 else 0.0
-            cash -= shares * close
+            gross_deployable_cash = gross_cash * size_fraction
+            shares = deployable_cash / (close * (1 + cost_rate)) if close > 0 else 0.0
+            gross_shares = gross_deployable_cash / close if close > 0 else 0.0
+            entry_cost = shares * close * cost_rate
+            cash -= shares * close + entry_cost
+            gross_cash -= gross_shares * close
+            total_fees_paid += entry_cost
             entry_price = close
             entry_date = date
         elif shares > 0 and should_exit:
-            cash += shares * close
+            exit_value = shares * close
+            gross_exit_value = gross_shares * close
+            exit_cost = exit_value * cost_rate
+            cash += exit_value - exit_cost
+            gross_cash += gross_exit_value
+            total_fees_paid += exit_cost
             pnl = (close - entry_price) * shares
             trades.append(
                 {
@@ -699,6 +699,7 @@ def run_strategy_backtest(request: StrategyBacktestRequest) -> StrategyBacktestR
                 }
             )
             shares = 0.0
+            gross_shares = 0.0
             entry_price = 0.0
             entry_date = None
 
@@ -718,7 +719,12 @@ def run_strategy_backtest(request: StrategyBacktestRequest) -> StrategyBacktestR
 
     if shares > 0:
         close = float(frame.iloc[-1]["Close"])
-        cash += shares * close
+        exit_value = shares * close
+        gross_exit_value = gross_shares * close
+        exit_cost = exit_value * cost_rate
+        cash += exit_value - exit_cost
+        gross_cash += gross_exit_value
+        total_fees_paid += exit_cost
         pnl = (close - entry_price) * shares
         trades.append(
             {
@@ -734,6 +740,8 @@ def run_strategy_backtest(request: StrategyBacktestRequest) -> StrategyBacktestR
         )
 
     total_return_pct = ((cash / initial_capital) - 1) * 100
+    gross_return_pct = ((gross_cash / initial_capital) - 1) * 100
+    cost_drag_pct = gross_return_pct - total_return_pct
     buy_hold_return_pct = (
         (float(frame.iloc[-1]["Close"]) / float(frame.iloc[0]["Close"])) - 1
     ) * 100
@@ -747,11 +755,32 @@ def run_strategy_backtest(request: StrategyBacktestRequest) -> StrategyBacktestR
     sharpe = None
     if not returns.empty and returns.std() > 0:
         sharpe = float((returns.mean() / returns.std()) * (252**0.5))
+    downside_returns = returns[returns < 0]
+    sortino = None
+    if not returns.empty and not downside_returns.empty and downside_returns.std() > 0:
+        sortino = float((returns.mean() / downside_returns.std()) * (252**0.5))
+
+    benchmark_series = pd.Series(
+        [point.benchmark for point in equity_points if point.benchmark is not None],
+        dtype="float64",
+    )
+    benchmark_returns = benchmark_series.pct_change().dropna()
+    beta = None
+    if (
+        len(returns) > 1
+        and len(benchmark_returns) > 1
+        and benchmark_returns.var() > 0
+    ):
+        aligned = pd.concat([returns.reset_index(drop=True), benchmark_returns.reset_index(drop=True)], axis=1).dropna()
+        if len(aligned) > 1 and aligned.iloc[:, 1].var() > 0:
+            beta = float(aligned.iloc[:, 0].cov(aligned.iloc[:, 1]) / aligned.iloc[:, 1].var())
 
     days = max((frame.iloc[-1]["Date"] - frame.iloc[0]["Date"]).days, 1)
     annualized = ((cash / initial_capital) ** (365 / days) - 1) * 100 if days > 0 else None
     summary = StrategyBacktestSummary(
         total_return_pct=round(total_return_pct, 2),
+        gross_return_pct=round(gross_return_pct, 2),
+        cost_drag_pct=round(cost_drag_pct, 2),
         buy_hold_return_pct=round(buy_hold_return_pct, 2),
         max_drawdown_pct=round(abs(max_drawdown), 2),
         win_rate=round(win_rate, 2),
@@ -759,6 +788,9 @@ def run_strategy_backtest(request: StrategyBacktestRequest) -> StrategyBacktestR
         avg_return_pct=round(avg_return, 2),
         annualized_return_pct=None if annualized is None else round(float(annualized), 2),
         sharpe_ratio=None if sharpe is None else round(sharpe, 2),
+        sortino_ratio=None if sortino is None else round(sortino, 2),
+        beta=None if beta is None else round(beta, 2),
+        total_fees_paid=round(total_fees_paid, 2),
     )
 
     screen_matches = _evaluate_strategy_matches(

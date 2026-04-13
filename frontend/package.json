@@ -11,13 +11,15 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@tanstack/react-query": "^5.99.0",
     "date-fns": "^3.6.0",
     "lightweight-charts": "^4.2.0",
     "lucide-react": "^0.436.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.27.0",
-    "recharts": "^2.12.7"
+    "recharts": "^2.12.7",
+    "zustand": "^5.0.12"
   },
   "devDependencies": {
     "@types/node": "^25.6.0",
