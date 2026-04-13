@@ -723,7 +723,12 @@ def get_market_monitor(universe: list[str] | None = None) -> MarketMonitorOvervi
             avg_change_pct=("change_pct", "mean"),
             avg_return_20d=("Ticker_Return_20D", "mean"),
             avg_rsi=("Ticker_RSI", "mean"),
-            pct_above_200d=("Close", lambda close: float(((close > latest.loc[close.index, "Ticker_SMA_200"]).fillna(False).mean()) * 100)),
+            pct_above_200d=(
+                "Close",
+                lambda close: float(
+                    ((close > latest.loc[close.index, "Ticker_SMA_200"]).fillna(False).mean()) * 100
+                ),
+            ),
         )
         .sort_values("avg_return_20d", ascending=False, na_position="last")
     )
@@ -970,12 +975,10 @@ def run_strategy_backtest(request: StrategyBacktestRequest) -> StrategyBacktestR
     )
     benchmark_returns = benchmark_series.pct_change().dropna()
     beta = None
-    if (
-        len(returns) > 1
-        and len(benchmark_returns) > 1
-        and benchmark_returns.var() > 0
-    ):
-        aligned = pd.concat([returns.reset_index(drop=True), benchmark_returns.reset_index(drop=True)], axis=1).dropna()
+    if len(returns) > 1 and len(benchmark_returns) > 1 and benchmark_returns.var() > 0:
+        aligned = pd.concat(
+            [returns.reset_index(drop=True), benchmark_returns.reset_index(drop=True)], axis=1
+        ).dropna()
         if len(aligned) > 1 and aligned.iloc[:, 1].var() > 0:
             beta = float(aligned.iloc[:, 0].cov(aligned.iloc[:, 1]) / aligned.iloc[:, 1].var())
 
