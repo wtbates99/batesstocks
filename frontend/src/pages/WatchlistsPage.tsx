@@ -9,42 +9,71 @@ import {
   formatPercent,
   toneClass,
 } from '../lib/formatters'
-import { getActiveWatchlist, useTerminalStore } from '../state/terminalStore'
+import { getActiveWatchlist, useTerminalStore, type WatchlistAnnotation } from '../state/terminalStore'
 
 function watchlistName(index: number) {
   return `Watchlist ${index + 1}`
 }
+
+const RISK_LABELS: Record<string, string> = { H: 'HIGH', M: 'MED', L: 'LOW' }
+const RISK_CLASSES: Record<string, string> = { H: 'tone-negative', M: 'tone-warning', L: 'tone-positive' }
 
 export default function WatchlistsPage() {
   const navigate = useNavigate()
   const [renameDraft, setRenameDraft] = useState('')
   const [newName, setNewName] = useState('')
   const [batchAdd, setBatchAdd] = useState('')
+  const [annotatingKey, setAnnotatingKey] = useState<string | null>(null)
+  const [annDraft, setAnnDraft] = useState<WatchlistAnnotation>({})
   const {
     watchlists,
     activeWatchlistId,
     activeWatchlist,
     recentTickers,
+    watchlistAnnotations,
     setActiveWatchlist,
     createWatchlist,
     renameWatchlist,
     deleteWatchlist,
     toggleWatchlist,
     setCompareTickers,
+    setAnnotation,
+    clearAnnotation,
   } = useTerminalStore(
     useShallow((state) => ({
       watchlists: state.watchlists,
       activeWatchlistId: state.activeWatchlistId,
       activeWatchlist: getActiveWatchlist(state),
       recentTickers: state.recentTickers,
+      watchlistAnnotations: state.watchlistAnnotations,
       setActiveWatchlist: state.setActiveWatchlist,
       createWatchlist: state.createWatchlist,
       renameWatchlist: state.renameWatchlist,
       deleteWatchlist: state.deleteWatchlist,
       toggleWatchlist: state.toggleWatchlist,
       setCompareTickers: state.setCompareTickers,
+      setAnnotation: state.setAnnotation,
+      clearAnnotation: state.clearAnnotation,
     })),
   )
+
+  function annKey(ticker: string) { return `${activeWatchlistId}:${ticker}` }
+
+  function openAnn(ticker: string) {
+    const key = annKey(ticker)
+    setAnnotatingKey(key)
+    setAnnDraft(watchlistAnnotations[key] ?? {})
+  }
+
+  function saveAnn() {
+    if (!annotatingKey) return
+    if (annDraft.note || annDraft.triggerPrice || annDraft.riskTag || annDraft.reviewDate) {
+      setAnnotation(annotatingKey, annDraft)
+    } else {
+      clearAnnotation(annotatingKey)
+    }
+    setAnnotatingKey(null)
+  }
 
   const symbols = activeWatchlist?.symbols ?? []
   const snapshots = useSnapshotsQuery(symbols, symbols.length > 0)
@@ -337,99 +366,77 @@ export default function WatchlistsPage() {
               </tr>
             </thead>
             <tbody>
-              {items.map((item) => (
-                <tr key={item.ticker}>
-                  <td>
-                    <Link to={`/security/${item.ticker}`} className="ticker-link">
-                      {item.ticker}
-                    </Link>
-                  </td>
-                  <td
-                    style={{
-                      color: 'var(--text-muted)',
-                      maxWidth: 130,
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {item.name ?? '—'}
-                  </td>
-                  <td>
-                    {item.sector ? (
-                      <Link
-                        to={`/sector/${encodeURIComponent(item.sector)}`}
-                        className="ticker-link"
-                      >
-                        {item.sector}
-                      </Link>
-                    ) : (
-                      '—'
+              {items.map((item) => {
+                const key = annKey(item.ticker)
+                const ann = watchlistAnnotations[key]
+                const isEditing = annotatingKey === key
+                return (
+                  <>
+                    <tr key={item.ticker}>
+                      <td>
+                        <Link to={`/security/${item.ticker}`} className="ticker-link">{item.ticker}</Link>
+                        {ann?.riskTag && <span className={`ann-risk-badge ${RISK_CLASSES[ann.riskTag]}`}>{RISK_LABELS[ann.riskTag]}</span>}
+                      </td>
+                      <td style={{ color: 'var(--text-muted)', maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {item.name ?? '—'}
+                        {ann?.note && <span className="ann-note-hint" title={ann.note}> ✎</span>}
+                      </td>
+                      <td>
+                        {item.sector ? <Link to={`/sector/${encodeURIComponent(item.sector)}`} className="ticker-link">{item.sector}</Link> : '—'}
+                      </td>
+                      <td className="align-right">
+                        {formatNumber(item.close)}
+                        {ann?.triggerPrice && (
+                          <div style={{ fontSize: 'var(--fs-xs)', color: (item.close ?? 0) >= ann.triggerPrice ? 'var(--green-soft)' : 'var(--amber-soft)' }}>
+                            T:{formatNumber(ann.triggerPrice)}
+                          </div>
+                        )}
+                      </td>
+                      <td className={`align-right ${toneClass(item.change_pct)}`}>{formatPercent(item.change_pct)}</td>
+                      <td className={`align-right ${toneClass(item.return_20d)}`}>{formatPercent(item.return_20d)}</td>
+                      <td className={`align-right ${toneClass(item.return_63d)}`}>{formatPercent(item.return_63d)}</td>
+                      <td className={`align-right ${(item.rsi ?? 50) >= 70 ? 'tone-negative' : (item.rsi ?? 50) <= 30 ? 'tone-positive' : ''}`}>
+                        {formatNumber(item.rsi, 1)}
+                      </td>
+                      <td className={`align-right ${(item.tech_score ?? 0) >= 65 ? 'tone-positive' : ''}`}>{formatNumber(item.tech_score, 0)}</td>
+                      <td className="align-right">{formatCompactNumber(item.volume)}</td>
+                      <td>
+                        <div className="table-actions">
+                          <button type="button" className="table-action" onClick={() => toggleWatchlist(item.ticker, activeWatchlistId)}>RM</button>
+                          <button type="button" className="table-action" onClick={() => { setCompareTickers([item.ticker, ...symbols.filter((v) => v !== item.ticker).slice(0, 3), 'SPY']); navigate('/compare') }}>COMP</button>
+                          <button type="button" className="table-action" onClick={() => navigate(`/backtest?ticker=${item.ticker}`)}>BT</button>
+                          <button type="button" className={`table-action${isEditing ? ' is-active' : ''}`} onClick={() => isEditing ? setAnnotatingKey(null) : openAnn(item.ticker)}>ANN</button>
+                        </div>
+                      </td>
+                    </tr>
+                    {isEditing && (
+                      <tr key={`${item.ticker}-ann`}>
+                        <td colSpan={11}>
+                          <div className="ann-editor">
+                            <input className="terminal-input" placeholder="Note / thesis" value={annDraft.note ?? ''} onChange={(e) => setAnnDraft((d) => ({ ...d, note: e.target.value }))} />
+                            <input className="terminal-input" type="number" placeholder="Trigger price" value={annDraft.triggerPrice ?? ''} onChange={(e) => setAnnDraft((d) => ({ ...d, triggerPrice: e.target.value ? Number(e.target.value) : undefined }))} style={{ width: 110 }} />
+                            <select className="terminal-input" value={annDraft.riskTag ?? ''} onChange={(e) => setAnnDraft((d) => ({ ...d, riskTag: e.target.value as 'H' | 'M' | 'L' | undefined || undefined }))}>
+                              <option value="">Risk</option>
+                              <option value="H">HIGH</option>
+                              <option value="M">MED</option>
+                              <option value="L">LOW</option>
+                            </select>
+                            <input className="terminal-input" type="date" value={annDraft.reviewDate ?? ''} onChange={(e) => setAnnDraft((d) => ({ ...d, reviewDate: e.target.value || undefined }))} style={{ width: 130 }} />
+                            <button type="button" className="terminal-button" onClick={saveAnn}>SAVE</button>
+                            {ann && <button type="button" className="terminal-button terminal-button-ghost" onClick={() => { clearAnnotation(key); setAnnotatingKey(null) }}>CLEAR</button>}
+                          </div>
+                        </td>
+                      </tr>
                     )}
-                  </td>
-                  <td className="align-right">{formatNumber(item.close)}</td>
-                  <td className={`align-right ${toneClass(item.change_pct)}`}>
-                    {formatPercent(item.change_pct)}
-                  </td>
-                  <td className={`align-right ${toneClass(item.return_20d)}`}>
-                    {formatPercent(item.return_20d)}
-                  </td>
-                  <td className={`align-right ${toneClass(item.return_63d)}`}>
-                    {formatPercent(item.return_63d)}
-                  </td>
-                  <td
-                    className={`align-right ${
-                      (item.rsi ?? 50) >= 70
-                        ? 'tone-negative'
-                        : (item.rsi ?? 50) <= 30
-                          ? 'tone-positive'
-                          : ''
-                    }`}
-                  >
-                    {formatNumber(item.rsi, 1)}
-                  </td>
-                  <td
-                    className={`align-right ${(item.tech_score ?? 0) >= 65 ? 'tone-positive' : ''}`}
-                  >
-                    {formatNumber(item.tech_score, 0)}
-                  </td>
-                  <td className="align-right">{formatCompactNumber(item.volume)}</td>
-                  <td>
-                    <div className="table-actions">
-                      <button
-                        type="button"
-                        className="table-action"
-                        onClick={() => toggleWatchlist(item.ticker, activeWatchlistId)}
-                      >
-                        RM
-                      </button>
-                      <button
-                        type="button"
-                        className="table-action"
-                        onClick={() => {
-                          setCompareTickers([
-                            item.ticker,
-                            ...symbols.filter((value) => value !== item.ticker).slice(0, 3),
-                            'SPY',
-                          ])
-                          navigate('/compare')
-                        }}
-                      >
-                        COMP
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                  </>
+                )
+              })}
               {symbols.length === 0 && (
                 <tr>
                   <td colSpan={11}>
                     <div className="empty-block">
                       <div className="empty-title">Active watchlist is empty.</div>
-                      <div className="empty-copy">
-                        Add symbols from security, screener, compare, or the command bar to
-                        build a live monitor book.
-                      </div>
+                      <div className="empty-copy">Add symbols from security, screener, compare, or the command bar.</div>
                     </div>
                   </td>
                 </tr>

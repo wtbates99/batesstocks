@@ -13,6 +13,13 @@ export interface TerminalWatchlist {
   symbols: string[]
 }
 
+export interface WatchlistAnnotation {
+  note?: string
+  triggerPrice?: number
+  riskTag?: 'H' | 'M' | 'L'
+  reviewDate?: string
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }
@@ -111,6 +118,7 @@ interface TerminalStore {
   recentCommands: string[]
   savedScreens: SavedWorkspaceDraft<StrategyDraft>[]
   savedBacktests: SavedWorkspaceDraft<StrategyDraft>[]
+  watchlistAnnotations: Record<string, WatchlistAnnotation>
   lastRoute: string
   setActiveTicker: (ticker: string) => void
   addRecentTicker: (ticker: string) => void
@@ -136,6 +144,8 @@ interface TerminalStore {
   deleteScreenDraft: (id: string) => void
   saveBacktestDraft: (name: string, draft: StrategyDraft) => void
   deleteBacktestDraft: (id: string) => void
+  setAnnotation: (key: string, ann: WatchlistAnnotation) => void
+  clearAnnotation: (key: string) => void
   setLastRoute: (route: string) => void
 }
 
@@ -157,6 +167,7 @@ export const useTerminalStore = create<TerminalStore>()(
       recentCommands: [],
       savedScreens: [],
       savedBacktests: [],
+      watchlistAnnotations: {},
       lastRoute: '/',
       setActiveTicker: (ticker) => set({ activeTicker: ticker.toUpperCase() }),
       addRecentTicker: (ticker) =>
@@ -283,6 +294,16 @@ export const useTerminalStore = create<TerminalStore>()(
         set((state) => ({
           savedBacktests: state.savedBacktests.filter((item) => item.id !== id),
         })),
+      setAnnotation: (key, ann) =>
+        set((state) => ({
+          watchlistAnnotations: { ...state.watchlistAnnotations, [key]: ann },
+        })),
+      clearAnnotation: (key) =>
+        set((state) => {
+          const next = { ...state.watchlistAnnotations }
+          delete next[key]
+          return { watchlistAnnotations: next }
+        }),
       setLastRoute: (lastRoute) => set({ lastRoute }),
     }),
     {
@@ -297,6 +318,7 @@ export const useTerminalStore = create<TerminalStore>()(
         recentCommands: state.recentCommands,
         savedScreens: state.savedScreens,
         savedBacktests: state.savedBacktests,
+        watchlistAnnotations: state.watchlistAnnotations,
         lastRoute: state.lastRoute,
       }),
       merge: (persisted, current) => {
@@ -324,6 +346,7 @@ export const useTerminalStore = create<TerminalStore>()(
             : current.recentCommands,
           savedScreens: sanitizeSavedDrafts<StrategyDraft>(source.savedScreens),
           savedBacktests: sanitizeSavedDrafts<StrategyDraft>(source.savedBacktests),
+          watchlistAnnotations: isRecord(source.watchlistAnnotations) ? source.watchlistAnnotations as Record<string, WatchlistAnnotation> : {},
           lastRoute: typeof source.lastRoute === 'string' && source.lastRoute.startsWith('/')
             ? source.lastRoute
             : current.lastRoute,

@@ -1039,6 +1039,28 @@ select {
   resize: vertical;
 }
 
+/* Watchlist annotations */
+.ann-editor {
+  display: flex;
+  gap: var(--sp-2);
+  padding: 6px 10px;
+  background: var(--bg-base);
+  border-top: 1px solid var(--line);
+  flex-wrap: wrap;
+  align-items: center;
+}
+.ann-risk-badge {
+  margin-left: 4px;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 4px;
+  border: 1px solid currentColor;
+  border-radius: 2px;
+  vertical-align: middle;
+}
+.ann-note-hint { color: var(--amber-soft); cursor: default; }
+.table-action.is-active { color: var(--amber-soft); border-color: var(--amber-soft); }
+
 .drawer-input {
   display: grid;
   gap: 8px;
