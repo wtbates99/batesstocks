@@ -10,6 +10,7 @@ from backend.models import (
     BackupCreateRequest,
     BackupCreateResponse,
     BackupStatus,
+    EarningsResponse,
     MarketMonitorOverview,
     NewsResponse,
     SectorOverview,
@@ -30,6 +31,7 @@ from backend.services.data_sync_service import (
     ensure_market_data,
     sync_market_data,
 )
+from backend.services.earnings_service import get_earnings
 from backend.services.news_service import get_news
 from backend.services.sync_status import sync_status_tracker
 from backend.services.terminal_service import (
@@ -165,6 +167,14 @@ def system_sync(request: SyncRequest) -> SyncResponse:
         return sync_market_data(request.tickers, years=request.years, source="manual")
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Data sync failed: {exc}") from exc
+
+
+@router.get("/earnings", response_model=EarningsResponse)
+def terminal_earnings(
+    tickers: str = Query("", max_length=512),
+) -> EarningsResponse:
+    ticker_list = [v.strip().upper() for v in tickers.split(",") if v.strip()]
+    return get_earnings(ticker_list)
 
 
 @router.get("/news", response_model=NewsResponse)

@@ -69,6 +69,9 @@ export default function TerminalShell() {
   }, [location.pathname, setLastRoute])
 
   useEffect(() => {
+    let gPending = false
+    let gTimer: ReturnType<typeof setTimeout> | undefined
+
     const handler = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null
       const typing = target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)
@@ -86,35 +89,37 @@ export default function TerminalShell() {
         return
       }
 
+      if (!typing && (event.key === 'g' || event.key === 'G') && !event.metaKey && !event.ctrlKey && !event.altKey) {
+        gPending = true
+        clearTimeout(gTimer)
+        gTimer = setTimeout(() => { gPending = false }, 1500)
+        return
+      }
+
+      if (gPending && !typing) {
+        gPending = false
+        clearTimeout(gTimer)
+        const dest: Record<string, string> = {
+          d: '/', m: '/monitor', w: '/watchlists',
+          c: '/compare', n: '/news', e: '/screener', b: '/backtest',
+          s: `/security/${activeTicker}`,
+        }
+        const route = dest[event.key.toLowerCase()]
+        if (route) {
+          event.preventDefault()
+          navigate(route)
+        }
+        return
+      }
+
       if (event.altKey && !typing) {
-        if (event.key === '1') {
-          event.preventDefault()
-          navigate('/')
-        }
-        if (event.key === '2') {
-          event.preventDefault()
-          navigate('/monitor')
-        }
-        if (event.key === '3') {
-          event.preventDefault()
-          navigate('/watchlists')
-        }
-        if (event.key === '4') {
-          event.preventDefault()
-          navigate('/compare')
-        }
-        if (event.key === '5') {
-          event.preventDefault()
-          navigate('/news')
-        }
-        if (event.key === '6') {
-          event.preventDefault()
-          navigate('/screener')
-        }
-        if (event.key === '7') {
-          event.preventDefault()
-          navigate('/backtest')
-        }
+        if (event.key === '1') { event.preventDefault(); navigate('/') }
+        if (event.key === '2') { event.preventDefault(); navigate('/monitor') }
+        if (event.key === '3') { event.preventDefault(); navigate('/watchlists') }
+        if (event.key === '4') { event.preventDefault(); navigate('/compare') }
+        if (event.key === '5') { event.preventDefault(); navigate('/news') }
+        if (event.key === '6') { event.preventDefault(); navigate('/screener') }
+        if (event.key === '7') { event.preventDefault(); navigate('/backtest') }
       }
 
       if (!typing && event.key === '[') {
@@ -126,8 +131,8 @@ export default function TerminalShell() {
       }
     }
     window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  }, [aiOpen, closeAi, focusCommandBar, navigate, openAi, recentTickers])
+    return () => { window.removeEventListener('keydown', handler); clearTimeout(gTimer) }
+  }, [aiOpen, activeTicker, closeAi, focusCommandBar, navigate, openAi, recentTickers])
 
   return (
     <div className="terminal-shell">
@@ -173,7 +178,7 @@ export default function TerminalShell() {
             {item.label}
           </NavLink>
         ))}
-        <div className="function-hint">`/` focus command · `[` prior symbol · `Alt+1..7` destinations</div>
+        <div className="function-hint">`/` search · `[` prior · `g+d/m/w/c/n/e/b/s` go to · `Alt+1..7` nav</div>
       </nav>
 
       <main className="shell-main">

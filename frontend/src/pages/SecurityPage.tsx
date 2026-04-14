@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
-import { Plus, Star, StarOff } from 'lucide-react'
+import { Link, useNavigate, useParams } from 'react-router-dom'
+import { FlaskConical, Plus, Star, StarOff } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import TerminalChart from '../components/charts/TerminalChart'
 import NewsPanel from '../components/news/NewsPanel'
 import ReturnLadder from '../components/app/ReturnLadder'
 import SignalStack from '../components/app/SignalStack'
-import { useLivePricesQuery, useNewsQuery, useSecurityQuery } from '../api/query'
+import { useEarningsQuery, useLivePricesQuery, useNewsQuery, useSecurityQuery } from '../api/query'
 import {
   formatCompactNumber,
   formatNumber,
@@ -46,6 +46,7 @@ function relatedTickers(compareTickers: string[], ticker: string) {
 export default function SecurityPage() {
   const { ticker: routeTicker } = useParams<{ ticker: string }>()
   const ticker = (routeTicker ?? 'SPY').toUpperCase()
+  const navigate = useNavigate()
   const [timeframe, setTimeframe] = useState<(typeof TIMEFRAMES)[number]['days']>(132)
   const [overlays, setOverlays] = useState<Array<'sma_10' | 'sma_30' | 'sma_200' | 'ema_10'>>([
     'sma_10',
@@ -75,6 +76,8 @@ export default function SecurityPage() {
   )
 
   const security = useSecurityQuery(ticker, 260)
+  const earnings = useEarningsQuery([ticker])
+  const earningsItem = earnings.data?.items[0]
   const news = useNewsQuery(
     [ticker, ...relatedTickers(compareTickers, ticker)],
     'security',
@@ -192,6 +195,19 @@ export default function SecurityPage() {
               {snapshot.above_sma_200 && snapshot.above_sma_250 ? 'ABOVE' : snapshot.above_sma_200 ? 'MIXED' : 'BELOW'}
             </div>
           </div>
+          {earningsItem?.earnings_date && (
+            <div className="quote-cell">
+              <div className="quote-label">Next Earnings</div>
+              <div className={`quote-value ${
+                (() => {
+                  const days = Math.ceil((new Date(earningsItem.earnings_date).getTime() - Date.now()) / 86400000)
+                  return days <= 7 ? 'tone-warning' : days <= 30 ? 'tone-cyan' : ''
+                })()
+              }`}>
+                {earningsItem.earnings_date}
+              </div>
+            </div>
+          )}
           <div className="quote-cell" style={{ flex: 1 }}>
             <div className="quote-label">Generated</div>
             <div className="quote-value" style={{ color: 'var(--text-dim)', fontWeight: 400 }}>
@@ -280,6 +296,14 @@ export default function SecurityPage() {
             >
               <Plus size={12} />
               COMPARE
+            </button>
+            <button
+              type="button"
+              className="terminal-button terminal-button-ghost"
+              onClick={() => navigate(`/backtest?ticker=${ticker}`)}
+            >
+              <FlaskConical size={12} />
+              BACKTEST
             </button>
           </div>
         </div>

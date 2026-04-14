@@ -310,3 +310,15 @@ class SyncStatus(BaseModel):
     metadata_rows: int = 0
     last_success_at: str | None = None
     last_error: str | None = None
+
+
+class EarningsItem(BaseModel):
+    ticker: str
+    earnings_date: str | None = None
+    eps_estimate: float | None = None
+    revenue_estimate: float | None = None
+
+
+class EarningsResponse(BaseModel):
+    generated_at: str
+    items: list[EarningsItem]

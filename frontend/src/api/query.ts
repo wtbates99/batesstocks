@@ -14,6 +14,7 @@ export const terminalKeys = {
   security: (ticker: string, limit: number) => ['security', ticker, limit] as const,
   snapshots: (tickers: string[]) => ['snapshots', ...tickers] as const,
   news: (scope: string, tickers: string[]) => ['news', scope, ...tickers] as const,
+  earnings: (tickers: string[]) => ['earnings', ...tickers] as const,
   livePrices: (tickers: string[]) => ['live-prices', ...tickers] as const,
   search: (query: string) => ['search', query] as const,
   syncStatus: () => ['sync-status'] as const,
@@ -79,6 +80,18 @@ export function useNewsQuery(tickers: string[], scope: string, limit = 12, enabl
     enabled: enabled && clean.length > 0,
     staleTime: 5 * 60_000,
     refetchInterval: 5 * 60_000,
+    refetchOnWindowFocus: false,
+  })
+}
+
+export function useEarningsQuery(tickers: string[], enabled = true) {
+  const clean = Array.from(new Set(tickers.filter(Boolean).map((t) => t.toUpperCase())))
+  return useQuery({
+    queryKey: terminalKeys.earnings(clean),
+    queryFn: () => api.terminal.earnings(clean),
+    enabled: enabled && clean.length > 0,
+    staleTime: 6 * 60 * 60_000,
+    refetchInterval: 6 * 60 * 60_000,
     refetchOnWindowFocus: false,
   })
 }

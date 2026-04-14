@@ -309,6 +309,18 @@ export interface SyncResponse {
   metadata_rows: number
 }
 
+export interface EarningsItem {
+  ticker: string
+  earnings_date?: string | null
+  eps_estimate?: number | null
+  revenue_estimate?: number | null
+}
+
+export interface EarningsResponse {
+  generated_at: string
+  items: EarningsItem[]
+}
+
 export interface SyncStatus {
   state: string
   source: string

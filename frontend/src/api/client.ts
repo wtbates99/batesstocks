@@ -3,6 +3,7 @@ import type {
   BackupCreateRequest,
   BackupCreateResponse,
   BackupStatus,
+  EarningsResponse,
   LivePrices,
   MarketMonitorOverview,
   NewsResponse,
@@ -79,6 +80,8 @@ export const api = {
       get<SecuritySnapshotResponse>('/terminal/snapshots', { tickers: tickers.join(',') }),
     news: (tickers: string[], scope: string, limit = 12) =>
       get<NewsResponse>('/news', { tickers: tickers.join(','), scope, limit }),
+    earnings: (tickers: string[]) =>
+      get<EarningsResponse>('/earnings', { tickers: tickers.join(',') }),
   },
 
   strategies: {
