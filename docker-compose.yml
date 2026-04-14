@@ -5,8 +5,8 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./stock_data.duckdb:/app/stock_data.duckdb
-      - ./backups:/app/backups
+      - /home/anur/code/home-server/data/batesstocks/stock_data.duckdb:/app/stock_data.duckdb
+      - /home/anur/code/home-server/data/batesstocks/backups:/app/backups
     environment:
       - DB_PATH=/app/stock_data.duckdb
       - BACKUP_DIR=/app/backups

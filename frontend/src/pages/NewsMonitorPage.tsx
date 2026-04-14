@@ -170,6 +170,7 @@ export default function NewsMonitorPage() {
         className="panel-span-2"
         title="News Monitor"
         items={news.data?.items ?? []}
+        loading={news.isPending}
         empty="Select a scope to load market, watchlist, recent, or focus-symbol news."
       />
     </div>

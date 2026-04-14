@@ -44,7 +44,10 @@ class NewsItem(BaseModel):
     publisher: str | None = None
     link: str
     published_at: str | None = None
-    related_tickers: list[str] = []
+    related_tickers: list[str] = Field(default_factory=list)
+    matched_tickers: list[str] = Field(default_factory=list)
+    why: str | None = None
+    relevance_score: float | None = None
 
 
 class NewsResponse(BaseModel):

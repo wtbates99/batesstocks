@@ -346,6 +346,7 @@ export default function ComparePage() {
       <NewsPanel
         title="Compare News"
         items={news.data?.items ?? []}
+        loading={news.isPending}
         empty="Comparison headlines will populate from the current compare set."
       />
     </div>

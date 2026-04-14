@@ -19,7 +19,12 @@ from pydantic import BaseModel, Field
 from backend.api.terminal import router as terminal_router
 from backend.core.duckdb import duckdb_connection, ensure_schema
 from backend.models import LivePrices, SearchResult
-from backend.services.data_sync_service import ensure_market_data, has_market_data, sync_market_data
+from backend.services.data_sync_service import (
+    ensure_market_data,
+    get_data_staleness_days,
+    has_market_data,
+    sync_market_data,
+)
 from backend.services.sync_scheduler import MarketSyncScheduler
 
 load_dotenv()
@@ -69,17 +74,37 @@ async def _run_scheduled_market_sync() -> None:
         await to_thread(sync_market_data, None, years, "scheduled")
 
 
+async def _run_startup_sync(staleness: int | None, stale_threshold: int) -> None:
+    years = 2 if staleness is not None else 5
+    logger.info(
+        "AUTO_SYNC_ON_START: data is %s days old (threshold %s), syncing %s years.",
+        staleness,
+        stale_threshold,
+        years,
+    )
+    try:
+        await to_thread(sync_market_data, None, years, "startup")
+    except Exception as exc:  # pragma: no cover - network/provider dependent
+        logger.warning("AUTO_SYNC_ON_START sync failed: %s", exc)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    import asyncio
+
     ensure_schema()
     scheduler: MarketSyncScheduler | None = None
+    bg_sync: asyncio.Task | None = None
     should_auto_sync = os.getenv("AUTO_SYNC_ON_START", "true").lower() == "true"
+    stale_threshold = int(os.getenv("STALE_SYNC_THRESHOLD_DAYS", "3"))
     if should_auto_sync:
         try:
-            if not has_market_data():
-                ensure_market_data(years=5, source="startup")
+            staleness = get_data_staleness_days()
+            if staleness is None or staleness >= stale_threshold:
+                # Run as background task so the server starts accepting requests immediately
+                bg_sync = asyncio.create_task(_run_startup_sync(staleness, stale_threshold))
         except Exception as exc:  # pragma: no cover - startup/network dependent
-            logger.warning("AUTO_SYNC_ON_START failed: %s", exc)
+            logger.warning("AUTO_SYNC_ON_START check failed: %s", exc)
     should_schedule = os.getenv("AUTO_SYNC_SCHEDULED", "true").lower() == "true"
     if should_schedule:
         scheduler = MarketSyncScheduler(
@@ -88,6 +113,12 @@ async def lifespan(_: FastAPI):
         )
         scheduler.start()
     yield
+    if bg_sync is not None:
+        bg_sync.cancel()
+        try:
+            await bg_sync
+        except asyncio.CancelledError:
+            pass
     if scheduler is not None:
         await scheduler.stop()
 

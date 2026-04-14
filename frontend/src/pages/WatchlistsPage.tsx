@@ -442,6 +442,7 @@ export default function WatchlistsPage() {
       <NewsPanel
         title={`${activeWatchlist?.name ?? 'Watchlist'} News`}
         items={news.data?.items ?? []}
+        loading={news.isPending}
         empty="Watchlist headlines will appear here once the active list tracks symbols."
       />
     </div>

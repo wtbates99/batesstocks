@@ -58,6 +58,9 @@ export interface NewsItem {
   link: string
   published_at?: string | null
   related_tickers: string[]
+  matched_tickers: string[]
+  why?: string | null
+  relevance_score?: number | null
 }
 
 export interface NewsResponse {
@@ -258,15 +261,6 @@ export interface MarketMonitorOverview {
   volume_surge: SecurityListItem[]
   rsi_high: SecurityListItem[]
   rsi_low: SecurityListItem[]
-}
-
-export interface SectorOverview {
-  generated_at: string
-  sector: string
-  summary: TerminalStat[]
-  leaders: SecurityListItem[]
-  laggards: SecurityListItem[]
-  members: SecurityListItem[]
 }
 
 export interface SectorOverview {
