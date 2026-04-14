@@ -328,9 +328,13 @@ select {
   left: 0;
   right: 0;
   z-index: 5;
-  display: grid;
+  display: none;
   border: 1px solid var(--line-strong);
   background: #06080b;
+}
+
+.commandbar-input-wrap:focus-within .command-results {
+  display: grid;
 }
 
 .command-result {
