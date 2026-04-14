@@ -433,6 +433,7 @@ export default function SecurityPage() {
         <NewsPanel
           title="Security News"
           items={news.data?.items ?? []}
+          loading={news.isPending}
           empty="Live security news will appear here when providers have current coverage for this symbol."
         />
       </div>

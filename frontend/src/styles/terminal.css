@@ -140,22 +140,22 @@ select {
 
 .shell-header {
   display: grid;
-  grid-template-columns: 260px minmax(0, 1fr) 440px;
+  grid-template-columns: 220px minmax(0, 1fr) auto;
   align-items: center;
   gap: 12px;
-  padding: 8px 12px;
+  padding: 6px 12px;
   background: rgba(6, 8, 10, 0.96);
 }
 
 .brand-strip {
   display: grid;
-  gap: 6px;
+  gap: 4px;
 }
 
 .brand-mark {
   color: var(--amber);
   font-family: var(--font-mono);
-  font-size: 18px;
+  font-size: 15px;
   font-weight: 700;
   letter-spacing: 0.14em;
 }
@@ -163,24 +163,29 @@ select {
 .brand-path {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   color: var(--text-dim);
   font-family: var(--font-mono);
   font-size: 10px;
+  overflow: hidden;
 }
 
 .ticker-strip {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 10px;
+  gap: 6px;
   min-width: 0;
 }
 
 .strip-cell {
   display: grid;
-  gap: 2px;
+  gap: 1px;
   min-width: 56px;
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  background: var(--bg-panel);
+  text-align: right;
 }
 
 .strip-label,
@@ -204,6 +209,18 @@ select {
 .monitor-value,
 .score-value {
   font-family: var(--font-mono);
+}
+
+.strip-value {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.shell-clock {
+  font-size: 11px;
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
 }
 
 .commandbar {
@@ -273,10 +290,26 @@ select {
 }
 
 .commandbar-hints {
-  display: flex;
-  gap: 6px;
-  margin-top: 24px;
+  position: absolute;
+  top: calc(100% + 26px);
+  left: 0;
+  right: 0;
+  display: none;
+  gap: 5px;
   flex-wrap: wrap;
+  padding: 8px 10px;
+  background: rgba(6, 8, 10, 0.98);
+  border: 1px solid var(--line-strong);
+  border-top: none;
+  z-index: 4;
+}
+
+.commandbar-input-wrap:focus-within .commandbar-hints {
+  display: flex;
+}
+
+.commandbar-input-wrap:focus-within:has(.command-results) .commandbar-hints {
+  display: none;
 }
 
 .hint-chip {

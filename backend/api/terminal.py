@@ -191,6 +191,13 @@ def system_freshness() -> dict[str, object]:
                 COUNTIF(Date < CURRENT_DATE - INTERVAL '3 days') AS stale_count
             FROM v_latest_ticker
         """).fetchone()
+        stale_rows = conn.execute("""
+            SELECT Ticker, Date::TEXT AS latest
+            FROM v_latest_ticker
+            WHERE Date < CURRENT_DATE - INTERVAL '3 days'
+            ORDER BY Date ASC
+            LIMIT 50
+        """).fetchall()
     if row is None:
         return {
             "generated_at": _utc_now(),
@@ -198,6 +205,7 @@ def system_freshness() -> dict[str, object]:
             "oldest_date": None,
             "ticker_count": 0,
             "stale_count": 0,
+            "stale_tickers": [],
         }
     latest_date, oldest_date, ticker_count, stale_count = row
     return {
@@ -206,6 +214,7 @@ def system_freshness() -> dict[str, object]:
         "oldest_date": oldest_date,
         "ticker_count": int(ticker_count or 0),
         "stale_count": int(stale_count or 0),
+        "stale_tickers": [{"ticker": r[0], "latest": r[1]} for r in stale_rows],
     }
 
 

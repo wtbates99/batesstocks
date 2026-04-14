@@ -481,6 +481,7 @@ export default function BacktestPage() {
         <NewsPanel
           title={`Research News ${newsTickers.join(' · ')}`}
           items={news.data?.items ?? []}
+          loading={news.isPending}
           empty="The research blotter will show current ticker and active match news alongside the backtest workspace."
         />
       </div>

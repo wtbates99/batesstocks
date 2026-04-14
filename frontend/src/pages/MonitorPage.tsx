@@ -316,6 +316,7 @@ export default function MonitorPage() {
       <NewsPanel
         title="Market News"
         items={news.data?.items ?? []}
+        loading={news.isPending}
         empty="Market monitor news will populate from broad-market and macro proxies."
       />
     </div>

@@ -5,20 +5,23 @@ interface Props {
   title: string
   items: NewsItem[]
   empty: string
+  loading?: boolean
   className?: string
 }
 
-export default function NewsPanel({ title, items, empty, className }: Props) {
+export default function NewsPanel({ title, items, empty, loading, className }: Props) {
   return (
     <section className={`terminal-panel${className ? ` ${className}` : ''}`}>
       <div className="panel-header">
         <div className="panel-title">{title}</div>
+        {loading && <div className="panel-meta" style={{ color: 'var(--cyan)' }}>LOADING…</div>}
+        {!loading && items.length > 0 && <div className="panel-meta">{items.length} items</div>}
       </div>
       <div className="feed-list">
         {items.length === 0 ? (
           <div className="empty-block">
-            <div className="empty-title">No current news.</div>
-            <div className="empty-copy">{empty}</div>
+            <div className="empty-title">{loading ? 'Fetching news…' : 'No current news.'}</div>
+            <div className="empty-copy">{loading ? 'Pulling latest headlines from market data feeds.' : empty}</div>
           </div>
         ) : (
           items.map((item) => (

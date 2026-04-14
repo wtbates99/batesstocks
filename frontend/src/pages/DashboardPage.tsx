@@ -304,6 +304,7 @@ export default function DashboardPage() {
       <NewsPanel
         title="News Triage"
         items={news.data?.items ?? []}
+        loading={news.isPending}
         empty="News will populate as the focus ticker and watchlist pull live coverage."
       />
     </div>

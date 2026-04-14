@@ -79,6 +79,18 @@ def has_market_data() -> bool:
     return bool(row and row[0] > 0)
 
 
+def get_data_staleness_days() -> int | None:
+    """Returns how many calendar days since the latest market data row, or None if no data."""
+    with duckdb_connection(read_only=True) as conn:
+        row = conn.execute("SELECT MAX(Date) FROM ticker_data").fetchone()
+    if not row or row[0] is None:
+        return None
+    from datetime import date as _date
+
+    latest = pd.to_datetime(row[0]).date()
+    return (_date.today() - latest).days
+
+
 def get_tracked_ticker_count() -> int:
     with duckdb_connection(read_only=True) as conn:
         row = conn.execute("SELECT COUNT(DISTINCT Ticker) FROM ticker_data").fetchone()
@@ -104,6 +116,26 @@ def get_missing_tickers(tickers: list[str] | None = None) -> list[str]:
     return [ticker for ticker in universe if ticker not in present]
 
 
+def get_ticker_latest_dates(tickers: list[str] | None = None) -> dict[str, str]:
+    """Return a mapping of ticker → ISO date string for the latest data row."""
+    universe = _normalize_tickers(tickers) if tickers else []
+    if universe:
+        placeholders = ", ".join(["?"] * len(universe))
+        query = f"""
+            SELECT Ticker, MAX(Date)::TEXT AS latest
+            FROM ticker_data
+            WHERE Ticker IN ({placeholders})
+            GROUP BY Ticker
+        """
+        params = universe
+    else:
+        query = "SELECT Ticker, MAX(Date)::TEXT AS latest FROM ticker_data GROUP BY Ticker"
+        params = []
+    with duckdb_connection(read_only=True) as conn:
+        rows = conn.execute(query, params).fetchall()
+    return {str(row[0]).upper(): str(row[1]) for row in rows if row[1] is not None}
+
+
 def ensure_market_data(
     tickers: list[str] | None = None, years: int = 5, source: str = "hydrate"
 ) -> SyncResponse | None:
@@ -119,9 +151,10 @@ def ensure_default_universe_data(years: int = 5) -> SyncResponse | None:
     return ensure_market_data(None, years=_normalize_years(years), source="bootstrap")
 
 
-def _download_ohlcv(tickers: list[str], years: int) -> pd.DataFrame:
+def _download_ohlcv(tickers: list[str], years: int, start_date: str | None = None) -> pd.DataFrame:
     years = _normalize_years(years)
-    start_date = (_utc_now() - timedelta(days=max(365 * years, 180))).date().isoformat()
+    if start_date is None:
+        start_date = (_utc_now() - timedelta(days=max(365 * years, 180))).date().isoformat()
     frame = yf.download(
         tickers=tickers,
         start=start_date,
@@ -363,6 +396,14 @@ def _fetch_company_metadata(tickers: list[str]) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+# Sources that should use incremental (skip-fresh) logic instead of full re-download
+_INCREMENTAL_SOURCES = frozenset({"scheduled", "startup"})
+# Minimum indicator lookback needed for long-window indicators (SMA_250 = ~1 year)
+_INDICATOR_LOOKBACK_DAYS = 270
+# Tickers with data this many days old (or newer) are considered fresh and skipped
+_FRESH_THRESHOLD_DAYS = 2
+
+
 def sync_market_data(
     tickers: list[str] | None = None, years: int = 5, source: str = "manual"
 ) -> SyncResponse:
@@ -370,12 +411,51 @@ def sync_market_data(
     with _SYNC_WRITE_LOCK:
         started_at = _utc_now()
         universe = _normalize_tickers(tickers)
+
+        # Incremental sources: skip already-fresh tickers and use a tight download window
+        incremental_start: str | None = None
+        if source in _INCREMENTAL_SOURCES and universe:
+            fresh_cutoff = (_utc_now() - timedelta(days=_FRESH_THRESHOLD_DAYS)).date()
+            latest_dates = get_ticker_latest_dates(universe)
+            stale = [
+                t
+                for t in universe
+                if pd.to_datetime(latest_dates.get(t, "2000-01-01")).date() < fresh_cutoff
+            ]
+            if not stale:
+                sync_status_tracker.begin(
+                    source=source, target_tickers=0, detail="All tickers are up to date."
+                )
+                sync_status_tracker.succeed(
+                    rows_written=0, metadata_rows=0, detail="All tickers are up to date."
+                )
+                return SyncResponse(
+                    started_at=started_at.isoformat(),
+                    finished_at=_utc_now().isoformat(),
+                    tickers=[],
+                    rows_written=0,
+                    metadata_rows=0,
+                )
+            universe = stale
+            # Download only enough history to recompute long-window indicators correctly
+            stale_dates = [pd.to_datetime(latest_dates[t]) for t in stale if t in latest_dates]
+            if stale_dates:
+                oldest_stale = min(stale_dates).date()
+                incremental_start = (
+                    oldest_stale - timedelta(days=_INDICATOR_LOOKBACK_DAYS)
+                ).isoformat()
+
         sync_status_tracker.begin(
             source=source,
             target_tickers=len(universe),
-            detail=f"Loading {len(universe)} tickers with {years} years of daily history.",
+            detail=f"Loading {len(universe)} tickers"
+            + (
+                f" (incremental from {incremental_start})"
+                if incremental_start
+                else f" with {years} years of history"
+            ),
         )
-        raw = _download_ohlcv(universe, years=years)
+        raw = _download_ohlcv(universe, years=years, start_date=incremental_start)
         if raw.empty:
             response = SyncResponse(
                 started_at=started_at.isoformat(),
@@ -459,17 +539,11 @@ def sync_market_data(
                     conn.register("metadata_frame", metadata)
                     conn.execute("""
                         INSERT OR REPLACE INTO stock_information
+                            (Ticker, FullName, ShortName, Sector, Subsector, MarketCap,
+                             Exchange, Currency, Website, QuoteType)
                         SELECT
-                            Ticker,
-                            FullName,
-                            ShortName,
-                            Sector,
-                            Subsector,
-                            MarketCap,
-                            Exchange,
-                            Currency,
-                            Website,
-                            QuoteType
+                            Ticker, FullName, ShortName, Sector, Subsector, MarketCap,
+                            Exchange, Currency, Website, QuoteType
                         FROM metadata_frame
                     """)
                     conn.unregister("metadata_frame")

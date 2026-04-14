@@ -249,6 +249,7 @@ export default function SectorPage() {
       <NewsPanel
         title={`${overview.sector} News`}
         items={news.data?.items ?? []}
+        loading={news.isPending}
         empty="Sector headlines will appear here from the highest-ranked names in this group."
       />
     </div>

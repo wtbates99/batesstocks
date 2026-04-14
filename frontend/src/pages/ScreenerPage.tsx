@@ -293,6 +293,7 @@ export default function ScreenerPage() {
       <NewsPanel
         title={`Signal News ${newsTickers.join(' · ')}`}
         items={news.data?.items ?? []}
+        loading={news.isPending}
         empty="Run a screen and the news tape will populate from the highest-ranked matches."
       />
     </div>
