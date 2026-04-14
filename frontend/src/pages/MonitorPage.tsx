@@ -166,68 +166,6 @@ function RankedTable({
   )
 }
 
-function SectorTable({ sectors }: { sectors: MonitorSector[] }) {
-  return (
-    <section className="terminal-panel">
-      <div className="panel-header">
-        <div className="panel-title">Sector Rank</div>
-        <div className="panel-meta">ranked by 20D return</div>
-      </div>
-      <div className="panel-table-wrap">
-        <table className="terminal-table compact">
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>Sector</th>
-              <th className="align-right">N</th>
-              <th className="align-right">Day</th>
-              <th className="align-right">20D</th>
-              <th className="align-right">RSI</th>
-              <th className="align-right">% &gt;200D</th>
-            </tr>
-          </thead>
-          <tbody>
-            {sectors.map((sector, i) => (
-              <tr key={sector.sector}>
-                <td style={{ color: 'var(--text-dim)', width: 24 }}>{i + 1}</td>
-                <td>
-                  <Link
-                    to={`/sector/${encodeURIComponent(sector.sector)}`}
-                    className="ticker-link"
-                  >
-                    {sector.sector}
-                  </Link>
-                </td>
-                <td className="align-right" style={{ color: 'var(--text-dim)' }}>
-                  {sector.members}
-                </td>
-                <td className={`align-right ${toneClass(sector.avg_change_pct)}`}>
-                  {formatPercent(sector.avg_change_pct)}
-                </td>
-                <td className={`align-right ${toneClass(sector.avg_return_20d)}`}>
-                  {formatPercent(sector.avg_return_20d)}
-                </td>
-                <td className="align-right">{formatNumber(sector.avg_rsi, 1)}</td>
-                <td
-                  className={`align-right ${
-                    (sector.pct_above_200d ?? 0) >= 60
-                      ? 'tone-positive'
-                      : (sector.pct_above_200d ?? 0) <= 40
-                        ? 'tone-negative'
-                        : 'tone-warning'
-                  }`}
-                >
-                  {formatPercent(sector.pct_above_200d, 0)}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  )
-}
-
 export default function MonitorPage() {
   const monitor = useMonitorQuery()
   const news = useNewsQuery(['SPY', 'QQQ', 'IWM', 'TLT', 'GLD'], 'monitor', 12)
