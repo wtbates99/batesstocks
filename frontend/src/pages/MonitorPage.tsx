@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { useShallow } from 'zustand/react/shallow'
 import NewsPanel from '../components/news/NewsPanel'
 import BreadthStrip from '../components/app/BreadthStrip'
 import { useMonitorQuery, useNewsQuery } from '../api/query'
@@ -171,10 +172,12 @@ export default function MonitorPage() {
   const news = useNewsQuery(['SPY', 'QQQ', 'IWM', 'TLT', 'GLD'], 'monitor', 12)
   const [activeView, setActiveView] = useState<RankedView>('leaders')
   const navigate = useNavigate()
-  const { setCompareTickers, toggleWatchlist } = useTerminalStore((state) => ({
-    setCompareTickers: state.setCompareTickers,
-    toggleWatchlist: state.toggleWatchlist,
-  }))
+  const { setCompareTickers, toggleWatchlist } = useTerminalStore(
+    useShallow((state) => ({
+      setCompareTickers: state.setCompareTickers,
+      toggleWatchlist: state.toggleWatchlist,
+    })),
+  )
 
   if (monitor.isPending) {
     return <div className="state-panel loading-state">Loading market monitor…</div>
