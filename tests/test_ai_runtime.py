@@ -75,7 +75,10 @@ async def test_call_ollama_uses_bearer_auth_and_streaming(monkeypatch):
                 "model": "gemini-3-flash-preview",
                 "stream": True,
                 "think": False,
-                "messages": [{"role": "user", "content": "hello"}],
+                "messages": [
+                    {"role": "system", "content": main._SYSTEM_PROMPT},
+                    {"role": "user", "content": "hello"},
+                ],
             },
         }
     ]
