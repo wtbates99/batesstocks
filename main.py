@@ -225,6 +225,14 @@ def health_ready() -> dict[str, str]:
     return {"status": "ready"}
 
 
+_SYSTEM_PROMPT = (
+    "You are the integrated BATESSTOCKS terminal analyst. "
+    "Be concise: answer in 3-5 sentences or a short bullet list. "
+    "Use markdown (bold, bullets, code) — it renders in the terminal. "
+    "Use the supplied context. No preamble, no sign-off."
+)
+
+
 async def _call_openai(payload: AiChatRequest) -> str:
     key = payload.api_key or os.getenv("OPENAI_API_KEY", "")
     if not key:
@@ -236,7 +244,10 @@ async def _call_openai(payload: AiChatRequest) -> str:
             headers={"Authorization": f"Bearer {key}"},
             json={
                 "model": model,
-                "messages": [message.model_dump() for message in payload.messages],
+                "messages": [
+                    {"role": "system", "content": _SYSTEM_PROMPT},
+                    *[message.model_dump() for message in payload.messages],
+                ],
             },
         )
         response.raise_for_status()
@@ -249,7 +260,7 @@ async def _call_anthropic(payload: AiChatRequest) -> str:
     if not key:
         raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY is not configured")
     model = payload.model or os.getenv("ANTHROPIC_MODEL", "claude-3-5-haiku-latest")
-    system = "You are the integrated BATESSTOCKS terminal analyst. Use the supplied context."
+    system = _SYSTEM_PROMPT
     messages = [message.model_dump() for message in payload.messages]
     async with httpx.AsyncClient(timeout=60.0) as client:
         response = await client.post(
@@ -291,7 +302,10 @@ async def _call_ollama(payload: AiChatRequest) -> str:
                 "model": model,
                 "stream": True,
                 "think": False,
-                "messages": [message.model_dump() for message in payload.messages],
+                "messages": [
+                    {"role": "system", "content": _SYSTEM_PROMPT},
+                    *[message.model_dump() for message in payload.messages],
+                ],
             },
         ) as response:
             response.raise_for_status()

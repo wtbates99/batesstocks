@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import Markdown from 'react-markdown'
 import { Bot, Send, X } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import { useChatMutation } from '../api/query'
@@ -137,7 +138,11 @@ export default function AiPanel({ open, onClose }: Props) {
           messages.map((message, index) => (
             <div key={`${message.role}-${index}`} className={`chat-message ${message.role}`}>
               <div className="chat-role">{message.role === 'user' ? 'YOU' : 'AI'}</div>
-              <div className="chat-content selectable">{message.content}</div>
+              <div className="chat-content selectable">
+                {message.role === 'assistant'
+                  ? <Markdown>{message.content}</Markdown>
+                  : message.content}
+              </div>
             </div>
           ))
         )}
