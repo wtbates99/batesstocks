@@ -1025,6 +1025,15 @@ select {
   white-space: pre-wrap;
 }
 
+.chat-content p { margin: 0 0 6px; }
+.chat-content p:last-child { margin-bottom: 0; }
+.chat-content ul, .chat-content ol { margin: 4px 0 6px; padding-left: 18px; }
+.chat-content li { margin: 2px 0; }
+.chat-content strong { color: var(--text); font-weight: 600; }
+.chat-content code { font-family: var(--font-mono); font-size: 11px; background: var(--bg-base); padding: 1px 4px; border: 1px solid var(--line); }
+.chat-content pre { background: var(--bg-base); border: 1px solid var(--line); padding: 8px; margin: 6px 0; overflow-x: auto; }
+.chat-content pre code { background: none; border: none; padding: 0; }
+
 .terminal-textarea {
   min-height: 72px;
   resize: vertical;
