@@ -266,7 +266,7 @@ export default function SecurityPage() {
             <div className="security-name-label">{snapshot.name ?? 'Unknown Security'}</div>
           </div>
 
-          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'baseline', gap: 'var(--sp-3)' }}>
+          <div className="security-price-group">
             <span className={`security-price-label ${toneClass(snapshot.change_pct)}`}>
               {formatNumber(livePrice)}
             </span>
@@ -406,7 +406,7 @@ export default function SecurityPage() {
             </>
           )}
 
-          <div className="toolbar-group" style={{ marginLeft: 'auto' }}>
+          <div className="toolbar-group toolbar-actions">
             <button
               type="button"
               className="terminal-button"
