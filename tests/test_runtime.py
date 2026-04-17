@@ -3,7 +3,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from backend.core.duckdb import ensure_schema
+from backend.core.duckdb import duckdb_connection, ensure_schema
 
 
 def test_ensure_schema_creates_duckdb_tables(monkeypatch, tmp_path):
@@ -13,13 +13,10 @@ def test_ensure_schema_creates_duckdb_tables(monkeypatch, tmp_path):
 
     ensure_schema()
 
-    import duckdb
-
-    conn = duckdb.connect(str(db_path), read_only=True)
-    try:
+    # Use the shared connection (duckdb_connection) instead of opening a second
+    # raw connection — DuckDB disallows two connections with different configs.
+    with duckdb_connection() as conn:
         tables = {row[0] for row in conn.execute("SHOW TABLES").fetchall()}
-    finally:
-        conn.close()
 
     assert "ticker_data" in tables
     assert "stock_information" in tables
