@@ -492,8 +492,20 @@ def sync_market_data(
         rows_written = 0
 
         try:
-            # Write one ticker at a time so _CONN_LOCK is released between tickers,
-            # keeping API reads responsive during a long bulk sync.
+            # DuckDB has a known bug: DELETE on a table with secondary indexes can raise
+            # "Failed to delete all rows from index" when the index was left in an
+            # inconsistent state by a previously interrupted write (e.g. a container kill).
+            # Fix: drop all secondary indexes before any DELETE so DuckDB only has to
+            # maintain the heap. Rebuild the indexes once at the very end.
+            with duckdb_connection() as conn:
+                conn.execute("CHECKPOINT")  # flush WAL first
+                conn.execute("DROP INDEX IF EXISTS idx_ticker_data_ticker_date")
+                conn.execute("DROP INDEX IF EXISTS idx_ticker_data_date")
+                conn.execute("DROP INDEX IF EXISTS idx_ohlcv_daily_ticker_date")
+
+            # Write one ticker at a time — releases _CONN_LOCK between tickers so
+            # API reads can proceed during the bulk sync (they just use table scans
+            # without indexes until the rebuild at the end).
             for index, ticker in enumerate(universe, start=1):
                 if ticker not in indicator_frame["Ticker"].values:
                     continue
@@ -559,6 +571,27 @@ def sync_market_data(
                         FROM metadata_frame
                     """)
                     conn.unregister("metadata_frame")
+
+            # Rebuild the indexes now that all writes are complete.
+            sync_status_tracker.update(
+                phase="indexing",
+                detail="Rebuilding indexes after write.",
+                completed_tickers=len(universe),
+                rows_written=rows_written,
+            )
+            with duckdb_connection() as conn:
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_ticker_data_ticker_date"
+                    " ON ticker_data (Ticker, Date)"
+                )
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_ticker_data_date ON ticker_data (Date)"
+                )
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_ohlcv_daily_ticker_date"
+                    " ON ohlcv_daily (Ticker, Date)"
+                )
+
         except Exception as exc:
             sync_status_tracker.fail(str(exc))
             raise
