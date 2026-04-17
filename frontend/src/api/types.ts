@@ -336,3 +336,54 @@ export interface SyncStatus {
   last_success_at?: string | null
   last_error?: string | null
 }
+
+export interface IntradayBar {
+  time: number // Unix timestamp (seconds)
+  open: number
+  high: number
+  low: number
+  close: number
+  volume: number
+}
+
+export interface IntradayResponse {
+  ticker: string
+  interval: string
+  period: string
+  bars: IntradayBar[]
+}
+
+export interface Fundamentals {
+  ticker: string
+  generated_at: string
+  pe_ratio?: number | null
+  forward_pe?: number | null
+  peg_ratio?: number | null
+  ev_ebitda?: number | null
+  price_to_book?: number | null
+  price_to_sales?: number | null
+  enterprise_value?: number | null
+  gross_margin?: number | null
+  operating_margin?: number | null
+  profit_margin?: number | null
+  roe?: number | null
+  roa?: number | null
+  eps_ttm?: number | null
+  eps_forward?: number | null
+  revenue_per_share?: number | null
+  book_value?: number | null
+  revenue_growth?: number | null
+  earnings_growth?: number | null
+  total_cash?: number | null
+  total_debt?: number | null
+  debt_to_equity?: number | null
+  current_ratio?: number | null
+  free_cash_flow?: number | null
+  dividend_yield?: number | null
+  payout_ratio?: number | null
+  beta?: number | null
+  shares_outstanding?: number | null
+  short_ratio?: number | null
+  total_revenue?: number | null
+  ebitda?: number | null
+}
