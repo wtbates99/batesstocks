@@ -313,6 +313,8 @@ def _prepare_ticker_data_frame(frame: pd.DataFrame) -> pd.DataFrame:
 
 def rebuild_indicator_cache(tickers: list[str] | None = None) -> int:
     universe = _normalize_tickers(tickers)
+
+    # Read and compute outside the lock — indicator math is CPU-only, no DB needed.
     with duckdb_connection() as conn:
         raw = conn.execute(
             """
@@ -322,15 +324,18 @@ def rebuild_indicator_cache(tickers: list[str] | None = None) -> int:
             """
         ).df()
 
+    if raw.empty:
+        return 0
+    if universe:
+        raw = raw[raw["Ticker"].isin(universe)].copy()
         if raw.empty:
             return 0
-        if universe:
-            raw = raw[raw["Ticker"].isin(universe)].copy()
-            if raw.empty:
-                return 0
 
-        indicator_frame = _compute_indicator_frame(raw)
-        write_frame = _prepare_ticker_data_frame(indicator_frame)
+    indicator_frame = _compute_indicator_frame(raw)
+    write_frame = _prepare_ticker_data_frame(indicator_frame)
+
+    # Write phase — acquire lock only for the actual table swap.
+    with duckdb_connection() as conn:
         conn.register("rebuilt_ticker_data", write_frame)
         if universe:
             placeholders = ", ".join(["?"] * len(universe))
@@ -484,23 +489,26 @@ def sync_market_data(
         rows_written = 0
 
         try:
-            with duckdb_connection() as conn:
-                for index, ticker in enumerate(universe, start=1):
-                    if ticker not in indicator_frame["Ticker"].values:
-                        continue
+            # Write one ticker at a time so _CONN_LOCK is released between tickers,
+            # keeping API reads responsive during a long bulk sync.
+            for index, ticker in enumerate(universe, start=1):
+                if ticker not in indicator_frame["Ticker"].values:
+                    continue
 
-                    sync_status_tracker.update(
-                        phase="writing",
-                        detail=f"Writing {ticker} to local market cache.",
-                        completed_tickers=index - 1,
-                        rows_written=rows_written,
-                    )
+                sync_status_tracker.update(
+                    phase="writing",
+                    detail=f"Writing {ticker} to local market cache.",
+                    completed_tickers=index - 1,
+                    rows_written=rows_written,
+                )
 
-                    subset = indicator_frame[indicator_frame["Ticker"] == ticker].copy()
-                    cutoff = subset["Date"].max() - pd.Timedelta(days=LOOKBACK_BUFFER_DAYS)
-                    subset = subset[subset["Date"] >= cutoff].copy()
-                    raw_subset = raw[(raw["Ticker"] == ticker) & (raw["Date"] >= cutoff)].copy()
+                subset = indicator_frame[indicator_frame["Ticker"] == ticker].copy()
+                cutoff = subset["Date"].max() - pd.Timedelta(days=LOOKBACK_BUFFER_DAYS)
+                subset = subset[subset["Date"] >= cutoff].copy()
+                raw_subset = raw[(raw["Ticker"] == ticker) & (raw["Date"] >= cutoff)].copy()
+                write_subset = _prepare_ticker_data_frame(subset)
 
+                with duckdb_connection() as conn:
                     conn.register("raw_subset", raw_subset)
                     conn.execute(
                         "DELETE FROM ohlcv_daily WHERE Ticker = ? AND Date >= ?",
@@ -512,7 +520,6 @@ def sync_market_data(
                     )
                     conn.unregister("raw_subset")
 
-                    write_subset = _prepare_ticker_data_frame(subset)
                     conn.register("ticker_subset", write_subset)
                     conn.execute(
                         "DELETE FROM ticker_data WHERE Ticker = ? AND Date >= ?",
@@ -526,16 +533,18 @@ def sync_market_data(
                         """
                     )
                     conn.unregister("ticker_subset")
-                    rows_written += len(write_subset)
 
-                if not metadata.empty:
-                    sync_status_tracker.update(
-                        phase="metadata",
-                        detail="Writing refreshed metadata and sector mappings.",
-                        completed_tickers=len(universe),
-                        rows_written=rows_written,
-                        metadata_rows=len(metadata),
-                    )
+                rows_written += len(write_subset)
+
+            if not metadata.empty:
+                sync_status_tracker.update(
+                    phase="metadata",
+                    detail="Writing refreshed metadata and sector mappings.",
+                    completed_tickers=len(universe),
+                    rows_written=rows_written,
+                    metadata_rows=len(metadata),
+                )
+                with duckdb_connection() as conn:
                     conn.register("metadata_frame", metadata)
                     conn.execute("""
                         INSERT OR REPLACE INTO stock_information

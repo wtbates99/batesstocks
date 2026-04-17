@@ -322,3 +322,61 @@ class EarningsItem(BaseModel):
 class EarningsResponse(BaseModel):
     generated_at: str
     items: list[EarningsItem]
+
+
+class IntradayBar(BaseModel):
+    time: int  # Unix timestamp (seconds)
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: float
+
+
+class IntradayResponse(BaseModel):
+    ticker: str
+    interval: str
+    period: str
+    bars: list[IntradayBar]
+
+
+class Fundamentals(BaseModel):
+    ticker: str
+    generated_at: str
+    # Valuation
+    pe_ratio: float | None = None
+    forward_pe: float | None = None
+    peg_ratio: float | None = None
+    ev_ebitda: float | None = None
+    price_to_book: float | None = None
+    price_to_sales: float | None = None
+    enterprise_value: float | None = None
+    # Profitability
+    gross_margin: float | None = None
+    operating_margin: float | None = None
+    profit_margin: float | None = None
+    roe: float | None = None
+    roa: float | None = None
+    # Per share
+    eps_ttm: float | None = None
+    eps_forward: float | None = None
+    revenue_per_share: float | None = None
+    book_value: float | None = None
+    # Growth
+    revenue_growth: float | None = None
+    earnings_growth: float | None = None
+    # Balance sheet
+    total_cash: float | None = None
+    total_debt: float | None = None
+    debt_to_equity: float | None = None
+    current_ratio: float | None = None
+    free_cash_flow: float | None = None
+    # Dividends & float
+    dividend_yield: float | None = None
+    payout_ratio: float | None = None
+    beta: float | None = None
+    shares_outstanding: float | None = None
+    short_ratio: float | None = None
+    # Revenue & earnings (TTM)
+    total_revenue: float | None = None
+    ebitda: float | None = None
