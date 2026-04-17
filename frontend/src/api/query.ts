@@ -12,6 +12,8 @@ export const terminalKeys = {
   monitor: () => ['monitor'] as const,
   sector: (sector: string) => ['sector', sector] as const,
   security: (ticker: string, limit: number) => ['security', ticker, limit] as const,
+  intraday: (ticker: string, interval: string, period: string) => ['intraday', ticker, interval, period] as const,
+  fundamentals: (ticker: string) => ['fundamentals', ticker] as const,
   snapshots: (tickers: string[]) => ['snapshots', ...tickers] as const,
   news: (scope: string, tickers: string[]) => ['news', scope, ...tickers] as const,
   earnings: (tickers: string[]) => ['earnings', ...tickers] as const,
@@ -56,6 +58,27 @@ export function useSecurityQuery(ticker: string, limit = 260) {
     queryKey: terminalKeys.security(ticker, limit),
     queryFn: () => api.terminal.security(ticker, limit),
     staleTime: 30_000,
+    refetchOnWindowFocus: false,
+  })
+}
+
+export function useIntradayQuery(ticker: string, interval: string, period: string, enabled = true) {
+  return useQuery({
+    queryKey: terminalKeys.intraday(ticker, interval, period),
+    queryFn: () => api.terminal.intraday(ticker, interval, period),
+    enabled: enabled && ticker.length > 0,
+    staleTime: 60_000,
+    refetchInterval: 60_000,
+    refetchOnWindowFocus: false,
+  })
+}
+
+export function useFundamentalsQuery(ticker: string, enabled = true) {
+  return useQuery({
+    queryKey: terminalKeys.fundamentals(ticker),
+    queryFn: () => api.terminal.fundamentals(ticker),
+    enabled: enabled && ticker.length > 0,
+    staleTime: 4 * 60 * 60_000,   // fundamentals are slow-moving; refresh every 4h
     refetchOnWindowFocus: false,
   })
 }

@@ -852,6 +852,31 @@ select {
   font-family: var(--font-mono);
 }
 
+.fundamentals-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: var(--sp-4);
+  padding: var(--sp-3) var(--sp-4) var(--sp-4);
+}
+
+.fundamentals-section {
+  display: grid;
+  gap: 6px;
+  align-content: start;
+}
+
+.fundamentals-section-title {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  color: var(--text-dim);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 2px;
+}
+
 .workbench-grid {
   display: grid;
   grid-template-columns: 520px minmax(0, 1fr);

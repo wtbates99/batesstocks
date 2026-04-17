@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 
+import yfinance as yf
 from fastapi import APIRouter, HTTPException, Query
 
 from backend.core.duckdb import duckdb_connection, ensure_schema
@@ -11,6 +12,9 @@ from backend.models import (
     BackupCreateResponse,
     BackupStatus,
     EarningsResponse,
+    Fundamentals,
+    IntradayBar,
+    IntradayResponse,
     MarketMonitorOverview,
     NewsResponse,
     SectorOverview,
@@ -70,6 +74,94 @@ def terminal_security(
         return get_security_overview(ticker, limit=limit)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/terminal/security/{ticker}/intraday", response_model=IntradayResponse)
+def terminal_security_intraday(
+    ticker: str,
+    interval: str = Query("5m", pattern="^(1m|5m|15m|30m|1h)$"),
+    period: str = Query("1d", pattern="^(1d|5d|1mo)$"),
+) -> IntradayResponse:
+    symbol = ticker.strip().upper()
+    try:
+        frame = yf.download(
+            tickers=symbol,
+            period=period,
+            interval=interval,
+            auto_adjust=True,
+            progress=False,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Intraday fetch failed: {exc}") from exc
+
+    if frame is None or frame.empty:
+        raise HTTPException(status_code=404, detail=f"No intraday data for {symbol}")
+
+    bars: list[IntradayBar] = []
+    for ts, row in frame.iterrows():
+        unix = int(ts.timestamp())
+        bars.append(
+            IntradayBar(
+                time=unix,
+                open=float(row["Open"]),
+                high=float(row["High"]),
+                low=float(row["Low"]),
+                close=float(row["Close"]),
+                volume=float(row["Volume"]),
+            )
+        )
+    return IntradayResponse(ticker=symbol, interval=interval, period=period, bars=bars)
+
+
+@router.get("/terminal/security/{ticker}/fundamentals", response_model=Fundamentals)
+def terminal_security_fundamentals(ticker: str) -> Fundamentals:
+    symbol = ticker.strip().upper()
+    try:
+        info = yf.Ticker(symbol).info
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Fundamentals fetch failed: {exc}") from exc
+
+    def _f(key: str) -> float | None:
+        v = info.get(key)
+        try:
+            return float(v) if v is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    return Fundamentals(
+        ticker=symbol,
+        generated_at=datetime.now(UTC).isoformat(),
+        pe_ratio=_f("trailingPE"),
+        forward_pe=_f("forwardPE"),
+        peg_ratio=_f("pegRatio"),
+        ev_ebitda=_f("enterpriseToEbitda"),
+        price_to_book=_f("priceToBook"),
+        price_to_sales=_f("priceToSalesTrailing12Months"),
+        enterprise_value=_f("enterpriseValue"),
+        gross_margin=_f("grossMargins"),
+        operating_margin=_f("operatingMargins"),
+        profit_margin=_f("profitMargins"),
+        roe=_f("returnOnEquity"),
+        roa=_f("returnOnAssets"),
+        eps_ttm=_f("trailingEps"),
+        eps_forward=_f("forwardEps"),
+        revenue_per_share=_f("revenuePerShare"),
+        book_value=_f("bookValue"),
+        revenue_growth=_f("revenueGrowth"),
+        earnings_growth=_f("earningsGrowth"),
+        total_cash=_f("totalCash"),
+        total_debt=_f("totalDebt"),
+        debt_to_equity=_f("debtToEquity"),
+        current_ratio=_f("currentRatio"),
+        free_cash_flow=_f("freeCashflow"),
+        dividend_yield=_f("dividendYield"),
+        payout_ratio=_f("payoutRatio"),
+        beta=_f("beta"),
+        shares_outstanding=_f("sharesOutstanding"),
+        short_ratio=_f("shortRatio"),
+        total_revenue=_f("totalRevenue"),
+        ebitda=_f("ebitda"),
+    )
 
 
 @router.get("/terminal/snapshots", response_model=SecuritySnapshotResponse)

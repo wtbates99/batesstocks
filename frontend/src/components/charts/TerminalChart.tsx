@@ -1,12 +1,22 @@
 import { useEffect, useRef } from 'react'
 import { ColorType, createChart, type IChartApi } from 'lightweight-charts'
-import type { SecurityBar } from '../../api/types'
+import type { IntradayBar, SecurityBar } from '../../api/types'
 
-interface Props {
+interface DailyProps {
   bars: SecurityBar[]
+  intradayBars?: never
   height?: number
   overlays?: Array<'sma_10' | 'sma_30' | 'sma_200' | 'ema_10'>
 }
+
+interface IntradayProps {
+  bars?: never
+  intradayBars: IntradayBar[]
+  height?: number
+  overlays?: never
+}
+
+type Props = DailyProps | IntradayProps
 
 const OVERLAY_CONFIG = {
   sma_10: { color: '#f6c344', label: 'SMA 10' },
@@ -15,13 +25,15 @@ const OVERLAY_CONFIG = {
   ema_10: { color: '#f28b39', label: 'EMA 10' },
 } as const
 
-export default function TerminalChart({ bars, height = 440, overlays = ['sma_10', 'sma_30', 'sma_200'] }: Props) {
+export default function TerminalChart({ bars, intradayBars, height = 440, overlays = ['sma_10', 'sma_30', 'sma_200'] }: Props) {
   const hostRef = useRef<HTMLDivElement | null>(null)
   const chartRef = useRef<IChartApi | null>(null)
 
+  const hasData = bars ? bars.length > 0 : (intradayBars?.length ?? 0) > 0
+
   useEffect(() => {
     const host = hostRef.current
-    if (!host || bars.length === 0) return
+    if (!host || !hasData) return
 
     const chart = createChart(host, {
       width: host.clientWidth,
@@ -42,6 +54,8 @@ export default function TerminalChart({ bars, height = 440, overlays = ['sma_10'
       timeScale: {
         borderColor: '#1a2028',
         fixLeftEdge: true,
+        timeVisible: !!intradayBars,
+        secondsVisible: false,
       },
       crosshair: {
         vertLine: { color: '#2c333d', labelBackgroundColor: '#0f1318' },
@@ -56,29 +70,42 @@ export default function TerminalChart({ bars, height = 440, overlays = ['sma_10'
       wickUpColor: '#11b981',
       wickDownColor: '#d24545',
     })
-    candles.setData(
-      bars.map((bar) => ({
-        time: bar.date,
-        open: bar.open,
-        high: bar.high,
-        low: bar.low,
-        close: bar.close,
-      })),
-    )
 
-    overlays.forEach((overlay) => {
-      const series = chart.addLineSeries({
-        color: OVERLAY_CONFIG[overlay].color,
-        lineWidth: overlay === 'sma_200' ? 2 : 1,
-        priceLineVisible: false,
-        lastValueVisible: true,
-      })
-      series.setData(
-        bars
-          .filter((bar) => bar[overlay] != null)
-          .map((bar) => ({ time: bar.date, value: bar[overlay] as number })),
+    if (intradayBars) {
+      candles.setData(
+        intradayBars.map((bar) => ({
+          time: bar.time as unknown as string,
+          open: bar.open,
+          high: bar.high,
+          low: bar.low,
+          close: bar.close,
+        })),
       )
-    })
+    } else if (bars) {
+      candles.setData(
+        bars.map((bar) => ({
+          time: bar.date,
+          open: bar.open,
+          high: bar.high,
+          low: bar.low,
+          close: bar.close,
+        })),
+      )
+
+      overlays?.forEach((overlay) => {
+        const series = chart.addLineSeries({
+          color: OVERLAY_CONFIG[overlay].color,
+          lineWidth: overlay === 'sma_200' ? 2 : 1,
+          priceLineVisible: false,
+          lastValueVisible: true,
+        })
+        series.setData(
+          bars
+            .filter((bar) => bar[overlay] != null)
+            .map((bar) => ({ time: bar.date, value: bar[overlay] as number })),
+        )
+      })
+    }
 
     const volume = chart.addHistogramSeries({
       priceScaleId: '',
@@ -87,13 +114,24 @@ export default function TerminalChart({ bars, height = 440, overlays = ['sma_10'
     volume.priceScale().applyOptions({
       scaleMargins: { top: 0.78, bottom: 0 },
     })
-    volume.setData(
-      bars.map((bar) => ({
-        time: bar.date,
-        value: bar.volume,
-        color: bar.close >= bar.open ? '#0f6c55' : '#7e2f35',
-      })),
-    )
+
+    if (intradayBars) {
+      volume.setData(
+        intradayBars.map((bar) => ({
+          time: bar.time as unknown as string,
+          value: bar.volume,
+          color: bar.close >= bar.open ? '#0f6c55' : '#7e2f35',
+        })),
+      )
+    } else if (bars) {
+      volume.setData(
+        bars.map((bar) => ({
+          time: bar.date,
+          value: bar.volume,
+          color: bar.close >= bar.open ? '#0f6c55' : '#7e2f35',
+        })),
+      )
+    }
 
     chart.timeScale().fitContent()
     chartRef.current = chart
@@ -110,7 +148,7 @@ export default function TerminalChart({ bars, height = 440, overlays = ['sma_10'
       chart.remove()
       chartRef.current = null
     }
-  }, [bars, height, overlays])
+  }, [bars, intradayBars, height, hasData, overlays])
 
   return <div ref={hostRef} className="chart-host" style={{ height }} />
 }

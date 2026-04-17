@@ -4,6 +4,8 @@ import type {
   BackupCreateResponse,
   BackupStatus,
   EarningsResponse,
+  Fundamentals,
+  IntradayResponse,
   LivePrices,
   MarketMonitorOverview,
   NewsResponse,
@@ -76,6 +78,10 @@ export const api = {
     sector: (sector: string) => get<SectorOverview>(`/terminal/sector/${encodeURIComponent(sector)}`),
     security: (ticker: string, limit = 260) =>
       get<SecurityOverview>(`/terminal/security/${ticker}`, { limit }),
+    intraday: (ticker: string, interval: string, period: string) =>
+      get<IntradayResponse>(`/terminal/security/${ticker}/intraday`, { interval, period }),
+    fundamentals: (ticker: string) =>
+      get<Fundamentals>(`/terminal/security/${ticker}/fundamentals`),
     snapshots: (tickers: string[]) =>
       get<SecuritySnapshotResponse>('/terminal/snapshots', { tickers: tickers.join(',') }),
     news: (tickers: string[], scope: string, limit = 12) =>
