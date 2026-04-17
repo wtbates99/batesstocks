@@ -167,34 +167,27 @@ def _download_ohlcv(tickers: list[str], years: int, start_date: str | None = Non
     if frame is None or frame.empty:
         return pd.DataFrame()
 
-    if len(tickers) == 1:
-        ticker = tickers[0]
-        flat = frame.reset_index()
-        flat.insert(1, "Ticker", ticker)
+    # yfinance now always returns a MultiIndex (Ticker, Price) regardless of ticker count.
+    # stack(level=0) moves the Ticker level into the index, giving flat (Date, Ticker) rows.
+    if isinstance(frame.columns, pd.MultiIndex):
+        flat = frame.stack(level=0, future_stack=True).reset_index()
+        # level name is already "Ticker" in recent yfinance versions
+        if "Ticker" not in flat.columns and "level_1" in flat.columns:
+            flat = flat.rename(columns={"level_1": "Ticker"})
     else:
-        flat = (
-            frame.stack(level=0, future_stack=True)
-            .reset_index()
-            .rename(columns={"level_1": "Ticker"})
-        )
+        # Fallback for older yfinance that returned flat columns for single tickers
+        flat = frame.reset_index()
+        if len(tickers) == 1:
+            flat.insert(1, "Ticker", tickers[0])
 
-    rename_map = {
-        "Date": "Date",
-        "Open": "Open",
-        "High": "High",
-        "Low": "Low",
-        "Close": "Close",
-        "Adj Close": "AdjClose",
-        "Volume": "Volume",
-    }
-    flat = flat.rename(columns=rename_map)
+    flat = flat.rename(columns={"Adj Close": "AdjClose"})
     keep = ["Date", "Ticker", "Open", "High", "Low", "Close", "AdjClose", "Volume"]
-    flat = flat[[column for column in keep if column in flat.columns]].copy()
+    flat = flat[[col for col in keep if col in flat.columns]].copy()
     flat["Date"] = pd.to_datetime(flat["Date"])
-    flat["Ticker"] = flat["Ticker"].str.upper()
-    for column in ["Open", "High", "Low", "Close", "AdjClose", "Volume"]:
-        if column not in flat.columns:
-            flat[column] = np.nan
+    flat["Ticker"] = flat["Ticker"].astype(str).str.upper()
+    for col in ["Open", "High", "Low", "Close", "AdjClose", "Volume"]:
+        if col not in flat.columns:
+            flat[col] = np.nan
     return flat.sort_values(["Ticker", "Date"]).reset_index(drop=True)
 
 
@@ -460,7 +453,12 @@ def sync_market_data(
                 else f" with {years} years of history"
             ),
         )
-        raw = _download_ohlcv(universe, years=years, start_date=incremental_start)
+        try:
+            raw = _download_ohlcv(universe, years=years, start_date=incremental_start)
+        except Exception as exc:
+            sync_status_tracker.fail(f"Download failed: {exc}")
+            raise
+
         if raw.empty:
             response = SyncResponse(
                 started_at=started_at.isoformat(),
@@ -476,11 +474,16 @@ def sync_market_data(
             )
             return response
 
-        sync_status_tracker.update(
-            phase="calculating",
-            detail="Recomputing indicators and long-horizon trend metrics.",
-        )
-        indicator_frame = _compute_indicator_frame(raw)
+        try:
+            sync_status_tracker.update(
+                phase="calculating",
+                detail="Recomputing indicators and long-horizon trend metrics.",
+            )
+            indicator_frame = _compute_indicator_frame(raw)
+        except Exception as exc:
+            sync_status_tracker.fail(f"Indicator computation failed: {exc}")
+            raise
+
         sync_status_tracker.update(
             phase="metadata",
             detail="Refreshing company and fund metadata.",

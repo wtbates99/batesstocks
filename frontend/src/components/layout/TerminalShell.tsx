@@ -207,7 +207,10 @@ export default function TerminalShell() {
           <span className={syncStatus.data?.state === 'running' ? 'tone-warning' : syncStatus.data?.state === 'error' ? 'tone-negative' : 'tone-positive'}>
             {syncStatus.data?.state?.toUpperCase() ?? 'UNKNOWN'}
           </span>
-          <span>{syncStatus.data?.detail ?? 'Awaiting telemetry'}</span>
+          <span>{syncStatus.data?.state === 'error' && syncStatus.data?.last_error
+            ? syncStatus.data.last_error.slice(0, 120)
+            : syncStatus.data?.detail ?? 'Awaiting telemetry'}
+          </span>
         </div>
         <div className="status-item">
           <DatabaseZap size={11} />

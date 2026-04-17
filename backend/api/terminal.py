@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 
+import pandas as pd
 import yfinance as yf
 from fastapi import APIRouter, HTTPException, Query
 
@@ -96,6 +97,10 @@ def terminal_security_intraday(
 
     if frame is None or frame.empty:
         raise HTTPException(status_code=404, detail=f"No intraday data for {symbol}")
+
+    # yfinance returns MultiIndex columns (Ticker, Price) — flatten before iterating
+    if isinstance(frame.columns, pd.MultiIndex):
+        frame.columns = frame.columns.get_level_values(1)  # keep Price level: Open/High/…
 
     bars: list[IntradayBar] = []
     for ts, row in frame.iterrows():
