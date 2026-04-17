@@ -1316,6 +1316,17 @@ select {
   border-bottom: 1px solid var(--line);
 }
 
+.security-price-group {
+  margin-left: auto;
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+}
+
+.toolbar-actions {
+  margin-left: auto;
+}
+
 .security-ticker-label {
   color: var(--amber);
   font-family: var(--font-mono);
@@ -1680,6 +1691,7 @@ select {
 }
 
 @media (max-width: 720px) {
+  /* ── Shell chrome ─────────────────────────────────────────────── */
   .shell-header {
     gap: 8px;
     padding: 8px;
@@ -1696,14 +1708,22 @@ select {
 
   .function-strip {
     padding: 0 8px;
+    gap: 4px;
   }
 
   .function-hint {
     display: none;
   }
 
+  .function-key {
+    padding: 6px 8px;
+    font-size: 10px;
+  }
+
+  /* ── Workspace & panels ──────────────────────────────────────── */
   .workspace {
-    padding: 8px;
+    padding: 6px;
+    gap: 6px;
   }
 
   .panel-body-pad,
@@ -1725,6 +1745,7 @@ select {
     padding: 8px;
   }
 
+  /* ── Grid layouts ─────────────────────────────────────────────── */
   .monitor-grid,
   .score-grid,
   .subpanel-grid,
@@ -1734,8 +1755,11 @@ select {
     grid-template-columns: 1fr;
   }
 
+  /* ── Status strip ─────────────────────────────────────────────── */
   .status-strip {
     flex-wrap: wrap;
+    gap: 4px 10px;
+    padding: 5px 10px;
   }
 
   .status-notice {
@@ -1743,25 +1767,111 @@ select {
     width: 100%;
   }
 
-  .security-header {
-    align-items: flex-start;
-  }
-
-  .security-price-label {
-    margin-left: 0;
-  }
-
+  /* ── Watchlist ────────────────────────────────────────────────── */
   .watchlist-admin .terminal-input {
     width: 100%;
   }
 
-  .quote-cell {
-    min-width: 0;
-    flex: 1 1 110px;
+  /* ── Security page ────────────────────────────────────────────── */
+  .security-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--sp-2);
+    padding: var(--sp-3) var(--sp-3) var(--sp-2);
   }
 
-  .toolbar-group,
+  .security-price-group {
+    margin-left: 0;
+  }
+
+  .security-ticker-label {
+    font-size: var(--fs-2xl);
+  }
+
+  .security-price-label {
+    font-size: var(--fs-xl);
+    margin-left: 0;
+  }
+
+  /* Quote strip: 2-per-row grid instead of flex overflow */
+  .quote-strip {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    flex-wrap: unset;
+  }
+
+  .quote-cell {
+    min-width: 0;
+    border-right: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+    padding: var(--sp-2) var(--sp-3);
+  }
+
+  .quote-cell:last-child {
+    /* "Generated" cell: span full width on its row */
+    grid-column: 1 / -1;
+    border-right: 0;
+  }
+
+  /* Return ladder: compact on mobile */
+  .return-ladder {
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 8px 10px;
+  }
+
+  /* Compare strip: scroll horizontally */
+  .compare-strip {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    gap: 4px;
+    padding: 6px 10px;
+  }
+
+  .compare-strip::-webkit-scrollbar {
+    display: none;
+  }
+
+  .compare-chip {
+    flex-shrink: 0;
+    padding: 5px 7px;
+    font-size: 10px;
+    gap: 5px;
+  }
+
+  /* Chart toolbar: stack into two rows — tabs | timeframes on row 1, actions on row 2 */
   .chart-toolbar {
     flex-wrap: wrap;
+    gap: 6px;
+    padding: 6px 8px;
+    row-gap: 6px;
+  }
+
+  .chart-toolbar .toolbar-group:last-child {
+    /* action buttons (ANALYZE / WATCH / COMPARE / BACKTEST) — full width, scrollable */
+    margin-left: 0 !important;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    width: 100%;
+  }
+
+  .chart-toolbar .toolbar-group:last-child::-webkit-scrollbar {
+    display: none;
+  }
+
+  .toolbar-chip,
+  .terminal-button {
+    padding: 5px 8px;
+    font-size: 10px;
+  }
+
+  /* Fundamentals: single column on mobile */
+  .fundamentals-grid {
+    grid-template-columns: 1fr;
+    padding: var(--sp-3);
+    gap: var(--sp-3);
   }
 }

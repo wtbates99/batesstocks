@@ -136,7 +136,7 @@ export default function CommandBar() {
   const helperText = parsed.kind === 'invalid'
     ? commandValue
       ? parsed.reason
-      : 'TYPE A FUNCTION OR SYMBOL'
+      : ''
     : parsed.kind === 'compare'
       ? `COMPARE SET ${parsed.tickers.join(' / ')}`
       : parsed.kind === 'watchlist'
@@ -193,9 +193,11 @@ export default function CommandBar() {
           placeholder="SPY DES | EQS | PORT | SYNC AAPL | WL ADD NVDA | COMP MSFT SPY"
         />
 
-        <div className={cn('commandbar-status', parsed.kind === 'invalid' && commandValue ? 'tone-warning' : 'tone-cyan')}>
-          {helperText}
-        </div>
+        {helperText && (
+          <div className={cn('commandbar-status', parsed.kind === 'invalid' && commandValue ? 'tone-warning' : 'tone-cyan')}>
+            {helperText}
+          </div>
+        )}
 
         <div className="commandbar-hints">
           {COMMAND_HINTS.map((hint) => (
