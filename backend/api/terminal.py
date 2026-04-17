@@ -169,7 +169,7 @@ def system_sync(request: SyncRequest) -> SyncResponse:
         raise HTTPException(status_code=502, detail=f"Data sync failed: {exc}") from exc
 
 
-@router.get("/earnings", response_model=EarningsResponse)
+@router.get("/api/earnings", response_model=EarningsResponse)
 def terminal_earnings(
     tickers: str = Query("", max_length=512),
 ) -> EarningsResponse:
@@ -177,7 +177,7 @@ def terminal_earnings(
     return get_earnings(ticker_list)
 
 
-@router.get("/news", response_model=NewsResponse)
+@router.get("/api/news", response_model=NewsResponse)
 def terminal_news(
     tickers: str = Query("", max_length=256),
     scope: str = Query("terminal", min_length=1, max_length=32),

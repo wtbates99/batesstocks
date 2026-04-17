@@ -18,6 +18,12 @@ _SCHEMA_LOCK = Lock()
 _SCHEMA_READY = False
 _SCHEMA_DB_PATH: Path | None = None
 
+# Single shared connection + lock — DuckDB file connections don't support
+# concurrent writers from multiple threads, so we serialize all access.
+_CONN_LOCK = Lock()
+_SHARED_CONN: duckdb.DuckDBPyConnection | None = None
+_SHARED_CONN_PATH: Path | None = None
+
 
 def _connection_config() -> dict[str, str]:
     return {
@@ -27,22 +33,34 @@ def _connection_config() -> dict[str, str]:
     }
 
 
+def _get_shared_connection() -> duckdb.DuckDBPyConnection:
+    global _SHARED_CONN, _SHARED_CONN_PATH
+    db_path = get_db_path()
+    if _SHARED_CONN is None or _SHARED_CONN_PATH != db_path:
+        if _SHARED_CONN is not None:
+            try:
+                _SHARED_CONN.close()
+            except Exception:
+                pass
+        _SHARED_CONN = duckdb.connect(
+            str(db_path),
+            read_only=False,
+            config=_connection_config(),
+        )
+        _SHARED_CONN_PATH = db_path
+    return _SHARED_CONN
+
+
 def open_connection(read_only: bool = False) -> duckdb.DuckDBPyConnection:
     _ = read_only
-    return duckdb.connect(
-        str(get_db_path()),
-        read_only=False,
-        config=_connection_config(),
-    )
+    return _get_shared_connection()
 
 
 @contextmanager
 def duckdb_connection(read_only: bool = False) -> Iterator[duckdb.DuckDBPyConnection]:
-    conn = open_connection(read_only=read_only)
-    try:
+    with _CONN_LOCK:
+        conn = _get_shared_connection()
         yield conn
-    finally:
-        conn.close()
 
 
 def ensure_schema() -> None:

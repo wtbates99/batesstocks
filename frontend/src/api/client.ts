@@ -79,9 +79,9 @@ export const api = {
     snapshots: (tickers: string[]) =>
       get<SecuritySnapshotResponse>('/terminal/snapshots', { tickers: tickers.join(',') }),
     news: (tickers: string[], scope: string, limit = 12) =>
-      get<NewsResponse>('/news', { tickers: tickers.join(','), scope, limit }),
+      get<NewsResponse>('/api/news', { tickers: tickers.join(','), scope, limit }),
     earnings: (tickers: string[]) =>
-      get<EarningsResponse>('/earnings', { tickers: tickers.join(',') }),
+      get<EarningsResponse>('/api/earnings', { tickers: tickers.join(',') }),
   },
 
   strategies: {

@@ -180,6 +180,7 @@ export default function StrategyWorkbench({ draft, onChange, includeTicker }: Pr
             <span className="field-label">Ticker</span>
             <input
               className="terminal-input"
+              placeholder="TICKER"
               value={draft.ticker}
               onChange={(event) => onChange((current) => ({
                 ...current,
