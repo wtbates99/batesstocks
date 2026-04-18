@@ -185,7 +185,7 @@ export default function SecurityPage() {
     })),
   )
 
-  const security = useSecurityQuery(ticker, 260)
+  const security = useSecurityQuery(ticker, 1000)
   const earnings = useEarningsQuery([ticker])
   const earningsItem = earnings.data?.items[0]
   const news = useNewsQuery(

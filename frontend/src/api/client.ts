@@ -76,7 +76,7 @@ export const api = {
     workspace: (ticker: string) => get<TerminalOverview>('/terminal/workspace', { ticker }),
     monitor: () => get<MarketMonitorOverview>('/terminal/monitor'),
     sector: (sector: string) => get<SectorOverview>(`/terminal/sector/${encodeURIComponent(sector)}`),
-    security: (ticker: string, limit = 260) =>
+    security: (ticker: string, limit = 1000) =>
       get<SecurityOverview>(`/terminal/security/${ticker}`, { limit }),
     intraday: (ticker: string, interval: string, period: string) =>
       get<IntradayResponse>(`/terminal/security/${ticker}/intraday`, { interval, period }),
