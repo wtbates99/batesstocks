@@ -14,7 +14,6 @@ from backend.models import SyncResponse
 from backend.services.market_universe import normalize_universe
 from backend.services.sync_status import sync_status_tracker
 
-LOOKBACK_BUFFER_DAYS = 60
 YFINANCE_CACHE_DIR = Path("/tmp/yfinance-cache")
 DEFAULT_UNIVERSE_MIN_SIZE = 400
 MIN_INDICATOR_LOOKBACK_YEARS = 2
@@ -518,9 +517,8 @@ def sync_market_data(
                 )
 
                 subset = indicator_frame[indicator_frame["Ticker"] == ticker].copy()
-                cutoff = subset["Date"].max() - pd.Timedelta(days=LOOKBACK_BUFFER_DAYS)
-                subset = subset[subset["Date"] >= cutoff].copy()
-                raw_subset = raw[(raw["Ticker"] == ticker) & (raw["Date"] >= cutoff)].copy()
+                raw_subset = raw[raw["Ticker"] == ticker].copy()
+                cutoff = raw_subset["Date"].min()
                 write_subset = _prepare_ticker_data_frame(subset)
 
                 with duckdb_connection() as conn:

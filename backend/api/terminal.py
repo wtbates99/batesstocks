@@ -67,7 +67,7 @@ def terminal_workspace(ticker: str = Query("SPY", min_length=1, max_length=10)) 
 @router.get("/terminal/security/{ticker}", response_model=SecurityOverview)
 def terminal_security(
     ticker: str,
-    limit: int = Query(180, ge=30, le=365),
+    limit: int = Query(260, ge=30, le=1000),
 ) -> SecurityOverview:
     ensure_schema()
     ensure_market_data([ticker], source="security")

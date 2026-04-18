@@ -53,7 +53,7 @@ export function useSectorQuery(sector: string, enabled = true) {
   })
 }
 
-export function useSecurityQuery(ticker: string, limit = 260) {
+export function useSecurityQuery(ticker: string, limit = 1000) {
   return useQuery({
     queryKey: terminalKeys.security(ticker, limit),
     queryFn: () => api.terminal.security(ticker, limit),

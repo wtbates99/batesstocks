@@ -203,9 +203,11 @@ def test_sync_market_data_writes_rows_and_metadata(mock_download, mock_meta, mon
 
     with duckdb_connection() as conn:
         count = conn.execute("SELECT COUNT(*) FROM ticker_data WHERE Ticker = 'AAPL'").fetchone()[0]
+        raw_count = conn.execute("SELECT COUNT(*) FROM ohlcv_daily WHERE Ticker = 'AAPL'").fetchone()[0]
         meta = conn.execute("SELECT Sector FROM stock_information WHERE Ticker = 'AAPL'").fetchone()
 
-    assert count > 0
+    assert count == len(ohlcv)
+    assert raw_count == len(ohlcv)
     assert meta is not None
     assert meta[0] == "Technology"
 
@@ -284,6 +286,95 @@ def test_sync_market_data_incremental_syncs_stale_tickers(
 
     assert response.rows_written > 0
     mock_download.assert_called_once()
+
+
+@patch("backend.services.data_sync_service._fetch_company_metadata")
+@patch("backend.services.data_sync_service._download_ohlcv")
+def test_sync_market_data_preserves_history_outside_download_window(
+    mock_download, mock_meta, monkeypatch, tmp_path
+):
+    _reset_schema(monkeypatch, tmp_path)
+
+    from backend.services.data_sync_service import _compute_indicator_frame, _prepare_ticker_data_frame
+
+    full_history = _minimal_ohlcv_df("AAPL", n_days=400)
+    seeded_indicators = _prepare_ticker_data_frame(_compute_indicator_frame(full_history))
+    with duckdb_connection() as conn:
+        conn.register("seed_ohlcv", full_history)
+        conn.execute("""
+            INSERT INTO ohlcv_daily (Date, Ticker, Open, High, Low, Close, AdjClose, Volume)
+            SELECT Date, Ticker, Open, High, Low, Close, AdjClose, Volume
+            FROM seed_ohlcv
+        """)
+        conn.unregister("seed_ohlcv")
+        conn.register("seed_ticker_data", seeded_indicators)
+        conn.execute(
+            """
+            INSERT INTO ticker_data (Date, Ticker, Open, High, Low, Close, Volume,
+                                     Ticker_SMA_10, Ticker_EMA_10, Ticker_SMA_30, Ticker_EMA_30,
+                                     Ticker_RSI, Ticker_MACD, Ticker_MACD_Signal, Ticker_MACD_Diff,
+                                     Ticker_Bollinger_PBand, Ticker_MFI, Ticker_VWAP, Ticker_Tech_Score,
+                                     Ticker_SMA_50, Ticker_SMA_100, Ticker_SMA_200, Ticker_SMA_250,
+                                     Ticker_EMA_50, Ticker_EMA_100, Ticker_EMA_200, Ticker_Return_20D,
+                                     Ticker_Return_63D, Ticker_Return_126D, Ticker_Return_252D,
+                                     Ticker_52W_High, Ticker_52W_Low, Ticker_52W_Range_Pct,
+                                     Ticker_Avg_Volume_20D)
+            SELECT Date, Ticker, Open, High, Low, Close, Volume,
+                   Ticker_SMA_10, Ticker_EMA_10, Ticker_SMA_30, Ticker_EMA_30,
+                   Ticker_RSI, Ticker_MACD, Ticker_MACD_Signal, Ticker_MACD_Diff,
+                   Ticker_Bollinger_PBand, Ticker_MFI, Ticker_VWAP, Ticker_Tech_Score,
+                   Ticker_SMA_50, Ticker_SMA_100, Ticker_SMA_200, Ticker_SMA_250,
+                   Ticker_EMA_50, Ticker_EMA_100, Ticker_EMA_200, Ticker_Return_20D,
+                   Ticker_Return_63D, Ticker_Return_126D, Ticker_Return_252D,
+                   Ticker_52W_High, Ticker_52W_Low, Ticker_52W_Range_Pct,
+                   Ticker_Avg_Volume_20D
+            FROM seed_ticker_data
+            """
+        )
+        conn.unregister("seed_ticker_data")
+
+    partial_refresh = full_history.iloc[-300:].copy()
+    partial_refresh.loc[partial_refresh.index[-1], "Close"] += 5
+    partial_refresh.loc[partial_refresh.index[-1], "AdjClose"] += 5
+    mock_download.return_value = partial_refresh
+    mock_meta.return_value = pd.DataFrame(
+        [
+            {
+                "Ticker": "AAPL",
+                "FullName": "Apple Inc.",
+                "ShortName": "Apple",
+                "Sector": "Technology",
+                "Subsector": None,
+                "MarketCap": None,
+                "Exchange": None,
+                "Currency": None,
+                "Website": None,
+                "QuoteType": None,
+            }
+        ]
+    )
+
+    response = sync_market_data(["AAPL"], years=2, source="manual")
+
+    with duckdb_connection() as conn:
+        ticker_count = conn.execute(
+            "SELECT COUNT(*) FROM ticker_data WHERE Ticker = 'AAPL'"
+        ).fetchone()[0]
+        raw_count = conn.execute(
+            "SELECT COUNT(*) FROM ohlcv_daily WHERE Ticker = 'AAPL'"
+        ).fetchone()[0]
+        oldest = conn.execute(
+            "SELECT MIN(Date)::TEXT FROM ticker_data WHERE Ticker = 'AAPL'"
+        ).fetchone()[0]
+        latest_close = conn.execute(
+            "SELECT Close FROM ticker_data WHERE Ticker = 'AAPL' ORDER BY Date DESC LIMIT 1"
+        ).fetchone()[0]
+
+    assert response.rows_written == len(partial_refresh)
+    assert ticker_count == len(full_history)
+    assert raw_count == len(full_history)
+    assert oldest.startswith(str(full_history["Date"].min().date()))
+    assert latest_close == partial_refresh.iloc[-1]["Close"]
 
 
 # ── rebuild_indicator_cache ──────────────────────────────────────────────────
