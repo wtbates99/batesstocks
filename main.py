@@ -25,6 +25,7 @@ from backend.services.data_sync_service import (
     has_market_data,
     sync_market_data,
 )
+from backend.services.quote_cache import fetch_live_prices
 from backend.services.sync_scheduler import MarketSyncScheduler
 
 load_dotenv()
@@ -167,15 +168,11 @@ def search(
     return [SearchResult(ticker=row[0], name=row[1]) for row in rows]
 
 
-def _read_latest_prices(tickers: list[str]) -> LivePrices:
-    cleaned = [ticker.strip().upper() for ticker in tickers if ticker.strip()]
-    if not cleaned:
-        return LivePrices(prices={}, timestamp="")
-    try:
-        ensure_market_data(cleaned, source="live_prices")
-    except Exception as exc:  # pragma: no cover - network/provider dependent
-        logger.warning("Live price bootstrap sync failed: %s", exc)
-    placeholders = ", ".join(["?"] * len(cleaned))
+def _read_db_closes(tickers: list[str]) -> dict[str, float | None]:
+    """Fallback to the most recent daily Close from ticker_data when the live fetch fails."""
+    if not tickers:
+        return {}
+    placeholders = ", ".join(["?"] * len(tickers))
     with duckdb_connection(read_only=True) as conn:
         rows = conn.execute(
             f"""
@@ -188,18 +185,29 @@ def _read_latest_prices(tickers: list[str]) -> LivePrices:
                 FROM ticker_data
                 WHERE Ticker IN ({placeholders})
             )
-            SELECT Ticker, Close, Date
-            FROM ranked
-            WHERE rn = 1
+            SELECT Ticker, Close FROM ranked WHERE rn = 1
             """,
-            cleaned,
+            tickers,
         ).fetchall()
-    timestamp = ""
-    prices: dict[str, float | None] = {ticker: None for ticker in cleaned}
-    for ticker, close, date in rows:
-        prices[str(ticker)] = None if close is None else float(close)
-        timestamp = max(timestamp, str(date))
-    return LivePrices(prices=prices, timestamp=timestamp)
+    return {str(t): (None if c is None else float(c)) for t, c in rows}
+
+
+def _read_latest_prices(tickers: list[str]) -> LivePrices:
+    from datetime import UTC, datetime
+
+    cleaned = [ticker.strip().upper() for ticker in tickers if ticker.strip()]
+    if not cleaned:
+        return LivePrices(prices={}, timestamp="")
+    try:
+        ensure_market_data(cleaned, source="live_prices")
+    except Exception as exc:  # pragma: no cover - network/provider dependent
+        logger.warning("Live price bootstrap sync failed: %s", exc)
+    live = fetch_live_prices(cleaned)
+    fallback = _read_db_closes([t for t, p in live.items() if p is None])
+    prices: dict[str, float | None] = {
+        t: live.get(t) if live.get(t) is not None else fallback.get(t) for t in cleaned
+    }
+    return LivePrices(prices=prices, timestamp=datetime.now(UTC).isoformat())
 
 
 @app.get("/live-prices", response_model=LivePrices)
@@ -259,7 +267,7 @@ async def _call_anthropic(payload: AiChatRequest) -> str:
     key = payload.api_key or os.getenv("ANTHROPIC_API_KEY", "")
     if not key:
         raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY is not configured")
-    model = payload.model or os.getenv("ANTHROPIC_MODEL", "claude-3-5-haiku-latest")
+    model = payload.model or os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5")
     system = _SYSTEM_PROMPT
     messages = [message.model_dump() for message in payload.messages]
     async with httpx.AsyncClient(timeout=60.0) as client:
@@ -359,9 +367,25 @@ async def ai_chat(payload: AiChatRequest) -> dict[str, str]:
         return {"content": _fallback_ai_response(payload)}
 
 
+# Path prefixes owned by the API — anything under these should 404 if unmatched
+# instead of falling through to the SPA shell (which masks typos and broken clients).
+_API_PREFIXES = (
+    "ai/",
+    "api/",
+    "health/",
+    "live-prices",
+    "search",
+    "strategies/",
+    "system/",
+    "terminal/",
+)
+
+
 @app.get("/", response_class=HTMLResponse)
 @app.get("/{full_path:path}", response_class=HTMLResponse)
 def serve_frontend(full_path: str = "") -> HTMLResponse:
+    if any(full_path == p.rstrip("/") or full_path.startswith(p) for p in _API_PREFIXES):
+        raise HTTPException(status_code=404, detail=f"Unknown API route: /{full_path}")
     index_html = _frontend_index_html()
     if index_html.is_file():
         return HTMLResponse(index_html.read_text(encoding="utf-8"))

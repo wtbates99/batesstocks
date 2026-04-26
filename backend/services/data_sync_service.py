@@ -79,9 +79,23 @@ def has_market_data() -> bool:
 
 
 def get_data_staleness_days() -> int | None:
-    """Returns how many calendar days since the latest market data row, or None if no data."""
+    """Calendar days since the median ticker's latest row, or None if no data.
+
+    Uses the median (not MAX) so that one freshly-synced ticker doesn't hide a stale
+    universe — which would otherwise prevent the startup auto-sync from firing when
+    the database is broadly out-of-date.
+    """
     with duckdb_connection(read_only=True) as conn:
-        row = conn.execute("SELECT MAX(Date) FROM ticker_data").fetchone()
+        row = conn.execute(
+            """
+            SELECT MEDIAN(latest) AS median_latest
+            FROM (
+                SELECT MAX(Date) AS latest
+                FROM ticker_data
+                GROUP BY Ticker
+            )
+            """
+        ).fetchone()
     if not row or row[0] is None:
         return None
     from datetime import date as _date
@@ -138,16 +152,70 @@ def get_ticker_latest_dates(tickers: list[str] | None = None) -> dict[str, str]:
 def ensure_market_data(
     tickers: list[str] | None = None, years: int = 5, source: str = "hydrate"
 ) -> SyncResponse | None:
-    missing = get_missing_tickers(tickers)
-    if not missing:
+    """Fetch tickers that are either fully missing or whose latest row is older than the freshness threshold.
+
+    Missing tickers are bootstrapped with the full `years` window. Stale tickers go through
+    the incremental path which reuses prior history for indicator warmup.
+    """
+    universe = _normalize_tickers(tickers)
+    if not universe:
         return None
-    return sync_market_data(missing, years=_normalize_years(years), source=source)
+
+    fresh_cutoff = (_utc_now() - timedelta(days=_FRESH_THRESHOLD_DAYS)).date()
+    latest_dates = get_ticker_latest_dates(universe)
+
+    missing = [t for t in universe if t not in latest_dates]
+    stale = [
+        t
+        for t in universe
+        if t in latest_dates
+        and pd.to_datetime(latest_dates[t]).date() < fresh_cutoff
+    ]
+
+    if not missing and not stale:
+        return None
+
+    response: SyncResponse | None = None
+    if missing:
+        response = sync_market_data(
+            missing, years=_normalize_years(years), source=f"{source}_missing"
+        )
+    if stale:
+        response = sync_market_data(
+            stale, years=_normalize_years(years), source=f"{source}_stale"
+        )
+    return response
+
+
+_BOOTSTRAP_THREAD: object | None = None
 
 
 def ensure_default_universe_data(years: int = 5) -> SyncResponse | None:
+    """Trigger a bootstrap of the default universe in a background thread when the DB is sparse.
+
+    Synchronous syncs inside request handlers can take minutes for a 500-ticker bootstrap.
+    Instead, fire-and-forget on a daemon thread so the request returns immediately with
+    whatever data already exists. The startup sync handles the cold-start case anyway.
+    """
+    global _BOOTSTRAP_THREAD
     if get_tracked_ticker_count() >= DEFAULT_UNIVERSE_MIN_SIZE:
         return None
-    return ensure_market_data(None, years=_normalize_years(years), source="bootstrap")
+    import threading
+
+    existing = _BOOTSTRAP_THREAD
+    if existing is not None and getattr(existing, "is_alive", lambda: False)():
+        return None
+
+    def _run() -> None:
+        try:
+            ensure_market_data(None, years=_normalize_years(years), source="bootstrap")
+        except Exception:
+            pass
+
+    thread = threading.Thread(target=_run, name="universe-bootstrap", daemon=True)
+    _BOOTSTRAP_THREAD = thread
+    thread.start()
+    return None
 
 
 def _download_ohlcv(tickers: list[str], years: int, start_date: str | None = None) -> pd.DataFrame:
@@ -393,12 +461,51 @@ def _fetch_company_metadata(tickers: list[str]) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-# Sources that should use incremental (skip-fresh) logic instead of full re-download
+# Sources that should use incremental (skip-fresh + indicator warmup) logic
+# instead of a full re-download. Anything ending in `_stale` is a per-request hydrate
+# of already-tracked-but-stale tickers, which always wants the incremental path.
 _INCREMENTAL_SOURCES = frozenset({"scheduled", "startup"})
-# Minimum indicator lookback needed for long-window indicators (SMA_250 = ~1 year)
-_INDICATOR_LOOKBACK_DAYS = 270
+# Buffer days included before the oldest stale date — protects against backdated revisions
+# from the data provider and ensures we always re-write a couple of days for safety.
+_INCREMENTAL_DOWNLOAD_BUFFER_DAYS = 7
+# When merging existing OHLCV for indicator warmup, pull this many days before
+# incremental_start so long-window indicators (SMA_250 / Return_252D) have a full
+# window of prior closes. 350d ≈ 1.4y, comfortably above the 252-day requirement.
+_INDICATOR_WARMUP_DAYS = 350
 # Tickers with data this many days old (or newer) are considered fresh and skipped
 _FRESH_THRESHOLD_DAYS = 2
+
+
+def _is_incremental_source(source: str) -> bool:
+    return source in _INCREMENTAL_SOURCES or source.endswith("_stale")
+
+
+def _load_warmup_ohlcv(tickers: list[str], before_date: str) -> pd.DataFrame:
+    """Fetch existing OHLCV rows from `before_date - _INDICATOR_WARMUP_DAYS` up to (exclusive) `before_date`.
+
+    Used to splice prior history onto a fresh incremental download so long-window
+    indicators (SMA_250 etc.) compute against a full warmup, instead of the short
+    download slice in isolation.
+    """
+    if not tickers:
+        return pd.DataFrame()
+    warmup_start = (
+        pd.to_datetime(before_date) - pd.Timedelta(days=_INDICATOR_WARMUP_DAYS)
+    ).date().isoformat()
+    placeholders = ", ".join(["?"] * len(tickers))
+    sql = f"""
+        SELECT Date, Ticker, Open, High, Low, Close, AdjClose, Volume
+        FROM ohlcv_daily
+        WHERE Ticker IN ({placeholders}) AND Date >= ? AND Date < ?
+        ORDER BY Ticker, Date
+    """
+    with duckdb_connection(read_only=True) as conn:
+        warmup = conn.execute(sql, [*tickers, warmup_start, before_date]).df()
+    if warmup.empty:
+        return warmup
+    warmup["Date"] = pd.to_datetime(warmup["Date"])
+    warmup["Ticker"] = warmup["Ticker"].astype(str).str.upper()
+    return warmup
 
 
 def sync_market_data(
@@ -411,7 +518,7 @@ def sync_market_data(
 
         # Incremental sources: skip already-fresh tickers and use a tight download window
         incremental_start: str | None = None
-        if source in _INCREMENTAL_SOURCES and universe:
+        if _is_incremental_source(source) and universe:
             fresh_cutoff = (_utc_now() - timedelta(days=_FRESH_THRESHOLD_DAYS)).date()
             latest_dates = get_ticker_latest_dates(universe)
             stale = [
@@ -434,12 +541,11 @@ def sync_market_data(
                     metadata_rows=0,
                 )
             universe = stale
-            # Download only enough history to recompute long-window indicators correctly
             stale_dates = [pd.to_datetime(latest_dates[t]) for t in stale if t in latest_dates]
             if stale_dates:
                 oldest_stale = min(stale_dates).date()
                 incremental_start = (
-                    oldest_stale - timedelta(days=_INDICATOR_LOOKBACK_DAYS)
+                    oldest_stale - timedelta(days=_INCREMENTAL_DOWNLOAD_BUFFER_DAYS)
                 ).isoformat()
 
         sync_status_tracker.begin(
@@ -478,7 +584,28 @@ def sync_market_data(
                 phase="calculating",
                 detail="Recomputing indicators and long-horizon trend metrics.",
             )
-            indicator_frame = _compute_indicator_frame(raw)
+            if incremental_start is not None:
+                # Splice prior OHLCV onto the fresh download so long-window indicators
+                # (SMA_250 / Return_252D / ...) have proper warmup. Without this, the
+                # short download slice computes indicators in isolation and produces
+                # NaN for the trailing year, which then overwrites correct values.
+                warmup = _load_warmup_ohlcv(universe, incremental_start)
+                if warmup.empty:
+                    # No prior OHLCV — fall through to the standard full compute. The
+                    # write loop will overwrite whatever range it covers.
+                    indicator_frame = _compute_indicator_frame(raw)
+                else:
+                    merged_raw = (
+                        pd.concat([warmup, raw], ignore_index=True)
+                        .sort_values(["Ticker", "Date"])
+                        .reset_index(drop=True)
+                    )
+                    indicator_frame = _compute_indicator_frame(merged_raw)
+                    # Persist only the new range — warmup rows are already in ticker_data.
+                    cutoff_dt = pd.to_datetime(incremental_start)
+                    indicator_frame = indicator_frame[indicator_frame["Date"] >= cutoff_dt].copy()
+            else:
+                indicator_frame = _compute_indicator_frame(raw)
         except Exception as exc:
             sync_status_tracker.fail(f"Indicator computation failed: {exc}")
             raise
