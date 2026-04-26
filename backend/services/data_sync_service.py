@@ -168,8 +168,7 @@ def ensure_market_data(
     stale = [
         t
         for t in universe
-        if t in latest_dates
-        and pd.to_datetime(latest_dates[t]).date() < fresh_cutoff
+        if t in latest_dates and pd.to_datetime(latest_dates[t]).date() < fresh_cutoff
     ]
 
     if not missing and not stale:
@@ -181,9 +180,7 @@ def ensure_market_data(
             missing, years=_normalize_years(years), source=f"{source}_missing"
         )
     if stale:
-        response = sync_market_data(
-            stale, years=_normalize_years(years), source=f"{source}_stale"
-        )
+        response = sync_market_data(stale, years=_normalize_years(years), source=f"{source}_stale")
     return response
 
 
@@ -490,8 +487,8 @@ def _load_warmup_ohlcv(tickers: list[str], before_date: str) -> pd.DataFrame:
     if not tickers:
         return pd.DataFrame()
     warmup_start = (
-        pd.to_datetime(before_date) - pd.Timedelta(days=_INDICATOR_WARMUP_DAYS)
-    ).date().isoformat()
+        (pd.to_datetime(before_date) - pd.Timedelta(days=_INDICATOR_WARMUP_DAYS)).date().isoformat()
+    )
     placeholders = ", ".join(["?"] * len(tickers))
     sql = f"""
         SELECT Date, Ticker, Open, High, Low, Close, AdjClose, Volume

@@ -203,7 +203,9 @@ def test_sync_market_data_writes_rows_and_metadata(mock_download, mock_meta, mon
 
     with duckdb_connection() as conn:
         count = conn.execute("SELECT COUNT(*) FROM ticker_data WHERE Ticker = 'AAPL'").fetchone()[0]
-        raw_count = conn.execute("SELECT COUNT(*) FROM ohlcv_daily WHERE Ticker = 'AAPL'").fetchone()[0]
+        raw_count = conn.execute(
+            "SELECT COUNT(*) FROM ohlcv_daily WHERE Ticker = 'AAPL'"
+        ).fetchone()[0]
         meta = conn.execute("SELECT Sector FROM stock_information WHERE Ticker = 'AAPL'").fetchone()
 
     assert count == len(ohlcv)
@@ -295,7 +297,10 @@ def test_sync_market_data_preserves_history_outside_download_window(
 ):
     _reset_schema(monkeypatch, tmp_path)
 
-    from backend.services.data_sync_service import _compute_indicator_frame, _prepare_ticker_data_frame
+    from backend.services.data_sync_service import (
+        _compute_indicator_frame,
+        _prepare_ticker_data_frame,
+    )
 
     full_history = _minimal_ohlcv_df("AAPL", n_days=400)
     seeded_indicators = _prepare_ticker_data_frame(_compute_indicator_frame(full_history))
@@ -503,9 +508,20 @@ def test_ensure_market_data_refreshes_when_present_but_stale(
 
     mock_download.return_value = _minimal_ohlcv_df("AAPL")
     mock_meta.return_value = pd.DataFrame(
-        [{"Ticker": "AAPL", "FullName": "Apple Inc.", "ShortName": "Apple",
-          "Sector": None, "Subsector": None, "MarketCap": None, "Exchange": None,
-          "Currency": None, "Website": None, "QuoteType": None}]
+        [
+            {
+                "Ticker": "AAPL",
+                "FullName": "Apple Inc.",
+                "ShortName": "Apple",
+                "Sector": None,
+                "Subsector": None,
+                "MarketCap": None,
+                "Exchange": None,
+                "Currency": None,
+                "Website": None,
+                "QuoteType": None,
+            }
+        ]
     )
 
     result = ensure_market_data(["AAPL"], years=2)
