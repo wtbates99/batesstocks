@@ -38,6 +38,7 @@ from backend.services.data_sync_service import (
 )
 from backend.services.earnings_service import get_earnings
 from backend.services.news_service import get_news
+from backend.services.quote_cache import fundamentals_cache, intraday_cache
 from backend.services.sync_status import sync_status_tracker
 from backend.services.terminal_service import (
     get_market_monitor,
@@ -77,13 +78,7 @@ def terminal_security(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@router.get("/terminal/security/{ticker}/intraday", response_model=IntradayResponse)
-def terminal_security_intraday(
-    ticker: str,
-    interval: str = Query("5m", pattern="^(1m|5m|15m|30m|1h)$"),
-    period: str = Query("1d", pattern="^(1d|5d|1mo)$"),
-) -> IntradayResponse:
-    symbol = ticker.strip().upper()
+def _fetch_intraday(symbol: str, interval: str, period: str) -> IntradayResponse:
     try:
         frame = yf.download(
             tickers=symbol,
@@ -100,14 +95,13 @@ def terminal_security_intraday(
 
     # yfinance returns MultiIndex columns (Ticker, Price) — flatten before iterating
     if isinstance(frame.columns, pd.MultiIndex):
-        frame.columns = frame.columns.get_level_values(1)  # keep Price level: Open/High/…
+        frame.columns = frame.columns.get_level_values(1)
 
     bars: list[IntradayBar] = []
     for ts, row in frame.iterrows():
-        unix = int(ts.timestamp())
         bars.append(
             IntradayBar(
-                time=unix,
+                time=int(ts.timestamp()),
                 open=float(row["Open"]),
                 high=float(row["High"]),
                 low=float(row["Low"]),
@@ -118,9 +112,20 @@ def terminal_security_intraday(
     return IntradayResponse(ticker=symbol, interval=interval, period=period, bars=bars)
 
 
-@router.get("/terminal/security/{ticker}/fundamentals", response_model=Fundamentals)
-def terminal_security_fundamentals(ticker: str) -> Fundamentals:
+@router.get("/terminal/security/{ticker}/intraday", response_model=IntradayResponse)
+def terminal_security_intraday(
+    ticker: str,
+    interval: str = Query("5m", pattern="^(1m|5m|15m|30m|1h)$"),
+    period: str = Query("1d", pattern="^(1d|5d|1mo)$"),
+) -> IntradayResponse:
     symbol = ticker.strip().upper()
+    return intraday_cache.get_or_compute(
+        (symbol, interval, period),
+        lambda: _fetch_intraday(symbol, interval, period),
+    )
+
+
+def _fetch_fundamentals(symbol: str) -> Fundamentals:
     try:
         info = yf.Ticker(symbol).info
     except Exception as exc:
@@ -167,6 +172,12 @@ def terminal_security_fundamentals(ticker: str) -> Fundamentals:
         total_revenue=_f("totalRevenue"),
         ebitda=_f("ebitda"),
     )
+
+
+@router.get("/terminal/security/{ticker}/fundamentals", response_model=Fundamentals)
+def terminal_security_fundamentals(ticker: str) -> Fundamentals:
+    symbol = ticker.strip().upper()
+    return fundamentals_cache.get_or_compute(symbol, lambda: _fetch_fundamentals(symbol))
 
 
 @router.get("/terminal/snapshots", response_model=SecuritySnapshotResponse)

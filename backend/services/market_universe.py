@@ -3,9 +3,6 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
-import pandas as pd
-
-SP500_SOURCE_URL = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
 STATIC_SP500_PATH = Path(__file__).resolve().parent.parent / "data" / "sp500_constituents.txt"
 
 INDEX_AND_SECTOR_FUNDS = [
@@ -99,26 +96,12 @@ def _load_static_sp500_constituents() -> tuple[str, ...]:
 
 @lru_cache(maxsize=1)
 def get_sp500_constituents() -> tuple[str, ...]:
-    try:
-        tables = pd.read_html(SP500_SOURCE_URL)
-    except Exception:
-        tables = []
+    """Return the S&P 500 constituents from the bundled static list.
 
-    for table in tables:
-        if "Symbol" not in table.columns:
-            continue
-        symbols = tuple(
-            sorted(
-                {
-                    _normalize_symbol(str(value))
-                    for value in table["Symbol"].dropna().tolist()
-                    if str(value).strip()
-                }
-            )
-        )
-        if symbols:
-            return symbols
-
+    The previous implementation scraped Wikipedia on every cold start with no timeout,
+    which could stall the first sync by tens of seconds and silently fall back to the
+    static file anyway. Refresh by replacing data/sp500_constituents.txt.
+    """
     return _load_static_sp500_constituents()
 
 
