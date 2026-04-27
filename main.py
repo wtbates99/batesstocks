@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hmac
 import json
 import logging
 import os
@@ -10,7 +11,7 @@ from pathlib import Path
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -40,7 +41,9 @@ logging.basicConfig(
 CORS_ORIGINS = os.getenv(
     "CORS_ORIGINS",
     "http://localhost:8000,http://localhost:3000,https://batesstocks.com,https://www.batesstocks.com",
-).split(",")
+)
+CORS_ORIGINS = [origin.strip() for origin in CORS_ORIGINS.split(",") if origin.strip()]
+CORS_ALLOW_CREDENTIALS = "*" not in CORS_ORIGINS
 _SYNC_LOCK = Lock()
 
 
@@ -59,6 +62,31 @@ class AiChatRequest(BaseModel):
     api_key: str | None = None
     messages: list[AiMessage]
     context: dict[str, object] | None = None
+
+
+def _provided_token(authorization: str | None, explicit_token: str | None) -> str:
+    if authorization and authorization.lower().startswith("bearer "):
+        return authorization.split(" ", 1)[1].strip()
+    return explicit_token or ""
+
+
+def require_ai_chat_access(
+    payload: AiChatRequest,
+    authorization: str | None,
+    x_ai_token: str | None,
+) -> None:
+    if payload.api_key:
+        return
+    if os.getenv("ALLOW_PUBLIC_SERVER_AI", "false").lower() == "true":
+        return
+
+    expected = os.getenv("AI_CHAT_TOKEN", "")
+    if not expected:
+        raise HTTPException(status_code=503, detail="AI_CHAT_TOKEN is not configured")
+
+    provided = _provided_token(authorization, x_ai_token)
+    if not provided or not hmac.compare_digest(provided, expected):
+        raise HTTPException(status_code=403, detail="Invalid AI chat token")
 
 
 def _frontend_build_dir() -> Path:
@@ -128,7 +156,7 @@ app = FastAPI(lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
-    allow_credentials=True,
+    allow_credentials=CORS_ALLOW_CREDENTIALS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -352,7 +380,12 @@ def _fallback_ai_response(payload: AiChatRequest) -> str:
 
 
 @app.post("/ai/chat")
-async def ai_chat(payload: AiChatRequest) -> dict[str, str]:
+async def ai_chat(
+    payload: AiChatRequest,
+    authorization: str | None = Header(default=None),
+    x_ai_token: str | None = Header(default=None),
+) -> dict[str, str]:
+    require_ai_chat_access(payload, authorization, x_ai_token)
     provider = (payload.provider or os.getenv("AI_PROVIDER", "ollama")).lower()
     try:
         if provider == "openai":

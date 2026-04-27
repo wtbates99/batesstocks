@@ -1,186 +1,39 @@
-# BATESSTOCKS
+# BatesStocks
 
-BATESSTOCKS is a self-hosted, Bloomberg-style market terminal built for a constrained home-server deployment. The active system is a FastAPI backend backed by DuckDB and `yfinance`, with a React 18 + TypeScript + Vite frontend served by FastAPI in production.
+BatesStocks is a self-hosted market analytics terminal for watchlists, market
+monitoring, technical analysis, screening, backtesting, news review, and
+AI-assisted research. The backend is a FastAPI service backed by DuckDB, and the
+frontend is a dense React workspace designed for long research sessions on a
+home-server deployment.
 
-The product is intentionally dense, keyboard-first, and operator-oriented:
-- edge-to-edge terminal shell
-- market monitor and ranked tables
-- named watchlists
-- side-by-side compare workspace
-- security drilldowns
-- sector drilldowns
-- news monitor
-- strategy screener
-- backtest analytics
-- integrated AI panel
+Live demo: [stocks.palanbates.com](https://stocks.palanbates.com)
 
-## Stack
+The demo is not a brokerage product, investment service, or source of financial
+advice. Run your own instance if you want persistent data or private research
+state.
 
-Backend:
-- FastAPI
-- DuckDB
-- Pandas / NumPy
-- `yfinance`
+## Capabilities
 
-Frontend:
-- React 18
-- TypeScript
-- Vite
-- Zustand
-- TanStack Query
-- `lightweight-charts`
-- `recharts`
+- Pulls market data from `yfinance` into a local DuckDB analytics file.
+- Builds dashboards for quotes, movers, breadth, sectors, watchlists, and recent
+  snapshots.
+- Provides security-level research views with charts, overlays, signals, recent
+  bars, news, and related names.
+- Supports strategy screening and backtest workflows with saved local state.
+- Includes an AI analyst panel that can use Ollama, OpenAI, or Anthropic when
+  configured.
+- Creates database backups and can bootstrap data on an empty startup.
 
-## Product Surface
-
-Routes:
-- `/` launchpad dashboard
-- `/monitor` market monitor
-- `/watchlists` watchlist monitor
-- `/compare` compare workspace
-- `/news` news monitor
-- `/sector/:sector` sector drilldown
-- `/security/:ticker` security detail
-- `/screener` screener
-- `/backtest` backtest analytics
-
-Primary backend endpoints:
-- `GET /search`
-- `GET|POST /live-prices`
-- `POST /ai/chat`
-- `GET /news`
-- `GET /terminal/workspace`
-- `GET /terminal/monitor`
-- `GET /terminal/snapshots`
-- `GET /terminal/sector/{sector}`
-- `GET /terminal/security/{ticker}`
-- `POST /strategies/backtest`
-- `POST /strategies/screen`
-- `POST /system/sync`
-- `GET /system/sync/status`
-- `GET /system/backups`
-- `POST /system/backups/create`
-- `GET /health/live`
-- `GET /health/ready`
-
-## Runtime Behavior
-
-- DuckDB is the single analytics store.
-- SQLite and Redis are not part of the active runtime.
-- The app is built for Docker deployment and parent-stack consumption through Watchtower.
-- First boot may start with an empty DuckDB.
-- If `AUTO_SYNC_ON_START=true`, the backend syncs a default universe automatically on empty boot.
-- If a requested ticker is missing, the backend may sync it on demand before returning terminal data.
-- `SPY` is the default landing symbol.
-
-Default bootstrap universe:
-- `SPY`
-- `QQQ`
-- `IWM`
-- `AAPL`
-- `MSFT`
-- `NVDA`
-- `AMZN`
-- `META`
-- `GOOGL`
-- `TSLA`
-- `JPM`
-- `XOM`
-
-## Terminal Screens
-
-### Launchpad
-Dense dashboard with workspace stats, live pulse modules, watchlist board, recent symbols, ranked movers, and integrated news triage.
-
-### Market Monitor
-Broad-market destination with:
-- market breadth
-- sector matrix
-- leaders / laggards
-- most active
-- volume surge
-- RSI extremes
-- market-wide news
-
-### Watchlists
-Persistent named watchlists with:
-- create / rename / delete
-- dense monitor table
-- sector split
-- compare handoff
-- watchlist news
-
-### Compare
-Research workspace with:
-- normalized return chart
-- side-by-side snapshot table
-- saved compare sets
-- compare-linked news
-
-### Security Detail
-Single-name destination with:
-- quote strip
-- interactive chart
-- overlay toggles
-- signal stack
-- return ladder
-- related names
-- recent bars
-- security news
-- sector jump-out
-
-### Sector Drilldown
-Group-level monitor with:
-- sector summary
-- sector leaders / laggards
-- full member table
-- sector-linked news
-
-### Screener
-Rule-stack strategy screen with:
-- entry and exit stacks
-- saved screens
-- result summary
-- watchlist / compare / backtest handoff
-
-### Backtest
-Research workstation with:
-- scorecard
-- equity curve
-- benchmark-relative edge
-- executed trades
-- current matches
-- saved runs
-- assumptions summary
-
-## AI Panel
-
-The AI panel is embedded into the terminal rather than standing alone. It supports:
-- security analysis
-- strategy drafting
-- backtest interpretation
-- market and sector context questions
-
-Providers supported:
-- Ollama
-- OpenAI
-- Anthropic
-
-If no provider is configured or reachable, the app falls back to a local analyst-style response instead of breaking the terminal flow.
-
-## Docker
-
-Build:
+## Run with Docker
 
 ```bash
-docker build -t batesstocks:test .
+git clone https://github.com/wtbates99/batesstocks.git
+cd batesstocks
+mkdir -p data backups
+docker build -t batesstocks:local .
 ```
 
-Run:
-
 ```bash
-mkdir -p ./data ./backups
-
 docker run --rm \
   -p 8000:8000 \
   -e DB_PATH=/app/data/stock_data.duckdb \
@@ -188,37 +41,10 @@ docker run --rm \
   -e AUTO_SYNC_ON_START=true \
   -v "$(pwd)/data:/app/data" \
   -v "$(pwd)/backups:/app/backups" \
-  batesstocks:test
+  batesstocks:local
 ```
 
-Health:
-
-```bash
-curl -sf http://127.0.0.1:8000/health/live
-curl -sf http://127.0.0.1:8000/health/ready
-```
-
-## Environment
-
-Key variables:
-
-| Variable | Default | Purpose |
-|---|---|---|
-| `DB_PATH` | `stock_data.duckdb` | DuckDB file path |
-| `BACKUP_DIR` | `<db dir>/backups` | Backup directory |
-| `PORT` | `8000` | Uvicorn port |
-| `AUTO_SYNC_ON_START` | `true` | Auto-bootstrap market data on empty boot |
-| `DUCKDB_MEMORY_LIMIT` | `2GB` | DuckDB memory cap |
-| `DUCKDB_THREADS` | `4` | DuckDB worker threads |
-| `OLLAMA_HOST` | `http://localhost:11434` | Ollama endpoint, local or cloud |
-| `OLLAMA_MODEL` | `llama3.1` | Default Ollama model |
-| `OLLAMA_API_KEY` | unset | Bearer token for Ollama cloud |
-| `OPENAI_API_KEY` | unset | Enables OpenAI chat |
-| `OPENAI_MODEL` | `gpt-5-mini` | Default OpenAI model |
-| `ANTHROPIC_API_KEY` | unset | Enables Anthropic chat |
-| `ANTHROPIC_MODEL` | `claude-3-5-haiku-latest` | Default Anthropic model |
-| `AI_PROVIDER` | `ollama` | Default AI provider |
-| `CORS_ORIGINS` | local + configured origins | Allowed origins |
+Open [http://localhost:8000](http://localhost:8000).
 
 ## Local Development
 
@@ -237,22 +63,45 @@ npm install
 npm run dev
 ```
 
-In production, FastAPI serves the built frontend. In development, run the backend and Vite separately.
+In development, run FastAPI and Vite separately. In production, FastAPI serves
+the built frontend.
+
+## Configuration
+
+Common environment variables:
+
+| Variable | Purpose |
+| --- | --- |
+| `DB_PATH` | DuckDB database path |
+| `BACKUP_DIR` | Backup directory |
+| `PORT` | Uvicorn port |
+| `AUTO_SYNC_ON_START` | Bootstrap market data on empty startup |
+| `DUCKDB_MEMORY_LIMIT` | DuckDB memory cap |
+| `DUCKDB_THREADS` | DuckDB worker threads |
+| `AI_PROVIDER` | Default AI provider |
+| `AI_CHAT_TOKEN` | Required token for server-side AI chat unless public AI is explicitly allowed |
+| `ALLOW_PUBLIC_SERVER_AI` | Local/demo opt-in for unauthenticated server-side AI chat |
+| `OLLAMA_HOST` | Ollama-compatible endpoint |
+| `OLLAMA_MODEL` | Ollama model name |
+| `OPENAI_API_KEY` | Enables OpenAI chat |
+| `ANTHROPIC_API_KEY` | Enables Anthropic chat |
+| `CORS_ORIGINS` | Allowed browser origins |
+| `SYSTEM_ADMIN_TOKEN` | Required token for system mutation endpoints |
+| `ALLOW_UNAUTHENTICATED_SYSTEM_MUTATIONS` | Local-only opt-in for unauthenticated system mutations |
 
 ## Validation
 
 Backend:
 
 ```bash
-.venv/bin/ruff check backend main.py tests
-.venv/bin/pytest tests/test_terminal_service.py tests/test_runtime.py tests/test_news_service.py --tb=short
+uv run ruff check backend main.py tests
+uv run pytest
 ```
 
 Frontend:
 
 ```bash
 cd frontend
-npm run lint
 npm run typecheck
 npm run build
 ```
@@ -260,22 +109,11 @@ npm run build
 Docker:
 
 ```bash
-docker build -t batesstocks:test .
+docker build -t batesstocks:local .
 ```
 
-## Deployment Contract
+## Notes
 
-This repo is intended to be consumed by a parent home-server stack that:
-- runs the container with Docker Compose
-- mounts persistent DuckDB storage
-- mounts backup storage
-- updates through Watchtower
-
-Recommended parent-stack contract:
-- mount `/app/data`
-- mount `/app/backups`
-- set `DB_PATH=/app/data/stock_data.duckdb`
-- set `BACKUP_DIR=/app/backups`
-- keep `AUTO_SYNC_ON_START=true` unless sync is handled externally
-
-If the parent stack still references old SQLite files or Redis sidecars from earlier versions of BATESSTOCKS, those references should be removed. They are obsolete in the current runtime.
+The product surface is actively changing. This README intentionally avoids
+route lists, endpoint inventories, and implementation maps that drift faster
+than the core setup and operating model.

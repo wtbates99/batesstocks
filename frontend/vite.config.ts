@@ -24,10 +24,18 @@ export default defineConfig({
     sourcemap: false,
     rollupOptions: {
       output: {
-        manualChunks: {
-          vendor: ['react', 'react-dom', 'react-router-dom'],
-          chartCore: ['lightweight-charts'],
-          chartAnalytics: ['recharts'],
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return undefined
+          if (id.includes('lightweight-charts')) return 'chartCore'
+          if (id.includes('recharts')) return 'chartAnalytics'
+          if (
+            id.includes('react') ||
+            id.includes('react-dom') ||
+            id.includes('react-router-dom')
+          ) {
+            return 'vendor'
+          }
+          return undefined
         },
       },
     },
