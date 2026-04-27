@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import hmac
 import json
+import os
 from datetime import UTC, datetime
 
 import pandas as pd
 import yfinance as yf
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 
 from backend.core.duckdb import duckdb_connection, ensure_schema
 from backend.models import (
@@ -51,6 +53,24 @@ from backend.services.terminal_service import (
 )
 
 router = APIRouter(tags=["terminal"])
+
+
+def require_system_admin(
+    authorization: str | None = Header(default=None),
+    x_admin_token: str | None = Header(default=None),
+) -> None:
+    if os.getenv("ALLOW_UNAUTHENTICATED_SYSTEM_MUTATIONS", "false").lower() == "true":
+        return
+
+    expected = os.getenv("SYSTEM_ADMIN_TOKEN", "")
+    if not expected:
+        raise HTTPException(status_code=503, detail="SYSTEM_ADMIN_TOKEN is not configured")
+
+    provided = x_admin_token or ""
+    if authorization and authorization.lower().startswith("bearer "):
+        provided = authorization.split(" ", 1)[1].strip()
+    if not provided or not hmac.compare_digest(provided, expected):
+        raise HTTPException(status_code=403, detail="Invalid system admin token")
 
 
 def _utc_now() -> str:
@@ -254,7 +274,10 @@ def backup_status(retention_count: int = Query(7, ge=1, le=90)) -> BackupStatus:
 
 
 @router.post("/system/backups/create", response_model=BackupCreateResponse)
-def backup_create(request: BackupCreateRequest) -> BackupCreateResponse:
+def backup_create(
+    request: BackupCreateRequest,
+    _admin: None = Depends(require_system_admin),
+) -> BackupCreateResponse:
     ensure_schema()
     return create_backup(
         compress=request.compress,
@@ -269,7 +292,10 @@ def system_sync_status() -> SyncStatus:
 
 
 @router.post("/system/sync", response_model=SyncResponse)
-def system_sync(request: SyncRequest) -> SyncResponse:
+def system_sync(
+    request: SyncRequest,
+    _admin: None = Depends(require_system_admin),
+) -> SyncResponse:
     ensure_schema()
     try:
         return sync_market_data(request.tickers, years=request.years, source="manual")
@@ -341,6 +367,7 @@ def system_rebuild_indicators(
     tickers: str = Query(
         "", max_length=1024, description="Comma-separated tickers; empty = full universe"
     ),
+    _admin: None = Depends(require_system_admin),
 ) -> dict[str, object]:
     """Trigger an indicator-only re-sync from existing raw OHLCV data.
 
@@ -363,7 +390,10 @@ def system_rebuild_indicators(
 
 
 @router.post("/system/rebuild/security/{ticker}")
-def system_rebuild_security(ticker: str) -> dict[str, object]:
+def system_rebuild_security(
+    ticker: str,
+    _admin: None = Depends(require_system_admin),
+) -> dict[str, object]:
     """Repair a single ticker's data — re-syncs and recomputes indicators."""
     ensure_schema()
     symbol = ticker.strip().upper()
