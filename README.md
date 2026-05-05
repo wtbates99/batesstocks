@@ -3,8 +3,7 @@
 BatesStocks is a self-hosted market analytics terminal for watchlists, market
 monitoring, technical analysis, screening, backtesting, news review, and
 AI-assisted research. The backend is a FastAPI service backed by DuckDB, and the
-frontend is a dense React workspace designed for long research sessions on a
-home-server deployment.
+frontend is a dense React workspace designed for long research sessions.
 
 Live demo: [stocks.palanbates.com](https://stocks.palanbates.com)
 
