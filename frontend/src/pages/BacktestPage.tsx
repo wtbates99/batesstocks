@@ -51,9 +51,15 @@ export default function BacktestPage() {
 
   const result = backtest.data
   const currentMatches = result?.current_matches ?? screen.data?.matches ?? []
-  const newsTickers = Array.from(
-    new Set([draft.ticker.toUpperCase(), ...currentMatches.slice(0, 4).map((match) => match.ticker)]),
-  ).filter(Boolean)
+  const newsTickers = useMemo(
+    () => Array.from(
+      new Set([
+        draft.ticker.toUpperCase(),
+        ...currentMatches.slice(0, 4).map((match) => match.ticker),
+      ]),
+    ).filter(Boolean),
+    [currentMatches, draft.ticker],
+  )
   const news = useNewsQuery(newsTickers, 'backtest', 8, newsTickers.length > 0)
   const chartData = useMemo(
     () =>

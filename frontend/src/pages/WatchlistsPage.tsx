@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { Fragment, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useShallow } from 'zustand/react/shallow'
 import NewsPanel from '../components/news/NewsPanel'
@@ -76,14 +76,38 @@ export default function WatchlistsPage() {
   }
 
   const symbols = activeWatchlist?.symbols ?? []
+  const newsTickers = useMemo(() => symbols.slice(0, 10), [symbols])
   const snapshots = useSnapshotsQuery(symbols, symbols.length > 0)
   const news = useNewsQuery(
-    symbols.slice(0, 10),
+    newsTickers,
     `watchlist-${activeWatchlistId}`,
     10,
     symbols.length > 0,
   )
   const items = snapshots.data?.items ?? []
+  const [watchlistScrollTop, setWatchlistScrollTop] = useState(0)
+  const virtualRowHeight = 34
+  const virtualViewportHeight = 520
+  const virtualized = items.length > 80 && annotatingKey === null
+  const virtualRange = useMemo(() => {
+    if (!virtualized) {
+      return { start: 0, end: items.length, top: 0, bottom: 0 }
+    }
+    const overscan = 10
+    const start = Math.max(0, Math.floor(watchlistScrollTop / virtualRowHeight) - overscan)
+    const visible = Math.ceil(virtualViewportHeight / virtualRowHeight) + overscan * 2
+    const end = Math.min(items.length, start + visible)
+    return {
+      start,
+      end,
+      top: start * virtualRowHeight,
+      bottom: Math.max(0, (items.length - end) * virtualRowHeight),
+    }
+  }, [items.length, virtualized, watchlistScrollTop])
+  const visibleItems = useMemo(
+    () => items.slice(virtualRange.start, virtualRange.end),
+    [items, virtualRange.end, virtualRange.start],
+  )
 
   const winners = items.filter((item) => (item.change_pct ?? 0) > 0).length
   const losers = items.filter((item) => (item.change_pct ?? 0) < 0).length
@@ -303,7 +327,13 @@ export default function WatchlistsPage() {
         <div className="panel-header">
           <div className="panel-title">Recent Symbols</div>
         </div>
-        <div className="panel-table-wrap">
+        <div
+          className="panel-table-wrap"
+          style={virtualized ? { maxHeight: virtualViewportHeight, overflowY: 'auto' } : undefined}
+          onScroll={(event) => {
+            if (virtualized) setWatchlistScrollTop(event.currentTarget.scrollTop)
+          }}
+        >
           <table className="terminal-table compact">
             <thead>
               <tr>
@@ -366,12 +396,17 @@ export default function WatchlistsPage() {
               </tr>
             </thead>
             <tbody>
-              {items.map((item) => {
+              {virtualRange.top > 0 && (
+                <tr aria-hidden="true">
+                  <td colSpan={11} style={{ height: virtualRange.top, padding: 0, border: 0 }} />
+                </tr>
+              )}
+              {visibleItems.map((item) => {
                 const key = annKey(item.ticker)
                 const ann = watchlistAnnotations[key]
                 const isEditing = annotatingKey === key
                 return (
-                  <>
+                  <Fragment key={item.ticker}>
                     <tr key={item.ticker}>
                       <td>
                         <Link to={`/security/${item.ticker}`} className="ticker-link">{item.ticker}</Link>
@@ -428,9 +463,14 @@ export default function WatchlistsPage() {
                         </td>
                       </tr>
                     )}
-                  </>
+                  </Fragment>
                 )
               })}
+              {virtualRange.bottom > 0 && (
+                <tr aria-hidden="true">
+                  <td colSpan={11} style={{ height: virtualRange.bottom, padding: 0, border: 0 }} />
+                </tr>
+              )}
               {symbols.length === 0 && (
                 <tr>
                   <td colSpan={11}>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Play, RotateCcw, Save } from 'lucide-react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useShallow } from 'zustand/react/shallow'
@@ -32,7 +32,10 @@ export default function ScreenerPage() {
   )
 
   const result = screen.data
-  const newsTickers = result?.matches.slice(0, 5).map((match) => match.ticker) ?? ['SPY']
+  const newsTickers = useMemo(
+    () => result?.matches.slice(0, 5).map((match) => match.ticker) ?? ['SPY'],
+    [result],
+  )
   const news = useNewsQuery(newsTickers, 'screener', 8, newsTickers.length > 0)
 
   useEffect(() => {

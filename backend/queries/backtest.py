@@ -52,10 +52,11 @@ def run_strategy_backtest(request: StrategyBacktestRequest) -> StrategyBacktestR
     max_drawdown = 0.0
     total_fees_paid = 0.0
     cost_rate = trade_cost_rate(request.strategy)
+    first_close = float(frame.iloc[0]["Close"])
 
-    for idx, row in frame.iterrows():
-        close = float(row["Close"])
-        date = row["Date"]
+    for idx, row in enumerate(frame.itertuples(index=False)):
+        close = float(row.Close)
+        date = row.Date
         should_exit = bool(exit_signal.iloc[idx])
         if shares > 0 and request.strategy.stop_loss_pct is not None:
             stop_price = entry_price * (1 - request.strategy.stop_loss_pct / 100.0)
@@ -101,7 +102,7 @@ def run_strategy_backtest(request: StrategyBacktestRequest) -> StrategyBacktestR
         peak_equity = max(peak_equity, equity)
         drawdown = 0.0 if peak_equity == 0 else (equity / peak_equity - 1) * 100
         max_drawdown = min(max_drawdown, drawdown)
-        benchmark = initial_capital * (close / float(frame.iloc[0]["Close"]))
+        benchmark = initial_capital * (close / first_close)
         equity_points.append(
             StrategyBacktestPoint(
                 date=date.date().isoformat(),

@@ -46,7 +46,7 @@ function promptSuggestions(context: Record<string, unknown>) {
   }
 
   return [
-    'Summarize the market pulse from this workspace.',
+    'Summarize this workspace pulse.',
     'What should I look at next?',
     'Explain the highest-signal names on screen.',
   ]

@@ -21,6 +21,7 @@ import {
   formatTimestamp,
   toneClass,
 } from '../lib/formatters'
+import { demoSecurity } from '../lib/demoMarket'
 import { getActiveWatchlist, useTerminalStore } from '../state/terminalStore'
 
 // ── Timeframe definitions ────────────────────────────────────────────────────
@@ -36,6 +37,9 @@ const TIMEFRAMES: Timeframe[] = [
   { label: '3M', intraday: false, days: 66 },
   { label: '6M', intraday: false, days: 132 },
   { label: '1Y', intraday: false, days: 252 },
+  { label: '2Y', intraday: false, days: 504 },
+  { label: '5Y', intraday: false, days: 1260 },
+  { label: '10Y', intraday: false, days: 2520 },
   { label: 'ALL', intraday: false, days: Infinity },
 ]
 
@@ -185,15 +189,20 @@ export default function SecurityPage() {
     })),
   )
 
-  const security = useSecurityQuery(ticker, 1000)
-  const earnings = useEarningsQuery([ticker])
-  const earningsItem = earnings.data?.items[0]
-  const news = useNewsQuery(
-    [ticker, ...relatedTickers(compareTickers, ticker)],
-    'security',
-    10,
+  const tickerList = useMemo(() => [ticker], [ticker])
+  const newsTickers = useMemo(
+    () => [ticker, ...relatedTickers(compareTickers, ticker)],
+    [compareTickers, ticker],
   )
-  const compareUniverse = Array.from(new Set([ticker, ...compareTickers])).slice(0, 6)
+  const compareUniverse = useMemo(
+    () => Array.from(new Set([ticker, ...compareTickers])).slice(0, 6),
+    [compareTickers, ticker],
+  )
+
+  const security = useSecurityQuery(ticker, 3000)
+  const earnings = useEarningsQuery(tickerList)
+  const earningsItem = earnings.data?.items[0]
+  const news = useNewsQuery(newsTickers, 'security', 10)
   const live = useLivePricesQuery(compareUniverse)
 
   const isIntraday = activeTimeframe.intraday
@@ -203,6 +212,8 @@ export default function SecurityPage() {
     isIntraday ? activeTimeframe.period : '1d',
     isIntraday,
   )
+  const degraded = security.isPending || security.isError || !security.data
+  const securityData = security.data ?? demoSecurity(ticker)
 
   useEffect(() => {
     setActiveTicker(ticker)
@@ -210,37 +221,26 @@ export default function SecurityPage() {
   }, [addRecentTicker, setActiveTicker, ticker])
 
   useEffect(() => {
-    if (!security.data) return
     setAiContext({
       page: 'security',
       ticker,
-      snapshot: security.data.snapshot,
-      signals: security.data.signals,
-      related: security.data.related,
+      snapshot: securityData.snapshot,
+      signals: securityData.signals,
+      related: securityData.related,
       compareTickers,
       watchlisted: watchlist.includes(ticker),
+      degraded,
     })
-  }, [compareTickers, security.data, setAiContext, ticker, watchlist])
+  }, [compareTickers, degraded, securityData, setAiContext, ticker, watchlist])
 
   const dailyBars = useMemo(() => {
-    if (!security.data || isIntraday) return []
+    if (isIntraday) return []
     const tf = activeTimeframe as DailyTimeframe
-    if (!Number.isFinite(tf.days)) return security.data.bars
-    return security.data.bars.slice(-(tf.days as number))
-  }, [security.data, activeTimeframe, isIntraday])
+    if (!Number.isFinite(tf.days)) return securityData.bars
+    return securityData.bars.slice(-(tf.days as number))
+  }, [securityData.bars, activeTimeframe, isIntraday])
 
-  if (security.isPending) {
-    return <div className="state-panel loading-state">Loading {ticker} security monitor…</div>
-  }
-  if (security.isError || !security.data) {
-    return (
-      <div className="state-panel error-state">
-        {security.error instanceof Error ? security.error.message : 'Security unavailable.'}
-      </div>
-    )
-  }
-
-  const { snapshot, signals, related } = security.data
+  const { snapshot, signals, related } = securityData
   const isWatchlisted = watchlist.includes(ticker)
   const livePrice = live.data?.prices[ticker] ?? snapshot.close
 
@@ -248,6 +248,18 @@ export default function SecurityPage() {
     <div className="security-grid">
       {/* ── Main Column ────────────────────────────────────────────── */}
       <section className="terminal-panel security-main">
+        {degraded && (
+          <div className="offline-ribbon">
+            <div className="panel-header">
+              <div className="panel-title">{security.isPending ? 'Hydrating Security' : 'Offline Security View'}</div>
+              <div className="panel-meta">
+                {security.isError && security.error instanceof Error
+                  ? security.error.message.slice(0, 80)
+                  : 'showing sample chart context'}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Header */}
         <div className="security-header">
@@ -320,7 +332,7 @@ export default function SecurityPage() {
           <div className="quote-cell" style={{ flex: 1 }}>
             <div className="quote-label">Generated</div>
             <div className="quote-value" style={{ color: 'var(--text-dim)', fontWeight: 400 }}>
-              {formatTimestamp(security.data.generated_at)}
+              {formatTimestamp(securityData.generated_at)}
             </div>
           </div>
         </div>
@@ -549,7 +561,7 @@ export default function SecurityPage() {
                 </tr>
               </thead>
               <tbody>
-                {security.data.bars
+                {securityData.bars
                   .slice(-20)
                   .reverse()
                   .map((bar) => (

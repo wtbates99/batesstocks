@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import UTC, datetime
+from typing import Any
 
 import pandas as pd
 
@@ -19,7 +21,7 @@ def utc_now() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def row_to_mover(row: pd.Series) -> TerminalMover:
+def row_to_mover(row: Mapping[str, Any]) -> TerminalMover:
     return TerminalMover(
         ticker=row["Ticker"],
         name=row.get("FullName"),
@@ -30,7 +32,7 @@ def row_to_mover(row: pd.Series) -> TerminalMover:
     )
 
 
-def row_to_security_list_item(row: pd.Series) -> SecurityListItem:
+def row_to_security_list_item(row: Mapping[str, Any]) -> SecurityListItem:
     close = to_float(row.get("Close"))
     sma_200 = to_float(row.get("Ticker_SMA_200"))
     return SecurityListItem(
@@ -83,13 +85,22 @@ def load_screen_frame(universe: list[str] | None = None) -> pd.DataFrame:
     Kept for callers that need two-row context for external pct_change computation.
     New callers should prefer load_latest_market_frame which uses v_latest_security.
     """
+    params: list[object] = []
+    ticker_filter = ""
+    if universe:
+        placeholders = ", ".join(["?"] * len(universe))
+        ticker_filter = f"WHERE td.Ticker IN ({placeholders})"
+        params = [ticker.upper() for ticker in universe]
+
     with duckdb_connection(read_only=True) as conn:
-        frame = conn.execute("""
+        frame = conn.execute(
+            f"""
             WITH ranked AS (
                 SELECT
                     td.*,
                     ROW_NUMBER() OVER (PARTITION BY td.Ticker ORDER BY td.Date DESC) AS rn
                 FROM ticker_data td
+                {ticker_filter}
             )
             SELECT
                 ranked.*,
@@ -99,10 +110,9 @@ def load_screen_frame(universe: list[str] | None = None) -> pd.DataFrame:
             LEFT JOIN stock_information si ON si.Ticker = ranked.Ticker
             WHERE ranked.rn <= 2
             ORDER BY ranked.Ticker, ranked.Date
-        """).df()
-    if universe:
-        allowed = {ticker.upper() for ticker in universe}
-        frame = frame[frame["Ticker"].isin(allowed)].copy()
+        """,
+            params,
+        ).df()
     return frame
 
 
@@ -122,3 +132,17 @@ def load_latest_market_frame(universe: list[str] | None = None) -> pd.DataFrame:
     sql = f"SELECT * FROM v_latest_security {universe_filter} ORDER BY Ticker"
     with duckdb_connection(read_only=True) as conn:
         return conn.execute(sql, params).df()
+
+
+def load_sector_market_frame(sector: str) -> pd.DataFrame:
+    """Latest snapshot rows for one sector, filtered in DuckDB."""
+    with duckdb_connection(read_only=True) as conn:
+        return conn.execute(
+            """
+            SELECT *
+            FROM v_latest_security
+            WHERE Sector = ?
+            ORDER BY Ticker
+            """,
+            [sector],
+        ).df()

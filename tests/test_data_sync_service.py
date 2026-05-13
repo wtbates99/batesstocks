@@ -481,16 +481,55 @@ def test_ensure_market_data_skips_sync_when_already_present_and_fresh(
 ):
     _reset_schema(monkeypatch, tmp_path)
     today = datetime.now(UTC).date().isoformat()
+    old_enough = (datetime.now(UTC) - timedelta(days=365 * 2)).date().isoformat()
     with duckdb_connection() as conn:
         conn.execute(
             "INSERT INTO ticker_data (Date, Ticker, Open, High, Low, Close, Volume) "
-            f"VALUES ('{today}', 'AAPL', 190, 193, 189, 191, 1000000)"
+            f"VALUES ('{old_enough}', 'AAPL', 180, 183, 179, 181, 900000), "
+            f"('{today}', 'AAPL', 190, 193, 189, 191, 1000000)"
         )
 
     result = ensure_market_data(["AAPL"], years=2)
 
     assert result is None
     mock_download.assert_not_called()
+
+
+@patch("backend.services.data_sync_service._fetch_company_metadata")
+@patch("backend.services.data_sync_service._download_ohlcv")
+def test_ensure_market_data_backfills_when_history_window_is_too_short(
+    mock_download, mock_meta, monkeypatch, tmp_path
+):
+    _reset_schema(monkeypatch, tmp_path)
+    today = datetime.now(UTC).date().isoformat()
+    with duckdb_connection() as conn:
+        conn.execute(
+            "INSERT INTO ticker_data (Date, Ticker, Open, High, Low, Close, Volume) "
+            f"VALUES ('{today}', 'AAPL', 190, 193, 189, 191, 1000000)"
+        )
+
+    mock_download.return_value = _minimal_ohlcv_df("AAPL")
+    mock_meta.return_value = pd.DataFrame(
+        [
+            {
+                "Ticker": "AAPL",
+                "FullName": "Apple Inc.",
+                "ShortName": "Apple",
+                "Sector": None,
+                "Subsector": None,
+                "MarketCap": None,
+                "Exchange": None,
+                "Currency": None,
+                "Website": None,
+                "QuoteType": None,
+            }
+        ]
+    )
+
+    result = ensure_market_data(["AAPL"], years=5)
+
+    assert result is not None
+    mock_download.assert_called_once()
 
 
 @patch("backend.services.data_sync_service._fetch_company_metadata")

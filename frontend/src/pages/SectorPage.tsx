@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useShallow } from 'zustand/react/shallow'
 import NewsPanel from '../components/news/NewsPanel'
@@ -101,7 +102,10 @@ export default function SectorPage() {
     })),
   )
 
-  const newsUniverse = data.data?.members.slice(0, 8).map((item) => item.ticker) ?? []
+  const newsUniverse = useMemo(
+    () => data.data?.members.slice(0, 8).map((item) => item.ticker) ?? [],
+    [data.data],
+  )
   const news = useNewsQuery(newsUniverse, `sector-${sector}`, 14, newsUniverse.length > 0)
 
   if (data.isPending) {

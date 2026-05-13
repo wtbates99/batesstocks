@@ -1,14 +1,13 @@
-import { useEffect } from 'react'
+import { useEffect, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { useShallow } from 'zustand/react/shallow'
 import NewsPanel from '../components/news/NewsPanel'
 import BreadthStrip from '../components/app/BreadthStrip'
 import DeltaPill from '../components/app/DeltaPill'
 import {
+  useBootstrapQuery,
   useLivePricesQuery,
   useNewsQuery,
-  useSnapshotsQuery,
-  useWorkspaceQuery,
 } from '../api/query'
 import type { SecurityListItem, TerminalMover } from '../api/types'
 import {
@@ -19,6 +18,7 @@ import {
   toneClass,
   toneFromLabel,
 } from '../lib/formatters'
+import { demoItems, demoOverview } from '../lib/demoMarket'
 import { getActiveWatchlist, useTerminalStore } from '../state/terminalStore'
 
 function MoverTable({
@@ -85,56 +85,60 @@ export default function DashboardPage() {
     })),
   )
 
-  const workspace = useWorkspaceQuery(activeTicker)
-  const newsUniverse = Array.from(
-    new Set([activeTicker, ...watchlist.slice(0, 5), ...recentTickers.slice(0, 4)]),
-  ).slice(0, 6)
+  const newsUniverse = useMemo(
+    () => Array.from(
+      new Set([activeTicker, ...watchlist.slice(0, 5), ...recentTickers.slice(0, 4)]),
+    ).slice(0, 6),
+    [activeTicker, recentTickers, watchlist],
+  )
+  const boardUniverse = useMemo(
+    () => Array.from(new Set([...watchlist.slice(0, 14), ...recentTickers.slice(0, 10)])),
+    [recentTickers, watchlist],
+  )
+  const bootstrap = useBootstrapQuery(activeTicker, boardUniverse)
+  const workspaceData = bootstrap.data?.workspace
+  const fallbackOverview = useMemo(() => demoOverview(activeTicker), [activeTicker])
+  const degraded = bootstrap.isPending || bootstrap.isError || !workspaceData
+  const overview = workspaceData ?? fallbackOverview
   const news = useNewsQuery(newsUniverse, 'dashboard', 10)
-  const watchlistBoard = useSnapshotsQuery(watchlist.slice(0, 14), watchlist.length > 0)
-  const recentBoard = useSnapshotsQuery(recentTickers.slice(0, 10), recentTickers.length > 0)
 
-  const pulseUniverse = workspace.data
-    ? [
-        ...watchlist.slice(0, 6),
-        ...recentTickers.slice(0, 6),
-        activeTicker,
-        ...workspace.data.momentum_leaders.slice(0, 3).map((row) => row.ticker),
-        ...workspace.data.breakouts.slice(0, 3).map((row) => row.ticker),
-      ]
-    : watchlist
+  const pulseUniverse = useMemo(
+    () => overview
+      ? [
+          ...watchlist.slice(0, 6),
+          ...recentTickers.slice(0, 6),
+          activeTicker,
+          ...overview.momentum_leaders.slice(0, 3).map((row) => row.ticker),
+          ...overview.breakouts.slice(0, 3).map((row) => row.ticker),
+        ]
+      : watchlist,
+    [activeTicker, recentTickers, watchlist, overview],
+  )
   const live = useLivePricesQuery(pulseUniverse)
 
   useEffect(() => {
-    if (!workspace.data) return
     setAiContext({
       page: 'dashboard',
       ticker: activeTicker,
-      momentum: workspace.data.momentum_leaders.slice(0, 5),
-      breakouts: workspace.data.breakouts.slice(0, 5),
-      universeSize: workspace.data.universe_size,
+      momentum: overview.momentum_leaders.slice(0, 5),
+      breakouts: overview.breakouts.slice(0, 5),
+      universeSize: overview.universe_size,
       watchlist,
       recentTickers,
+      degraded,
     })
-  }, [activeTicker, recentTickers, setAiContext, watchlist, workspace.data])
+  }, [activeTicker, degraded, overview, recentTickers, setAiContext, watchlist])
 
-  if (workspace.isPending) {
-    return <div className="state-panel loading-state">Loading workspace for {activeTicker}…</div>
-  }
-
-  if (workspace.isError || !workspace.data) {
-    return (
-      <div className="state-panel error-state">
-        {workspace.error instanceof Error ? workspace.error.message : 'Workspace unavailable.'}
-      </div>
-    )
-  }
-
-  const overview = workspace.data
   const pulseSymbols = Array.from(new Set(pulseUniverse)).slice(0, 16)
-  const watchlistItems = watchlistBoard.data?.items ?? []
-  const recentItems = recentBoard.data?.items ?? []
+  const snapshotItems = bootstrap.data?.snapshots.items ?? demoItems
+  const watchlistSet = new Set(watchlist.slice(0, 14))
+  const recentSet = new Set(recentTickers.slice(0, 10))
+  const watchlistItems = snapshotItems.filter((item) => watchlistSet.has(item.ticker))
+  const recentItems = snapshotItems.filter((item) => recentSet.has(item.ticker))
+  const displayWatchlistItems = watchlistItems.length > 0 ? watchlistItems : demoItems.slice(0, 4)
+  const displayRecentTickers = recentTickers.length > 0 ? recentTickers : demoItems.map((item) => item.ticker)
   const recentItemMap = new Map<string, SecurityListItem>(
-    recentItems.map((item) => [item.ticker, item]),
+    [...recentItems, ...demoItems].map((item) => [item.ticker, item]),
   )
 
   // Separate breadth stats from price stats for better rendering
@@ -143,6 +147,15 @@ export default function DashboardPage() {
 
   return (
     <div className="dashboard-grid">
+      {degraded && (
+        <section className="terminal-panel offline-ribbon panel-span-2">
+          <div className="panel-header">
+            <div className="panel-title">{bootstrap.isPending ? 'Hydrating Terminal' : 'Offline Market Surface'}</div>
+            <div className="panel-meta">{bootstrap.isError && bootstrap.error instanceof Error ? bootstrap.error.message.slice(0, 80) : 'waiting for backend feed'}</div>
+          </div>
+        </section>
+      )}
+
       {/* ── Row 1: Market Pulse spanning 2 cols ───────────────────── */}
       <section className="terminal-panel panel-span-2">
         <div className="panel-header">
@@ -187,7 +200,7 @@ export default function DashboardPage() {
               </tr>
             </thead>
             <tbody>
-              {watchlistItems.map((item) => (
+              {displayWatchlistItems.map((item) => (
                 <tr key={item.ticker}>
                   <td>
                     <Link to={`/security/${item.ticker}`} className="ticker-link">
@@ -208,7 +221,7 @@ export default function DashboardPage() {
                   </td>
                 </tr>
               ))}
-              {watchlistItems.length === 0 && (
+              {displayWatchlistItems.length === 0 && (
                 <tr>
                   <td colSpan={5} style={{ color: 'var(--text-dim)', padding: '12px 10px' }}>
                     No watchlist symbols
@@ -245,7 +258,7 @@ export default function DashboardPage() {
               </tr>
             </thead>
             <tbody>
-              {recentTickers.slice(0, 10).map((sym) => {
+              {displayRecentTickers.slice(0, 10).map((sym) => {
                 const item = recentItemMap.get(sym)
                 return (
                 <tr key={sym}>
@@ -272,7 +285,7 @@ export default function DashboardPage() {
                 </tr>
                 )
               })}
-              {recentTickers.length === 0 && (
+              {displayRecentTickers.length === 0 && (
                 <tr>
                   <td colSpan={4} style={{ color: 'var(--text-dim)', padding: '12px 10px' }}>
                     Navigate to symbols to build history

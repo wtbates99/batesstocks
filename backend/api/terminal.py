@@ -4,6 +4,7 @@ import hmac
 import json
 import os
 from datetime import UTC, datetime
+from math import ceil
 
 import pandas as pd
 import yfinance as yf
@@ -30,6 +31,7 @@ from backend.models import (
     SyncRequest,
     SyncResponse,
     SyncStatus,
+    TerminalBootstrap,
     TerminalOverview,
 )
 from backend.services.backup_service import create_backup, list_backups
@@ -41,6 +43,7 @@ from backend.services.data_sync_service import (
 from backend.services.earnings_service import get_earnings
 from backend.services.news_service import get_news
 from backend.services.quote_cache import fundamentals_cache, intraday_cache
+from backend.services.response_cache import clear_response_cache, get_or_compute
 from backend.services.sync_status import sync_status_tracker
 from backend.services.terminal_service import (
     get_market_monitor,
@@ -82,18 +85,21 @@ def terminal_workspace(ticker: str = Query("SPY", min_length=1, max_length=10)) 
     ensure_schema()
     ensure_default_universe_data()
     ensure_market_data([ticker], source="workspace")
-    return get_terminal_overview(ticker)
+    symbol = ticker.strip().upper()
+    return get_or_compute(("workspace", symbol), 20, lambda: get_terminal_overview(symbol))
 
 
 @router.get("/terminal/security/{ticker}", response_model=SecurityOverview)
 def terminal_security(
     ticker: str,
-    limit: int = Query(260, ge=30, le=1000),
+    limit: int = Query(260, ge=30, le=3000),
 ) -> SecurityOverview:
     ensure_schema()
-    ensure_market_data([ticker], source="security")
+    history_years = max(5, ceil(limit / 252))
+    ensure_market_data([ticker], years=history_years, source="security")
+    symbol = ticker.strip().upper()
     try:
-        return get_security_overview(ticker, limit=limit)
+        return get_or_compute(("security", symbol, limit), 20, lambda: get_security_overview(symbol, limit=limit))
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -118,15 +124,16 @@ def _fetch_intraday(symbol: str, interval: str, period: str) -> IntradayResponse
         frame.columns = frame.columns.get_level_values(1)
 
     bars: list[IntradayBar] = []
-    for ts, row in frame.iterrows():
+    for row in frame.itertuples():
+        ts = row.Index
         bars.append(
             IntradayBar(
                 time=int(ts.timestamp()),
-                open=float(row["Open"]),
-                high=float(row["High"]),
-                low=float(row["Low"]),
-                close=float(row["Close"]),
-                volume=float(row["Volume"]),
+                open=float(row.Open),
+                high=float(row.High),
+                low=float(row.Low),
+                close=float(row.Close),
+                volume=float(row.Volume),
             )
         )
     return IntradayResponse(ticker=symbol, interval=interval, period=period, bars=bars)
@@ -205,16 +212,16 @@ def terminal_snapshots(
     tickers: str = Query(..., min_length=1, max_length=512),
 ) -> SecuritySnapshotResponse:
     ensure_schema()
-    symbols = [value.strip().upper() for value in tickers.split(",") if value.strip()]
+    symbols = sorted({value.strip().upper() for value in tickers.split(",") if value.strip()})
     ensure_market_data(symbols, source="snapshots")
-    return get_terminal_snapshots(symbols)
+    return get_or_compute(("snapshots", tuple(symbols)), 20, lambda: get_terminal_snapshots(symbols))
 
 
 @router.get("/terminal/monitor", response_model=MarketMonitorOverview)
 def terminal_monitor() -> MarketMonitorOverview:
     ensure_schema()
     ensure_default_universe_data()
-    return get_market_monitor()
+    return get_or_compute(("monitor",), 20, get_market_monitor)
 
 
 @router.get("/terminal/sector/{sector}", response_model=SectorOverview)
@@ -222,9 +229,31 @@ def terminal_sector(sector: str) -> SectorOverview:
     ensure_schema()
     ensure_default_universe_data()
     try:
-        return get_sector_overview(sector)
+        return get_or_compute(("sector", sector), 20, lambda: get_sector_overview(sector))
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/terminal/bootstrap", response_model=TerminalBootstrap)
+def terminal_bootstrap(
+    ticker: str = Query("SPY", min_length=1, max_length=10),
+    tickers: str = Query("", max_length=512),
+) -> TerminalBootstrap:
+    ensure_schema()
+    symbol = ticker.strip().upper()
+    snapshot_symbols = sorted({value.strip().upper() for value in tickers.split(",") if value.strip()})
+    hydrate = sorted({symbol, *snapshot_symbols})
+    ensure_default_universe_data()
+    ensure_market_data(hydrate, source="bootstrap")
+    return get_or_compute(
+        ("bootstrap", symbol, tuple(snapshot_symbols)),
+        20,
+        lambda: TerminalBootstrap(
+            workspace=get_terminal_overview(symbol),
+            monitor=get_market_monitor(),
+            snapshots=get_terminal_snapshots(snapshot_symbols) if snapshot_symbols else SecuritySnapshotResponse(generated_at=_utc_now(), items=[]),
+        ),
+    )
 
 
 @router.post("/strategies/backtest", response_model=StrategyBacktestResponse)
@@ -256,8 +285,9 @@ def strategy_backtest(request: StrategyBacktestRequest) -> StrategyBacktestRespo
 def strategy_screen(strategy: StrategyDefinition) -> StrategyScreenResponse:
     ensure_schema()
     ensure_default_universe_data()
+    cache_key = ("strategy_screen", json.dumps(strategy.model_dump(mode="json"), sort_keys=True))
     try:
-        matches = screen_strategy(strategy)
+        matches = get_or_compute(cache_key, 20, lambda: screen_strategy(strategy))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return StrategyScreenResponse(
@@ -298,9 +328,11 @@ def system_sync(
 ) -> SyncResponse:
     ensure_schema()
     try:
-        return sync_market_data(request.tickers, years=request.years, source="manual")
+        response = sync_market_data(request.tickers, years=request.years, source="manual")
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Data sync failed: {exc}") from exc
+    clear_response_cache()
+    return response
 
 
 @router.get("/api/earnings", response_model=EarningsResponse)
@@ -378,9 +410,10 @@ def system_rebuild_indicators(
     ensure_schema()
     ticker_list = [v.strip().upper() for v in tickers.split(",") if v.strip()] or None
     try:
-        result = sync_market_data(ticker_list, years=2, source="repair")
+        result = sync_market_data(ticker_list, years=5, source="repair")
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Indicator rebuild failed: {exc}") from exc
+    clear_response_cache()
     return {
         "generated_at": _utc_now(),
         "tickers_rebuilt": result.tickers,
@@ -398,11 +431,12 @@ def system_rebuild_security(
     ensure_schema()
     symbol = ticker.strip().upper()
     try:
-        result = sync_market_data([symbol], years=2, source="repair_single")
+        result = sync_market_data([symbol], years=5, source="repair_single")
     except Exception as exc:
         raise HTTPException(
             status_code=502, detail=f"Single-ticker rebuild failed for {symbol}: {exc}"
         ) from exc
+    clear_response_cache()
     return {
         "generated_at": _utc_now(),
         "ticker": symbol,

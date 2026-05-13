@@ -148,7 +148,7 @@ def get_security_overview(ticker: str, limit: int = 180) -> SecurityOverview:
             macd=to_float(row.get("Ticker_MACD")),
             macd_signal=to_float(row.get("Ticker_MACD_Signal")),
         )
-        for _, row in bars_frame.iterrows()
+        for row in bars_frame.to_dict("records")
     ]
 
     snapshot_model = SecuritySnapshot(
@@ -189,7 +189,7 @@ def get_security_overview(ticker: str, limit: int = 180) -> SecurityOverview:
         snapshot=snapshot_model,
         signals=signals,
         bars=bars,
-        related=[row_to_mover(row) for _, row in related.iterrows()],
+        related=[row_to_mover(row) for row in related.to_dict("records")],
     )
 
 

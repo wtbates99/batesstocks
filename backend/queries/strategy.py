@@ -148,7 +148,7 @@ def evaluate_strategy_matches(
             tech_score=to_float(row.get("Ticker_Tech_Score")),
             signal_state=str(row.get("signal_state") or "entry"),
         )
-        for _, row in matched.iterrows()
+        for row in matched.to_dict("records")
     ]
 
 

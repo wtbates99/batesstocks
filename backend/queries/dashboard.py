@@ -149,7 +149,7 @@ def get_terminal_overview(focus_ticker: str) -> TerminalOverview:
         )
 
     def _movers(frame) -> list[TerminalMover]:
-        return [row_to_mover(row) for _, row in frame.iterrows()]
+        return [row_to_mover(row) for row in frame.to_dict("records")]
 
     return TerminalOverview(
         generated_at=utc_now(),
@@ -164,5 +164,5 @@ def get_terminal_overview(focus_ticker: str) -> TerminalOverview:
 
 def get_terminal_snapshots(tickers: list[str]) -> SecuritySnapshotResponse:
     latest = load_latest_market_frame(tickers)
-    items = [row_to_security_list_item(row) for _, row in latest.iterrows()]
+    items = [row_to_security_list_item(row) for row in latest.to_dict("records")]
     return SecuritySnapshotResponse(generated_at=utc_now(), items=items)

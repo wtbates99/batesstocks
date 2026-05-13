@@ -79,6 +79,12 @@ export interface TerminalOverview {
   breakouts: TerminalMover[]
 }
 
+export interface TerminalBootstrap {
+  workspace: TerminalOverview
+  monitor: MarketMonitorOverview
+  snapshots: SecuritySnapshotResponse
+}
+
 export interface SecurityBar {
   date: string
   open: number

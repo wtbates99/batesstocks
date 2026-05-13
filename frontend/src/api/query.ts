@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from './client'
 import type {
@@ -9,6 +10,7 @@ import type {
 
 export const terminalKeys = {
   workspace: (ticker: string) => ['workspace', ticker] as const,
+  bootstrap: (ticker: string, tickers: string[]) => ['bootstrap', ticker, ...tickers] as const,
   monitor: () => ['monitor'] as const,
   sector: (sector: string) => ['sector', sector] as const,
   security: (ticker: string, limit: number) => ['security', ticker, limit] as const,
@@ -25,12 +27,35 @@ export const terminalKeys = {
   healthReady: () => ['health-ready'] as const,
 }
 
+function activeInterval(ms: number) {
+  return () => (document.visibilityState === 'visible' ? ms : false)
+}
+
+function useCleanTickers(tickers: string[]) {
+  return useMemo(
+    () => Array.from(new Set(tickers.filter(Boolean).map((ticker) => ticker.toUpperCase()))),
+    [tickers],
+  )
+}
+
 export function useWorkspaceQuery(ticker: string) {
   return useQuery({
     queryKey: terminalKeys.workspace(ticker),
     queryFn: () => api.terminal.workspace(ticker),
     staleTime: 30_000,
-    refetchInterval: 60_000,
+    refetchInterval: activeInterval(60_000),
+  })
+}
+
+export function useBootstrapQuery(ticker: string, tickers: string[], enabled = true) {
+  const clean = useCleanTickers(tickers)
+  return useQuery({
+    queryKey: terminalKeys.bootstrap(ticker, clean),
+    queryFn: () => api.terminal.bootstrap(ticker, clean),
+    enabled,
+    staleTime: 30_000,
+    refetchInterval: activeInterval(60_000),
+    refetchOnWindowFocus: false,
   })
 }
 
@@ -39,7 +64,7 @@ export function useMonitorQuery() {
     queryKey: terminalKeys.monitor(),
     queryFn: api.terminal.monitor,
     staleTime: 30_000,
-    refetchInterval: 60_000,
+    refetchInterval: activeInterval(60_000),
   })
 }
 
@@ -49,7 +74,7 @@ export function useSectorQuery(sector: string, enabled = true) {
     queryFn: () => api.terminal.sector(sector),
     enabled: enabled && sector.trim().length > 0,
     staleTime: 30_000,
-    refetchInterval: 60_000,
+    refetchInterval: activeInterval(60_000),
   })
 }
 
@@ -68,7 +93,7 @@ export function useIntradayQuery(ticker: string, interval: string, period: strin
     queryFn: () => api.terminal.intraday(ticker, interval, period),
     enabled: enabled && ticker.length > 0,
     staleTime: 60_000,
-    refetchInterval: 60_000,
+    refetchInterval: activeInterval(60_000),
     refetchOnWindowFocus: false,
   })
 }
@@ -84,49 +109,49 @@ export function useFundamentalsQuery(ticker: string, enabled = true) {
 }
 
 export function useSnapshotsQuery(tickers: string[], enabled = true) {
-  const clean = Array.from(new Set(tickers.filter(Boolean).map((ticker) => ticker.toUpperCase())))
+  const clean = useCleanTickers(tickers)
   return useQuery({
     queryKey: terminalKeys.snapshots(clean),
     queryFn: () => api.terminal.snapshots(clean),
     enabled: enabled && clean.length > 0,
     staleTime: 20_000,
-    refetchInterval: 30_000,
+    refetchInterval: activeInterval(30_000),
     refetchOnWindowFocus: false,
   })
 }
 
 export function useNewsQuery(tickers: string[], scope: string, limit = 12, enabled = true) {
-  const clean = Array.from(new Set(tickers.filter(Boolean).map((ticker) => ticker.toUpperCase())))
+  const clean = useCleanTickers(tickers)
   return useQuery({
     queryKey: terminalKeys.news(scope, clean),
     queryFn: () => api.terminal.news(clean, scope, limit),
     enabled: enabled && clean.length > 0,
     staleTime: 5 * 60_000,
-    refetchInterval: 5 * 60_000,
+    refetchInterval: activeInterval(5 * 60_000),
     refetchOnWindowFocus: false,
   })
 }
 
 export function useEarningsQuery(tickers: string[], enabled = true) {
-  const clean = Array.from(new Set(tickers.filter(Boolean).map((t) => t.toUpperCase())))
+  const clean = useCleanTickers(tickers)
   return useQuery({
     queryKey: terminalKeys.earnings(clean),
     queryFn: () => api.terminal.earnings(clean),
     enabled: enabled && clean.length > 0,
     staleTime: 6 * 60 * 60_000,
-    refetchInterval: 6 * 60 * 60_000,
+    refetchInterval: activeInterval(6 * 60 * 60_000),
     refetchOnWindowFocus: false,
   })
 }
 
 export function useLivePricesQuery(tickers: string[], enabled = true, intervalMs = 20_000) {
-  const clean = Array.from(new Set(tickers.filter(Boolean).map((ticker) => ticker.toUpperCase())))
+  const clean = useCleanTickers(tickers)
   return useQuery({
     queryKey: terminalKeys.livePrices(clean),
     queryFn: () => api.market.livePrices(clean),
     enabled: enabled && clean.length > 0,
     staleTime: 10_000,
-    refetchInterval: intervalMs,
+    refetchInterval: activeInterval(intervalMs),
     refetchOnWindowFocus: false,
   })
 }
@@ -145,7 +170,10 @@ export function useSyncStatusQuery() {
     queryKey: terminalKeys.syncStatus(),
     queryFn: api.system.syncStatus,
     staleTime: 1_000,
-    refetchInterval: (query) => (query.state.data?.state === 'running' ? 2_500 : 10_000),
+    refetchInterval: (query) => {
+      if (document.visibilityState !== 'visible') return false
+      return query.state.data?.state === 'running' ? 2_500 : 10_000
+    },
     refetchOnWindowFocus: false,
   })
 }
@@ -155,7 +183,7 @@ export function useFreshnessQuery() {
     queryKey: terminalKeys.freshness(),
     queryFn: api.system.freshness,
     staleTime: 60_000,
-    refetchInterval: 300_000,
+    refetchInterval: activeInterval(300_000),
     refetchOnWindowFocus: false,
   })
 }
@@ -166,14 +194,14 @@ export function useHealthQuery() {
       queryKey: terminalKeys.healthLive(),
       queryFn: api.system.liveHealth,
       staleTime: 10_000,
-      refetchInterval: 15_000,
+      refetchInterval: activeInterval(15_000),
       refetchOnWindowFocus: false,
     }),
     ready: useQuery({
       queryKey: terminalKeys.healthReady(),
       queryFn: api.system.readyHealth,
       staleTime: 10_000,
-      refetchInterval: 20_000,
+      refetchInterval: activeInterval(20_000),
       refetchOnWindowFocus: false,
     }),
   }

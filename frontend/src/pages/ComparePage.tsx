@@ -12,6 +12,7 @@ import {
   formatPercent,
   toneClass,
 } from '../lib/formatters'
+import { demoBars, demoItems } from '../lib/demoMarket'
 import { useTerminalStore } from '../state/terminalStore'
 
 const COLORS = ['#f3a037', '#3bb9e3', '#19b878', '#d24545', '#8b7cff', '#f08fb0']
@@ -40,7 +41,16 @@ export default function ComparePage() {
 
   const chartData = useMemo(() => {
     const ready = securities.filter((query) => query.data).map((query) => query.data!)
-    if (ready.length === 0) return []
+    if (ready.length === 0) {
+      const bars = demoBars(180)
+      return bars.map((bar, barIndex) => {
+        const point: Record<string, string | number | null> = { date: bar.date.slice(2) }
+        compareTickers.forEach((ticker, index) => {
+          point[ticker] = ((bar.close / bars[0].close) - 1) * 100 + index * 1.6 + Math.sin(barIndex / (12 + index)) * 1.2
+        })
+        return point
+      })
+    }
     const maps = ready.map((security) => {
       const first = security.bars[0]?.close ?? 1
       return new Map(
@@ -57,10 +67,20 @@ export default function ComparePage() {
     })
   }, [compareTickers, securities])
 
-  const snapshotItems = snapshots.data?.items ?? []
+  const snapshotItems = snapshots.data?.items ?? demoItems.filter((item) => compareTickers.includes(item.ticker))
+  const degraded = securities.every((query) => query.isError || !query.data)
 
   return (
     <div className="compare-grid">
+      {degraded && (
+        <section className="terminal-panel offline-ribbon panel-span-2">
+          <div className="panel-header">
+            <div className="panel-title">Offline Compare Surface</div>
+            <div className="panel-meta">showing sample relative-performance tape</div>
+          </div>
+        </section>
+      )}
+
       {/* ── Relative Performance chart ────────────────────────── */}
       <section className="terminal-panel panel-span-2">
         <div className="panel-header">

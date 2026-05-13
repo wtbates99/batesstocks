@@ -20,6 +20,7 @@ import type {
   SyncRequest,
   SyncResponse,
   SyncStatus,
+  TerminalBootstrap,
   TerminalOverview,
 } from './types'
 
@@ -74,6 +75,8 @@ export const api = {
 
   terminal: {
     workspace: (ticker: string) => get<TerminalOverview>('/terminal/workspace', { ticker }),
+    bootstrap: (ticker: string, tickers: string[]) =>
+      get<TerminalBootstrap>('/terminal/bootstrap', { ticker, tickers: tickers.join(',') }),
     monitor: () => get<MarketMonitorOverview>('/terminal/monitor'),
     sector: (sector: string) => get<SectorOverview>(`/terminal/sector/${encodeURIComponent(sector)}`),
     security: (ticker: string, limit = 1000) =>

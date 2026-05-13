@@ -66,6 +66,12 @@ class TerminalOverview(BaseModel):
     breakouts: list[TerminalMover]
 
 
+class TerminalBootstrap(BaseModel):
+    workspace: TerminalOverview
+    monitor: "MarketMonitorOverview"
+    snapshots: "SecuritySnapshotResponse"
+
+
 class StrategyLeg(BaseModel):
     metric: str
     condition: str

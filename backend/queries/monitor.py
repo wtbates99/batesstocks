@@ -13,6 +13,7 @@ from backend.models import (
 )
 from backend.queries.common import (
     load_latest_market_frame,
+    load_sector_market_frame,
     row_to_security_list_item,
     to_float,
     utc_now,
@@ -95,11 +96,11 @@ def get_market_monitor(universe: list[str] | None = None) -> MarketMonitorOvervi
             avg_rsi=to_float(row.get("avg_rsi")),
             pct_above_200d=to_float(row.get("pct_above_200d")),
         )
-        for _, row in sectors_frame.head(12).iterrows()
+        for row in sectors_frame.head(12).to_dict("records")
     ]
 
     def _ranked(frame: pd.DataFrame) -> list:
-        return [row_to_security_list_item(row) for _, row in frame.head(12).iterrows()]
+        return [row_to_security_list_item(row) for row in frame.head(12).to_dict("records")]
 
     leaders = latest.sort_values("Ticker_Return_20D", ascending=False, na_position="last")
     laggards = latest.sort_values("Ticker_Return_20D", ascending=True, na_position="last")
@@ -123,11 +124,7 @@ def get_market_monitor(universe: list[str] | None = None) -> MarketMonitorOvervi
 
 
 def get_sector_overview(sector: str) -> SectorOverview:
-    latest = load_latest_market_frame()
-    if latest.empty:
-        raise ValueError("No market data available for sector view")
-
-    sector_frame = latest[latest["Sector"] == sector].copy()
+    sector_frame = load_sector_market_frame(sector)
     if sector_frame.empty:
         raise ValueError(f"No data available for sector {sector}")
 
@@ -177,7 +174,7 @@ def get_sector_overview(sector: str) -> SectorOverview:
         generated_at=utc_now(),
         sector=sector,
         summary=summary,
-        leaders=[row_to_security_list_item(row) for _, row in leaders.head(8).iterrows()],
-        laggards=[row_to_security_list_item(row) for _, row in laggards.head(8).iterrows()],
-        members=[row_to_security_list_item(row) for _, row in members.head(40).iterrows()],
+        leaders=[row_to_security_list_item(row) for row in leaders.head(8).to_dict("records")],
+        laggards=[row_to_security_list_item(row) for row in laggards.head(8).to_dict("records")],
+        members=[row_to_security_list_item(row) for row in members.head(40).to_dict("records")],
     )

@@ -149,6 +149,34 @@ def get_ticker_latest_dates(tickers: list[str] | None = None) -> dict[str, str]:
     return {str(row[0]).upper(): str(row[1]) for row in rows if row[1] is not None}
 
 
+def get_ticker_history_bounds(tickers: list[str] | None = None) -> dict[str, tuple[str, str]]:
+    """Return ticker -> (earliest, latest) ISO date bounds for available rows."""
+    universe = _normalize_tickers(tickers) if tickers else []
+    if universe:
+        placeholders = ", ".join(["?"] * len(universe))
+        query = f"""
+            SELECT Ticker, MIN(Date)::TEXT AS earliest, MAX(Date)::TEXT AS latest
+            FROM ticker_data
+            WHERE Ticker IN ({placeholders})
+            GROUP BY Ticker
+        """
+        params = universe
+    else:
+        query = """
+            SELECT Ticker, MIN(Date)::TEXT AS earliest, MAX(Date)::TEXT AS latest
+            FROM ticker_data
+            GROUP BY Ticker
+        """
+        params = []
+    with duckdb_connection(read_only=True) as conn:
+        rows = conn.execute(query, params).fetchall()
+    return {
+        str(row[0]).upper(): (str(row[1]), str(row[2]))
+        for row in rows
+        if row[1] is not None and row[2] is not None
+    }
+
+
 def ensure_market_data(
     tickers: list[str] | None = None, years: int = 5, source: str = "hydrate"
 ) -> SyncResponse | None:
@@ -163,21 +191,32 @@ def ensure_market_data(
 
     fresh_cutoff = (_utc_now() - timedelta(days=_FRESH_THRESHOLD_DAYS)).date()
     latest_dates = get_ticker_latest_dates(universe)
+    bounds = get_ticker_history_bounds(universe)
+    history_cutoff = (_utc_now() - timedelta(days=365 * _normalize_years(years) - 30)).date()
 
     missing = [t for t in universe if t not in latest_dates]
+    backfill = [
+        t
+        for t in universe
+        if t in bounds and pd.to_datetime(bounds[t][0]).date() > history_cutoff
+    ]
     stale = [
         t
         for t in universe
-        if t in latest_dates and pd.to_datetime(latest_dates[t]).date() < fresh_cutoff
+        if t in latest_dates
+        and t not in backfill
+        and pd.to_datetime(latest_dates[t]).date() < fresh_cutoff
     ]
 
-    if not missing and not stale:
+    full_refresh = sorted({*missing, *backfill})
+
+    if not full_refresh and not stale:
         return None
 
     response: SyncResponse | None = None
-    if missing:
+    if full_refresh:
         response = sync_market_data(
-            missing, years=_normalize_years(years), source=f"{source}_missing"
+            full_refresh, years=_normalize_years(years), source=f"{source}_backfill"
         )
     if stale:
         response = sync_market_data(stale, years=_normalize_years(years), source=f"{source}_stale")
@@ -360,8 +399,8 @@ def _compute_indicator_frame(frame: pd.DataFrame) -> pd.DataFrame:
         ordered["Ticker_Tech_Score"] = tech_score.round(2)
         return ordered
 
-    computed = frame.groupby("Ticker", group_keys=False).apply(per_ticker)
-    return computed.reset_index(drop=True)
+    computed = [per_ticker(group) for _, group in frame.groupby("Ticker", sort=False)]
+    return pd.concat(computed, ignore_index=True)
 
 
 def _prepare_ticker_data_frame(frame: pd.DataFrame) -> pd.DataFrame:
@@ -372,21 +411,26 @@ def rebuild_indicator_cache(tickers: list[str] | None = None) -> int:
     universe = _normalize_tickers(tickers)
 
     # Read and compute outside the lock — indicator math is CPU-only, no DB needed.
+    filters = ""
+    params: list[str] = []
+    if universe:
+        placeholders = ", ".join(["?"] * len(universe))
+        filters = f"WHERE Ticker IN ({placeholders})"
+        params = universe
+
     with duckdb_connection() as conn:
         raw = conn.execute(
-            """
+            f"""
             SELECT Date, Ticker, Open, High, Low, Close, AdjClose, Volume
             FROM ohlcv_daily
+            {filters}
             ORDER BY Ticker, Date
-            """
+            """,
+            params,
         ).df()
 
     if raw.empty:
         return 0
-    if universe:
-        raw = raw[raw["Ticker"].isin(universe)].copy()
-        if raw.empty:
-            return 0
 
     indicator_frame = _compute_indicator_frame(raw)
     write_frame = _prepare_ticker_data_frame(indicator_frame)

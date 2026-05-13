@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useShallow } from 'zustand/react/shallow'
 import NewsPanel from '../components/news/NewsPanel'
@@ -12,6 +12,7 @@ import {
   formatTimestamp,
   toneClass,
 } from '../lib/formatters'
+import { demoMonitor } from '../lib/demoMarket'
 import { useTerminalStore } from '../state/terminalStore'
 
 function heatColor(value: number | null | undefined, max = 12): string {
@@ -169,7 +170,8 @@ function RankedTable({
 
 export default function MonitorPage() {
   const monitor = useMonitorQuery()
-  const news = useNewsQuery(['SPY', 'QQQ', 'IWM', 'TLT', 'GLD'], 'monitor', 12)
+  const newsTickers = useMemo(() => ['SPY', 'QQQ', 'IWM', 'TLT', 'GLD'], [])
+  const news = useNewsQuery(newsTickers, 'monitor', 12)
   const [activeView, setActiveView] = useState<RankedView>('leaders')
   const navigate = useNavigate()
   const { setCompareTickers, toggleWatchlist } = useTerminalStore(
@@ -179,19 +181,8 @@ export default function MonitorPage() {
     })),
   )
 
-  if (monitor.isPending) {
-    return <div className="state-panel loading-state">Loading market monitor…</div>
-  }
-
-  if (monitor.isError || !monitor.data) {
-    return (
-      <div className="state-panel error-state">
-        {monitor.error instanceof Error ? monitor.error.message : 'Monitor unavailable.'}
-      </div>
-    )
-  }
-
-  const data = monitor.data
+  const degraded = monitor.isPending || monitor.isError || !monitor.data
+  const data = monitor.data ?? demoMonitor()
 
   const activeRows: Record<RankedView, SecurityListItem[]> = {
     leaders: data.leaders,
@@ -213,6 +204,19 @@ export default function MonitorPage() {
 
   return (
     <div className="monitor-page-grid">
+      {degraded && (
+        <section className="terminal-panel offline-ribbon panel-span-2">
+          <div className="panel-header">
+            <div className="panel-title">{monitor.isPending ? 'Hydrating Monitor' : 'Offline Market Monitor'}</div>
+            <div className="panel-meta">
+              {monitor.isError && monitor.error instanceof Error
+                ? monitor.error.message.slice(0, 80)
+                : 'showing terminal sample tape'}
+            </div>
+          </div>
+        </section>
+      )}
+
       {/* ── Breadth strip spanning 2 cols ─────────────────────────── */}
       <section className="terminal-panel panel-span-2">
         <div className="panel-header">
