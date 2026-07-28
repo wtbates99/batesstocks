@@ -1,0 +1,51 @@
+[project]
+name = "batesstocks"
+version = "1.0.0"
+description = "BATESSTOCKS terminal-grade financial analytics platform"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.136.1",
+    "uvicorn[standard]>=0.41.0",
+    "duckdb>=1.1.0",
+    "pydantic>=2.10.0",
+    "httpx>=0.27.0",
+    "curl-cffi>=0.15.0",
+    "numpy==2.1.2",
+    "pandas==2.2.3",
+    "python-dotenv>=1.0.0",
+    "requests>=2.33.0",
+    "yfinance>=0.2.50",
+]
+
+[dependency-groups]
+dev = [
+    "pre-commit",
+    "pytest>=9.0.3",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.15.6",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["backend"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP"]
+ignore = [
+    "E501",   # line too long — handled by formatter
+]
+
+[tool.ruff.lint.per-file-ignores]
+# load_dotenv() must run before downstream imports that read env vars
+"main.py" = ["E402"]

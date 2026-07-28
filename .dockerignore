@@ -1,0 +1,17 @@
+stock_data.duckdb
+*.duckdb
+*.db
+frontend/node_modules/
+frontend/build/
+.env
+.git/
+.github/
+.claude/
+.codex
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+.pytest_cache/
+.ruff_cache/
+backups/

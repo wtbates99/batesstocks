@@ -1,0 +1,48 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v2.3.0
+    hooks:
+      - id: check-case-conflict
+      - id: check-json
+      - id: check-executables-have-shebangs
+      - id: pretty-format-json
+        args: [ --autofix ]
+      - id: check-merge-conflict
+      - id: check-yaml
+      - id: debug-statements
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+      - id: trailing-whitespace
+  - repo: https://github.com/pre-commit/pygrep-hooks
+    rev: v1.10.0
+    hooks:
+      - id: python-check-blanket-noqa
+      - id: python-check-blanket-type-ignore
+      - id: rst-backticks
+      - id: rst-directive-colons
+      - id: rst-inline-touching-normal
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.3.7
+    hooks:
+      - id: ruff
+        args: [ "--fix", "--extend-select=PD002", "--extend-select=E722", "--extend-select=PERF101" ]
+      - id: ruff-format
+  - repo: https://github.com/antonbabenko/pre-commit-terraform
+    rev: v1.89.0
+    hooks:
+      - id: terraform_fmt
+      - id: terraform_validate
+  - repo: local
+    hooks:
+      - id: frontend-prettier
+        name: Prettier (frontend)
+        language: system
+        entry: frontend/node_modules/.bin/prettier
+        args: ["--write"]
+        files: ^frontend/src/.*\.(js|jsx|css)$
+      - id: frontend-eslint
+        name: ESLint (frontend)
+        language: system
+        entry: frontend/node_modules/.bin/eslint
+        args: ["--max-warnings", "0", "--fix"]
+        files: ^frontend/src/.*\.jsx?$
