@@ -3,12 +3,12 @@ services:
     build: .
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "${HOST_PORT:-8001}:8000"
     volumes:
-      - ${DATA_DIR:-./data}/stock_data.duckdb:/app/stock_data.duckdb
+      - ${DATA_DIR:-./data}:/app/data
       - ${BACKUP_DIR:-./backups}:/app/backups
     environment:
-      - DB_PATH=/app/stock_data.duckdb
+      - DB_PATH=/app/data/stock_data.duckdb
       - BACKUP_DIR=/app/backups
       - PORT=8000
       - AUTO_SYNC_ON_START=true

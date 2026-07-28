@@ -4,6 +4,7 @@ update_and_sync.sh
 *.csv
 *.db
 *.duckdb
+*.duckdb.wal
 db/
 __pycache__/
 *.py[cod]

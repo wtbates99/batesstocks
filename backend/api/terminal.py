@@ -121,9 +121,21 @@ def _fetch_intraday(symbol: str, interval: str, period: str) -> IntradayResponse
     if frame is None or frame.empty:
         raise HTTPException(status_code=404, detail=f"No intraday data for {symbol}")
 
-    # yfinance returns MultiIndex columns (Ticker, Price) — flatten before iterating
+    # yfinance uses (Price, Ticker) for a single symbol, but can use
+    # (Ticker, Price) when group_by="ticker". Locate the OHLCV level instead of
+    # relying on a version- and request-dependent level order.
     if isinstance(frame.columns, pd.MultiIndex):
-        frame.columns = frame.columns.get_level_values(1)
+        price_columns = {"Open", "High", "Low", "Close", "Volume"}
+        for level in range(frame.columns.nlevels):
+            values = {str(value) for value in frame.columns.get_level_values(level)}
+            if price_columns.issubset(values):
+                frame.columns = frame.columns.get_level_values(level)
+                break
+        else:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Intraday provider returned unexpected columns for {symbol}",
+            )
 
     bars: list[IntradayBar] = []
     for row in frame.itertuples():

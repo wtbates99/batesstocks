@@ -164,6 +164,8 @@ app.include_router(terminal_router)
 
 if (_frontend_build_dir() / "assets").is_dir():
     app.mount("/assets", StaticFiles(directory=_frontend_build_dir() / "assets"), name="assets")
+if _frontend_build_dir().is_dir():
+    app.mount("/brand", StaticFiles(directory=_frontend_build_dir()), name="brand")
 
 
 @app.get("/search", response_model=list[SearchResult])
