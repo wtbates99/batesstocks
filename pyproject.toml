@@ -2,7 +2,18 @@
 name = "batesstocks"
 version = "1.0.0"
 description = "BATESSTOCKS terminal-grade financial analytics platform"
+readme = "README.md"
 requires-python = ">=3.11"
+license = "PolyForm-Noncommercial-1.0.0"
+license-files = ["LICENSE"]
+authors = [{ name = "William Bates", email = "wbates@palanbates.com" }]
+keywords = ["analytics", "backtesting", "duckdb", "market-data", "self-hosted"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "License :: Other/Proprietary License",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Office/Business :: Financial",
+]
 dependencies = [
     "fastapi>=0.136.1",
     "uvicorn[standard]>=0.41.0",
