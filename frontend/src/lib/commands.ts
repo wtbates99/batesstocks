@@ -55,12 +55,7 @@ export function parseTerminalCommand(raw: string): TerminalCommand {
     return { kind: 'invalid', reason: 'Use COMP [TICKER] [BENCHMARK...] to set compare mode.' }
   }
 
-  if (tokens[0] === 'AI') {
-    const prompt = raw.trim().slice(2).trim()
-    return prompt
-      ? { kind: 'ai', prompt }
-      : { kind: 'invalid', reason: 'Use AI followed by a prompt.' }
-  }
+  if (tokens[0] === 'AI') return { kind: 'invalid', reason: 'AI is disabled.' }
 
   if (tokens[0] === 'NEWS' && tokens[1] && isTickerToken(tokens[1])) {
     return { kind: 'security', ticker: tokens[1], functionCode: 'NEWS' }
@@ -78,7 +73,7 @@ export function parseTerminalCommand(raw: string): TerminalCommand {
     return { kind: 'security', ticker: tokens[1], functionCode: 'DES' }
   }
 
-  return { kind: 'invalid', reason: 'Commands: MON, WL, COMP, NEWS, [TICKER] DES, EQS, PORT, SYNC, LAST, AI.' }
+  return { kind: 'invalid', reason: 'Commands: MON, WL, COMP, NEWS, [TICKER] DES, EQS, PORT, SYNC, LAST.' }
 }
 
 interface ExecuteCommandOptions {
@@ -108,7 +103,7 @@ export async function executeTerminalCommand({
   }
 
   if (command.kind === 'help') {
-    onNotice('MON WL COMP NEWS DES EQS PORT SYNC LAST AI', 'neutral')
+    onNotice('MON WL COMP NEWS DES EQS PORT SYNC LAST', 'neutral')
     return true
   }
 

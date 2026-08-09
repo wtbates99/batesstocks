@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Activity, Bot, ChevronRight, DatabaseZap, Radio, RefreshCw } from 'lucide-react'
+import { Activity, ChevronRight, DatabaseZap, Radio, RefreshCw } from 'lucide-react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useShallow } from 'zustand/react/shallow'
 import {
@@ -13,6 +13,7 @@ import AiPanel from '../AiPanel'
 import WorkspaceRail from './WorkspaceRail'
 import { formatClock, formatTimestamp } from '../../lib/formatters'
 import { useTerminalStore } from '../../state/terminalStore'
+import { AI_ENABLED } from '../../lib/features'
 
 const NAV_ITEMS = [
   { label: 'DASH', path: '/' },
@@ -82,7 +83,7 @@ export default function TerminalShell() {
         return
       }
 
-      if (event.key === '`' && (event.metaKey || event.ctrlKey)) {
+      if (AI_ENABLED && event.key === '`' && (event.metaKey || event.ctrlKey)) {
         event.preventDefault()
         if (aiOpen) closeAi()
         else openAi()
@@ -159,10 +160,7 @@ export default function TerminalShell() {
               <span className="strip-value">{strip.data?.prices[ticker]?.toFixed(2) ?? '—'}</span>
             </div>
           ))}
-          <button type="button" className="terminal-button terminal-button-ghost" onClick={() => openAi()}>
-            <Bot size={12} />
-            AI
-          </button>
+          {AI_ENABLED && <button type="button" className="terminal-button terminal-button-ghost" onClick={() => openAi()}>AI</button>}
           <ClockStrip />
         </div>
       </header>
@@ -186,7 +184,7 @@ export default function TerminalShell() {
         <div className="workspace">
           <Outlet />
         </div>
-        <AiPanel open={aiOpen} onClose={closeAi} />
+        {AI_ENABLED && <AiPanel open={aiOpen} onClose={closeAi} />}
       </main>
 
       <footer className="status-strip">

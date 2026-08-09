@@ -1,5 +1,7 @@
-FROM node:20-slim AS frontend-build
+FROM node:22-slim AS frontend-build
 WORKDIR /app/frontend
+ARG VITE_AI_ENABLED=false
+ENV VITE_AI_ENABLED=$VITE_AI_ENABLED
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 COPY frontend/ ./
@@ -23,6 +25,7 @@ RUN uv sync --no-dev --no-install-project
 
 COPY backend/ ./backend/
 COPY main.py ./
+COPY sync_once.py ./
 COPY --from=frontend-build /app/frontend/build ./frontend/build
 
 RUN useradd --create-home --shell /usr/sbin/nologin appuser \

@@ -8,16 +8,7 @@ from datetime import UTC, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 MARKET_TZ = ZoneInfo("America/New_York")
-SCHEDULED_SLOTS: tuple[tuple[str, time], ...] = (
-    ("open", time(9, 35)),
-    ("hourly-10", time(10, 30)),
-    ("hourly-11", time(11, 30)),
-    ("hourly-12", time(12, 30)),
-    ("hourly-13", time(13, 30)),
-    ("hourly-14", time(14, 30)),
-    ("hourly-15", time(15, 30)),
-    ("close", time(16, 10)),
-)
+SCHEDULED_SLOTS: tuple[tuple[str, time], ...] = (("after-close", time(18, 0)),)
 SLOT_WINDOW = timedelta(minutes=20)
 
 logger = logging.getLogger("batesstocks.scheduler")
