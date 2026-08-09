@@ -228,10 +228,6 @@ def _read_latest_prices(tickers: list[str]) -> LivePrices:
     cleaned = [ticker.strip().upper() for ticker in tickers if ticker.strip()]
     if not cleaned:
         return LivePrices(prices={}, timestamp="")
-    try:
-        ensure_market_data(cleaned, source="live_prices")
-    except Exception as exc:  # pragma: no cover - network/provider dependent
-        logger.warning("Live price bootstrap sync failed: %s", exc)
     live = fetch_live_prices(cleaned)
     fallback = _read_db_closes([t for t, p in live.items() if p is None])
     prices: dict[str, float | None] = {
