@@ -10,7 +10,7 @@
 ![BatesStocks dashboard with market breadth, watchlists, and research panels](docs/assets/dashboard.png)
 
 BatesStocks combines watchlists, market monitoring, technical analysis,
-screening, backtesting, news review, and optional AI-assisted research in one
+screening, backtesting, and news review in one
 dense workspace. FastAPI serves the application, DuckDB stores local research
 state, and React provides the terminal-style frontend.
 
@@ -23,8 +23,8 @@ state, and React provides the terminal-style frontend.
 - Provides security research views with charts, overlays, signals, recent bars, news, and related names.
 - Supports configurable strategy screens and historical backtests with saved local state.
 - Pulls market data through `yfinance` into a local DuckDB analytics file.
-- Adds an optional AI analyst through Ollama-, OpenAI-, or Anthropic-compatible configuration.
-- Creates backups and can bootstrap an empty installation automatically.
+- Fetches live quotes on request and keeps the large historical refresh separate from the API.
+- Supports one bounded daily sync and one replaceable latest export.
 
 ![BatesStocks strategy workbench showing a configured backtest](docs/assets/strategy-workbench.png)
 
@@ -39,8 +39,10 @@ docker build -t batesstocks:local .
 docker run --rm \
   -p 8000:8000 \
   -e DB_PATH=/app/data/stock_data.duckdb \
-  -e BACKUP_DIR=/app/backups \
-  -e AUTO_SYNC_ON_START=true \
+  -e BACKUP_DIR=/app/exports \
+  -e AUTO_SYNC_ON_START=false \
+  -e AUTO_SYNC_SCHEDULED=false \
+  -e AI_ENABLED=false \
   -v "$(pwd)/data:/app/data" \
   -v "$(pwd)/backups:/app/backups" \
   batesstocks:local
@@ -74,11 +76,13 @@ do not represent current quotes or investment results.
 | Variable | Purpose |
 | --- | --- |
 | `DB_PATH` | DuckDB database path |
-| `BACKUP_DIR` | Backup directory |
+| `BACKUP_DIR` | Latest export directory |
 | `AUTO_SYNC_ON_START` | Bootstrap market data on an empty startup |
+| `AUTO_SYNC_SCHEDULED` | Enable the in-process scheduler; disabled in production |
 | `DUCKDB_MEMORY_LIMIT` | DuckDB memory cap |
 | `DUCKDB_THREADS` | DuckDB worker count |
-| `AI_PROVIDER` | Default AI provider |
+| `AI_ENABLED` | Enable the dormant AI route and frontend; false by default |
+| `AI_PROVIDER` | Default AI provider when AI is explicitly enabled |
 | `AI_CHAT_TOKEN` | Token required for server-side AI chat unless explicitly public |
 | `ALLOW_PUBLIC_SERVER_AI` | Local/demo opt-in for unauthenticated server-side AI chat |
 | `OLLAMA_HOST` / `OLLAMA_MODEL` | Ollama-compatible endpoint and model |

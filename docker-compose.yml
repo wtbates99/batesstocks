@@ -11,7 +11,11 @@ services:
       - DB_PATH=/app/data/stock_data.duckdb
       - BACKUP_DIR=/app/backups
       - PORT=8000
-      - AUTO_SYNC_ON_START=true
+      - AUTO_SYNC_ON_START=false
+      - AUTO_SYNC_SCHEDULED=false
+      - AI_ENABLED=false
+      - DUCKDB_MEMORY_LIMIT=768MB
+      - DUCKDB_THREADS=2
     env_file:
       - .env
     healthcheck:

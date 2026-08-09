@@ -14,8 +14,8 @@ def get_backup_dir() -> Path:
 
 
 def get_duckdb_memory_limit() -> str:
-    return os.getenv("DUCKDB_MEMORY_LIMIT", "2GB")
+    return os.getenv("DUCKDB_MEMORY_LIMIT", "768MB")
 
 
 def get_duckdb_threads() -> int:
-    return int(os.getenv("DUCKDB_THREADS", "4"))
+    return int(os.getenv("DUCKDB_THREADS", "2"))

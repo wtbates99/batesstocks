@@ -23,6 +23,7 @@ import {
 } from '../lib/formatters'
 import { demoSecurity } from '../lib/demoMarket'
 import { getActiveWatchlist, useTerminalStore } from '../state/terminalStore'
+import { AI_ENABLED } from '../lib/features'
 
 // ── Timeframe definitions ────────────────────────────────────────────────────
 
@@ -419,13 +420,13 @@ export default function SecurityPage() {
           )}
 
           <div className="toolbar-group toolbar-actions">
-            <button
+            {AI_ENABLED && <button
               type="button"
               className="terminal-button"
               onClick={() => openAi(`Analyze ${ticker} using its active signal stack and trend context.`)}
             >
               ANALYZE
-            </button>
+            </button>}
             <button
               type="button"
               className="terminal-button terminal-button-ghost"

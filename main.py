@@ -124,7 +124,7 @@ async def lifespan(_: FastAPI):
     ensure_schema()
     scheduler: MarketSyncScheduler | None = None
     bg_sync: asyncio.Task | None = None
-    should_auto_sync = os.getenv("AUTO_SYNC_ON_START", "true").lower() == "true"
+    should_auto_sync = os.getenv("AUTO_SYNC_ON_START", "false").lower() == "true"
     stale_threshold = int(os.getenv("STALE_SYNC_THRESHOLD_DAYS", "3"))
     if should_auto_sync:
         try:
@@ -134,7 +134,7 @@ async def lifespan(_: FastAPI):
                 bg_sync = asyncio.create_task(_run_startup_sync(staleness, stale_threshold))
         except Exception as exc:  # pragma: no cover - startup/network dependent
             logger.warning("AUTO_SYNC_ON_START check failed: %s", exc)
-    should_schedule = os.getenv("AUTO_SYNC_SCHEDULED", "true").lower() == "true"
+    should_schedule = os.getenv("AUTO_SYNC_SCHEDULED", "false").lower() == "true"
     if should_schedule:
         scheduler = MarketSyncScheduler(
             sync_callback=_run_scheduled_market_sync,
@@ -387,6 +387,8 @@ async def ai_chat(
     authorization: str | None = Header(default=None),
     x_ai_token: str | None = Header(default=None),
 ) -> dict[str, str]:
+    if os.getenv("AI_ENABLED", "false").lower() != "true":
+        raise HTTPException(status_code=404, detail="Not found")
     require_ai_chat_access(payload, authorization, x_ai_token)
     provider = (payload.provider or os.getenv("AI_PROVIDER", "ollama")).lower()
     try:
