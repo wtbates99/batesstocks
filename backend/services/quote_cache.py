@@ -17,6 +17,7 @@ from typing import Any
 import yfinance as yf
 
 _LIVE_PRICE_TTL_SECONDS = 30.0
+_LIVE_PRICE_MISS_TTL_SECONDS = 300.0
 _INTRADAY_TTL_SECONDS = 60.0
 _FUNDAMENTALS_TTL_SECONDS = 3600.0
 
@@ -57,15 +58,17 @@ class _TTLCache:
 
 
 _live_price_cache = _TTLCache(_LIVE_PRICE_TTL_SECONDS)
+_live_price_miss_cache = _TTLCache(_LIVE_PRICE_MISS_TTL_SECONDS)
 intraday_cache = _TTLCache(_INTRADAY_TTL_SECONDS)
 fundamentals_cache = _TTLCache(_FUNDAMENTALS_TTL_SECONDS)
 
 
 def _fetch_one_live_price(ticker: str) -> float | None:
+    if _live_price_miss_cache.get(ticker) is not None:
+        return None
     cached = _live_price_cache.get(ticker)
     if cached is not None:
-        # Sentinel for "we tried, it failed" — re-cache as None to avoid hammering.
-        return None if cached == "__miss__" else cached  # type: ignore[return-value]
+        return cached  # type: ignore[return-value]
     try:
         info = yf.Ticker(ticker).fast_info
         # fast_info exposes last_price as an attribute or mapping key depending on version.
@@ -73,11 +76,11 @@ def _fetch_one_live_price(ticker: str) -> float | None:
         if price is None and hasattr(info, "get"):
             price = info.get("last_price") or info.get("lastPrice")
         if price is None:
-            _live_price_cache.set(ticker, "__miss__")
+            _live_price_miss_cache.set(ticker, True)
             return None
         value = float(price)
     except Exception:
-        _live_price_cache.set(ticker, "__miss__")
+        _live_price_miss_cache.set(ticker, True)
         return None
     _live_price_cache.set(ticker, value)
     return value
