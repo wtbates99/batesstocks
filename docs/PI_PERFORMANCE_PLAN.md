@@ -118,6 +118,18 @@ Untouched production endpoint baseline:
 The multi-second cold times confirm that request-time hydration and repeated historical
 windows—not the chart renderer—were the dominant bottleneck.
 
+Post-deploy verification on the same Pi reduced a cold 132-bar security response to 225 ms
+and a cold 504-bar response to 200 ms; warm responses measured 26 ms and 37 ms respectively.
+Workspace and monitor cold responses fell to 250 ms and 161 ms. Gzip reduced the 132-bar
+wire payload to 11 KiB and the 504-bar payload to 37 KiB.
+
+Two load tests exercised 12- and 24-way concurrency. The initial 600-request cold/warm run
+completed without errors and sustained 111 requests/second for the mixed warm phase. A
+subsequent 3,000-request warm soak at 24 workers also completed without errors, sustaining
+112–118 requests/second in the mixed phases. Container memory remained about 338 MiB of its
+1.25 GiB allocation, peak sampled CPU was 161% of its two-CPU allowance, host memory retained
+2.7 GiB available, temperature remained below 47°C, and the Pi reported no throttling.
+
 ## Deployment
 
 CI publishes a native ARM64 image. On the Pi, deployment does not need to compile Node or
