@@ -1,5 +1,5 @@
 from backend.core import duckdb as duckdb_module
-from backend.core.duckdb import duckdb_connection, ensure_schema
+from backend.core.duckdb import duckdb_connection, ensure_schema, refresh_latest_ticker_cache
 from backend.models import StrategyBacktestRequest, StrategyDefinition, StrategyLeg
 from backend.services.terminal_service import (
     get_market_monitor,
@@ -46,6 +46,8 @@ def test_screen_strategy_supports_metric_thresholds_and_universe_override(monkey
                 ('2026-04-11', 'XLF', 45.2, 46.4, 45, 46.1, 650000, 44.2, 44.8, 57, 66, 3)
             """
         )
+
+    refresh_latest_ticker_cache()
 
     strategy = StrategyDefinition(
         name="Metric Compare",
@@ -145,6 +147,7 @@ def test_market_monitor_and_snapshots_return_ranked_views(monkeypatch, tmp_path)
             """
         )
 
+    refresh_latest_ticker_cache()
     monitor = get_market_monitor()
     snapshots = get_terminal_snapshots(["AAPL", "MSFT"])
 
@@ -188,6 +191,7 @@ def test_sector_overview_returns_ranked_members(monkeypatch, tmp_path):
             """
         )
 
+    refresh_latest_ticker_cache()
     overview = get_sector_overview("Technology")
 
     assert overview.sector == "Technology"

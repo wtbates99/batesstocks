@@ -79,7 +79,7 @@ export const api = {
       get<TerminalBootstrap>('/terminal/bootstrap', { ticker, tickers: tickers.join(',') }),
     monitor: () => get<MarketMonitorOverview>('/terminal/monitor'),
     sector: (sector: string) => get<SectorOverview>(`/terminal/sector/${encodeURIComponent(sector)}`),
-    security: (ticker: string, limit = 1000) =>
+    security: (ticker: string, limit = 132) =>
       get<SecurityOverview>(`/terminal/security/${ticker}`, { limit }),
     intraday: (ticker: string, interval: string, period: string) =>
       get<IntradayResponse>(`/terminal/security/${ticker}/intraday`, { interval, period }),

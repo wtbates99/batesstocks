@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 
-from backend.core.duckdb import duckdb_connection
+from backend.core.duckdb import duckdb_connection, refresh_latest_ticker_cache
 from backend.models import SyncResponse
 from backend.services.market_universe import normalize_universe
 from backend.services.sync_status import sync_status_tracker
@@ -405,6 +405,46 @@ def _prepare_ticker_data_frame(frame: pd.DataFrame) -> pd.DataFrame:
     return frame[TICKER_DATA_COLUMNS].copy()
 
 
+def _write_ticker_slice(
+    conn,
+    ticker: str,
+    cutoff: pd.Timestamp,
+    raw_subset: pd.DataFrame,
+    write_subset: pd.DataFrame,
+) -> None:
+    """Atomically replace one ticker's downloaded date range."""
+    conn.register("raw_subset", raw_subset)
+    conn.register("ticker_subset", write_subset)
+    conn.execute("BEGIN TRANSACTION")
+    try:
+        conn.execute(
+            "DELETE FROM ohlcv_daily WHERE Ticker = ? AND Date >= ?",
+            [ticker, cutoff.to_pydatetime()],
+        )
+        conn.execute(
+            "INSERT INTO ohlcv_daily (Date, Ticker, Open, High, Low, Close, AdjClose, Volume)"
+            " SELECT Date, Ticker, Open, High, Low, Close, AdjClose, Volume FROM raw_subset"
+        )
+        conn.execute(
+            "DELETE FROM ticker_data WHERE Ticker = ? AND Date >= ?",
+            [ticker, cutoff.to_pydatetime()],
+        )
+        conn.execute(
+            f"""
+            INSERT INTO ticker_data ({", ".join(TICKER_DATA_COLUMNS)})
+            SELECT {", ".join(TICKER_DATA_COLUMNS)}
+            FROM ticker_subset
+            """
+        )
+        conn.execute("COMMIT")
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
+    finally:
+        conn.unregister("raw_subset")
+        conn.unregister("ticker_subset")
+
+
 def rebuild_indicator_cache(tickers: list[str] | None = None) -> int:
     universe = _normalize_tickers(tickers)
 
@@ -470,6 +510,7 @@ def rebuild_indicator_cache(tickers: list[str] | None = None) -> int:
         )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_ticker_data_date ON ticker_data (Date)")
         conn.unregister("rebuilt_ticker_data")
+    refresh_latest_ticker_cache(universe or None)
     return len(write_frame)
 
 
@@ -498,6 +539,25 @@ def _fetch_company_metadata(tickers: list[str]) -> pd.DataFrame:
     with ThreadPoolExecutor(max_workers=min(8, max(1, len(tickers)))) as executor:
         rows = list(executor.map(fetch_one, tickers))
     return pd.DataFrame(rows)
+
+
+def _metadata_tickers_for_sync(tickers: list[str], source: str) -> list[str]:
+    """Return the symbols whose slow-moving company metadata should be fetched.
+
+    Incremental/startup syncs run frequently and should not make one remote ``info``
+    request per symbol every day. Existing metadata is retained; manual/bootstrap
+    refreshes still update the full requested set.
+    """
+    if not tickers or not _is_incremental_source(source):
+        return tickers
+    placeholders = ", ".join(["?"] * len(tickers))
+    with duckdb_connection(read_only=True) as conn:
+        rows = conn.execute(
+            f"SELECT Ticker FROM stock_information WHERE Ticker IN ({placeholders})",
+            tickers,
+        ).fetchall()
+    existing = {str(row[0]).upper() for row in rows}
+    return [ticker for ticker in tickers if ticker not in existing]
 
 
 # Sources that should use incremental (skip-fresh + indicator warmup) logic
@@ -653,26 +713,29 @@ def sync_market_data(
             phase="metadata",
             detail="Refreshing company and fund metadata.",
         )
-        metadata = _fetch_company_metadata(universe)
+        metadata_tickers = _metadata_tickers_for_sync(universe, source)
+        metadata = _fetch_company_metadata(metadata_tickers) if metadata_tickers else pd.DataFrame()
         rows_written = 0
 
         try:
-            # DuckDB has a known bug: DELETE on a table with secondary indexes can raise
-            # "Failed to delete all rows from index" when the index was left in an
-            # inconsistent state by a previously interrupted write (e.g. a container kill).
-            # Fix: drop all secondary indexes before any DELETE so DuckDB only has to
-            # maintain the heap. Rebuild the indexes once at the very end.
-            with duckdb_connection() as conn:
-                conn.execute("CHECKPOINT")  # flush WAL first
-                conn.execute("DROP INDEX IF EXISTS idx_ticker_data_ticker_date")
-                conn.execute("DROP INDEX IF EXISTS idx_ticker_data_date")
-                conn.execute("DROP INDEX IF EXISTS idx_ohlcv_daily_ticker_date")
+            # Build the groups once. Filtering each full DataFrame once per ticker made
+            # the old write loop O(tickers * rows), which is especially painful on a Pi.
+            indicator_groups = {
+                str(ticker).upper(): group.copy()
+                for ticker, group in indicator_frame.groupby("Ticker", sort=False)
+            }
+            raw_groups = {
+                str(ticker).upper(): group.copy()
+                for ticker, group in raw.groupby("Ticker", sort=False)
+            }
 
-            # Write one ticker at a time — releases _CONN_LOCK between tickers so
-            # API reads can proceed during the bulk sync (they just use table scans
-            # without indexes until the rebuild at the end).
+            # Write one ticker at a time and release _CONN_LOCK between tickers so API
+            # reads continue during a bulk sync. Keep the indexes live; rebuilding the
+            # entire 700k+ row index for a few thousand daily updates caused long stalls.
             for index, ticker in enumerate(universe, start=1):
-                if ticker not in indicator_frame["Ticker"].values:
+                subset = indicator_groups.get(ticker)
+                raw_subset = raw_groups.get(ticker)
+                if subset is None or raw_subset is None:
                     continue
 
                 sync_status_tracker.update(
@@ -682,36 +745,23 @@ def sync_market_data(
                     rows_written=rows_written,
                 )
 
-                subset = indicator_frame[indicator_frame["Ticker"] == ticker].copy()
-                raw_subset = raw[raw["Ticker"] == ticker].copy()
                 cutoff = raw_subset["Date"].min()
                 write_subset = _prepare_ticker_data_frame(subset)
 
-                with duckdb_connection() as conn:
-                    conn.register("raw_subset", raw_subset)
-                    conn.execute(
-                        "DELETE FROM ohlcv_daily WHERE Ticker = ? AND Date >= ?",
-                        [ticker, cutoff.to_pydatetime()],
-                    )
-                    conn.execute(
-                        "INSERT INTO ohlcv_daily (Date, Ticker, Open, High, Low, Close, AdjClose, Volume)"
-                        " SELECT Date, Ticker, Open, High, Low, Close, AdjClose, Volume FROM raw_subset"
-                    )
-                    conn.unregister("raw_subset")
-
-                    conn.register("ticker_subset", write_subset)
-                    conn.execute(
-                        "DELETE FROM ticker_data WHERE Ticker = ? AND Date >= ?",
-                        [ticker, cutoff.to_pydatetime()],
-                    )
-                    conn.execute(
-                        f"""
-                        INSERT INTO ticker_data ({", ".join(TICKER_DATA_COLUMNS)})
-                        SELECT {", ".join(TICKER_DATA_COLUMNS)}
-                        FROM ticker_subset
-                        """
-                    )
-                    conn.unregister("ticker_subset")
+                try:
+                    with duckdb_connection() as conn:
+                        _write_ticker_slice(conn, ticker, cutoff, raw_subset, write_subset)
+                except Exception as exc:
+                    # Interrupted older deployments can leave DuckDB secondary indexes
+                    # inconsistent. Repair only on that specific failure; healthy daily
+                    # syncs keep their indexes online and avoid a full rebuild stall.
+                    if "Failed to delete all rows from index" not in str(exc):
+                        raise
+                    with duckdb_connection() as conn:
+                        conn.execute("DROP INDEX IF EXISTS idx_ticker_data_ticker_date")
+                        conn.execute("DROP INDEX IF EXISTS idx_ticker_data_date")
+                        conn.execute("DROP INDEX IF EXISTS idx_ohlcv_daily_ticker_date")
+                        _write_ticker_slice(conn, ticker, cutoff, raw_subset, write_subset)
 
                 rows_written += len(write_subset)
 
@@ -736,10 +786,10 @@ def sync_market_data(
                     """)
                     conn.unregister("metadata_frame")
 
-            # Rebuild the indexes now that all writes are complete.
+            # Ensure indexes exist (CREATE IF NOT EXISTS is effectively free when they do).
             sync_status_tracker.update(
                 phase="indexing",
-                detail="Rebuilding indexes after write.",
+                detail="Verifying serving indexes after write.",
                 completed_tickers=len(universe),
                 rows_written=rows_written,
             )
@@ -755,6 +805,7 @@ def sync_market_data(
                     "CREATE INDEX IF NOT EXISTS idx_ohlcv_daily_ticker_date"
                     " ON ohlcv_daily (Ticker, Date)"
                 )
+            refresh_latest_ticker_cache(universe)
 
         except Exception as exc:
             sync_status_tracker.fail(str(exc))

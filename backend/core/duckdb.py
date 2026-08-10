@@ -24,6 +24,41 @@ _CONN_LOCK = Lock()
 _SHARED_CONN: duckdb.DuckDBPyConnection | None = None
 _SHARED_CONN_PATH: Path | None = None
 
+LATEST_TICKER_COLUMNS = (
+    "Ticker",
+    "Date",
+    "Open",
+    "High",
+    "Low",
+    "Close",
+    "Volume",
+    "prev_close",
+    "change_pct",
+    "Ticker_RSI",
+    "Ticker_MACD",
+    "Ticker_MACD_Signal",
+    "Ticker_Tech_Score",
+    "Ticker_SMA_10",
+    "Ticker_SMA_30",
+    "Ticker_SMA_50",
+    "Ticker_SMA_100",
+    "Ticker_SMA_200",
+    "Ticker_SMA_250",
+    "Ticker_EMA_10",
+    "Ticker_EMA_50",
+    "Ticker_EMA_100",
+    "Ticker_EMA_200",
+    "Ticker_Return_20D",
+    "Ticker_Return_63D",
+    "Ticker_Return_126D",
+    "Ticker_Return_252D",
+    "Ticker_52W_High",
+    "Ticker_52W_Low",
+    "Ticker_52W_Range_Pct",
+    "Ticker_Avg_Volume_20D",
+    "volume_ratio",
+)
+
 
 def _connection_config() -> dict[str, str]:
     return {
@@ -61,6 +96,86 @@ def duckdb_connection(read_only: bool = False) -> Iterator[duckdb.DuckDBPyConnec
     with _CONN_LOCK:
         conn = _get_shared_connection()
         yield conn
+
+
+def _refresh_latest_ticker_cache(
+    conn: duckdb.DuckDBPyConnection,
+    tickers: list[str] | None = None,
+) -> int:
+    symbols = sorted({ticker.strip().upper() for ticker in tickers or [] if ticker.strip()})
+    params: list[str] = []
+    source_filter = ""
+    if symbols:
+        placeholders = ", ".join(["?"] * len(symbols))
+        conn.execute(f"DELETE FROM latest_ticker_cache WHERE Ticker IN ({placeholders})", symbols)
+        source_filter = f"WHERE Ticker IN ({placeholders})"
+        params = symbols
+    else:
+        conn.execute("DELETE FROM latest_ticker_cache")
+
+    columns = ", ".join(LATEST_TICKER_COLUMNS)
+    conn.execute(
+        f"""
+        INSERT INTO latest_ticker_cache ({columns})
+        WITH ordered AS (
+            SELECT
+                *,
+                LEAD(Close) OVER (PARTITION BY Ticker ORDER BY Date DESC) AS prev_close,
+                ROW_NUMBER() OVER (PARTITION BY Ticker ORDER BY Date DESC) AS rn
+            FROM ticker_data
+            {source_filter}
+        )
+        SELECT
+            Ticker,
+            Date,
+            Open,
+            High,
+            Low,
+            Close,
+            Volume,
+            prev_close,
+            CASE WHEN prev_close IS NULL OR prev_close = 0 THEN NULL
+                 ELSE ((Close / prev_close) - 1) * 100
+            END AS change_pct,
+            Ticker_RSI,
+            Ticker_MACD,
+            Ticker_MACD_Signal,
+            Ticker_Tech_Score,
+            Ticker_SMA_10,
+            Ticker_SMA_30,
+            Ticker_SMA_50,
+            Ticker_SMA_100,
+            Ticker_SMA_200,
+            Ticker_SMA_250,
+            Ticker_EMA_10,
+            Ticker_EMA_50,
+            Ticker_EMA_100,
+            Ticker_EMA_200,
+            Ticker_Return_20D,
+            Ticker_Return_63D,
+            Ticker_Return_126D,
+            Ticker_Return_252D,
+            Ticker_52W_High,
+            Ticker_52W_Low,
+            Ticker_52W_Range_Pct,
+            Ticker_Avg_Volume_20D,
+            CASE WHEN Ticker_Avg_Volume_20D > 0
+                 THEN Volume / Ticker_Avg_Volume_20D
+                 ELSE NULL
+            END AS volume_ratio
+        FROM ordered
+        WHERE rn = 1
+        """,
+        params,
+    )
+    row = conn.execute("SELECT COUNT(*) FROM latest_ticker_cache").fetchone()
+    return int(row[0]) if row else 0
+
+
+def refresh_latest_ticker_cache(tickers: list[str] | None = None) -> int:
+    """Refresh the compact latest-per-symbol serving table."""
+    with duckdb_connection() as conn:
+        return _refresh_latest_ticker_cache(conn, tickers)
 
 
 def ensure_schema() -> None:
@@ -144,6 +259,42 @@ def ensure_schema() -> None:
                 conn.execute(
                     f"ALTER TABLE ticker_data ADD COLUMN IF NOT EXISTS {column_name} DOUBLE"
                 )
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS latest_ticker_cache (
+                    Ticker TEXT PRIMARY KEY,
+                    Date TIMESTAMP,
+                    Open DOUBLE,
+                    High DOUBLE,
+                    Low DOUBLE,
+                    Close DOUBLE,
+                    Volume DOUBLE,
+                    prev_close DOUBLE,
+                    change_pct DOUBLE,
+                    Ticker_RSI DOUBLE,
+                    Ticker_MACD DOUBLE,
+                    Ticker_MACD_Signal DOUBLE,
+                    Ticker_Tech_Score DOUBLE,
+                    Ticker_SMA_10 DOUBLE,
+                    Ticker_SMA_30 DOUBLE,
+                    Ticker_SMA_50 DOUBLE,
+                    Ticker_SMA_100 DOUBLE,
+                    Ticker_SMA_200 DOUBLE,
+                    Ticker_SMA_250 DOUBLE,
+                    Ticker_EMA_10 DOUBLE,
+                    Ticker_EMA_50 DOUBLE,
+                    Ticker_EMA_100 DOUBLE,
+                    Ticker_EMA_200 DOUBLE,
+                    Ticker_Return_20D DOUBLE,
+                    Ticker_Return_63D DOUBLE,
+                    Ticker_Return_126D DOUBLE,
+                    Ticker_Return_252D DOUBLE,
+                    Ticker_52W_High DOUBLE,
+                    Ticker_52W_Low DOUBLE,
+                    Ticker_52W_Range_Pct DOUBLE,
+                    Ticker_Avg_Volume_20D DOUBLE,
+                    volume_ratio DOUBLE
+                )
+            """)
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_ticker_data_ticker_date ON ticker_data (Ticker, Date)"
             )
@@ -199,56 +350,12 @@ def ensure_schema() -> None:
             )
 
             # ── Serving views ─────────────────────────────────────────────────
-            # v_latest_ticker: most recent row per ticker with day-over-day change
+            # Materialize the expensive latest-per-ticker window once at startup/sync.
+            # All dashboard, monitor, sector, and security reads then scan ~550 rows.
+            _refresh_latest_ticker_cache(conn)
             conn.execute("""
                 CREATE OR REPLACE VIEW v_latest_ticker AS
-                WITH ordered AS (
-                    SELECT
-                        *,
-                        LAG(Close) OVER (PARTITION BY Ticker ORDER BY Date) AS prev_close,
-                        ROW_NUMBER() OVER (PARTITION BY Ticker ORDER BY Date DESC) AS rn
-                    FROM ticker_data
-                )
-                SELECT
-                    Ticker,
-                    Date,
-                    Open,
-                    High,
-                    Low,
-                    Close,
-                    Volume,
-                    prev_close,
-                    CASE WHEN prev_close IS NULL OR prev_close = 0 THEN NULL
-                         ELSE ((Close / prev_close) - 1) * 100
-                    END AS change_pct,
-                    Ticker_RSI,
-                    Ticker_MACD,
-                    Ticker_MACD_Signal,
-                    Ticker_Tech_Score,
-                    Ticker_SMA_10,
-                    Ticker_SMA_30,
-                    Ticker_SMA_50,
-                    Ticker_SMA_100,
-                    Ticker_SMA_200,
-                    Ticker_SMA_250,
-                    Ticker_EMA_10,
-                    Ticker_EMA_50,
-                    Ticker_EMA_100,
-                    Ticker_EMA_200,
-                    Ticker_Return_20D,
-                    Ticker_Return_63D,
-                    Ticker_Return_126D,
-                    Ticker_Return_252D,
-                    Ticker_52W_High,
-                    Ticker_52W_Low,
-                    Ticker_52W_Range_Pct,
-                    Ticker_Avg_Volume_20D,
-                    CASE WHEN Ticker_Avg_Volume_20D > 0
-                         THEN Volume / Ticker_Avg_Volume_20D
-                         ELSE NULL
-                    END AS volume_ratio
-                FROM ordered
-                WHERE rn = 1
+                SELECT * FROM latest_ticker_cache
             """)
 
             # v_latest_security: latest ticker snapshot joined with company info

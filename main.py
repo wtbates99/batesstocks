@@ -8,11 +8,13 @@ import re
 from asyncio import Lock, to_thread
 from contextlib import asynccontextmanager
 from pathlib import Path
+from time import perf_counter
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import FastAPI, Header, HTTPException, Query
+from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -153,6 +155,7 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+app.add_middleware(GZipMiddleware, minimum_size=1_000, compresslevel=5)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
@@ -161,6 +164,31 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(terminal_router)
+
+
+@app.middleware("http")
+async def performance_and_cache_headers(request: Request, call_next):
+    started = perf_counter()
+    response = await call_next(request)
+    elapsed_ms = (perf_counter() - started) * 1_000
+    response.headers["Server-Timing"] = f"app;dur={elapsed_ms:.1f}"
+    if elapsed_ms >= 1_000:
+        logger.warning(
+            "Slow request: %s %s completed in %.1fms",
+            request.method,
+            request.url.path,
+            elapsed_ms,
+        )
+    if request.url.path.startswith("/assets/") and response.status_code == 200:
+        # Vite filenames are content-hashed, so immutable caching is safe.
+        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+    elif request.url.path == "/" or response.headers.get("content-type", "").startswith(
+        "text/html"
+    ):
+        # Always revalidate the tiny shell so a deploy picks up new hashed assets.
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
 
 if (_frontend_build_dir() / "assets").is_dir():
     app.mount("/assets", StaticFiles(directory=_frontend_build_dir() / "assets"), name="assets")

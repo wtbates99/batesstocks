@@ -6,7 +6,7 @@ interface DailyProps {
   bars: SecurityBar[]
   intradayBars?: never
   height?: number
-  overlays?: Array<'sma_10' | 'sma_30' | 'sma_200' | 'ema_10'>
+  overlays?: Array<'sma_10' | 'sma_30' | 'sma_50' | 'ema_10'>
 }
 
 interface IntradayProps {
@@ -21,11 +21,11 @@ type Props = DailyProps | IntradayProps
 const OVERLAY_CONFIG = {
   sma_10: { color: '#f6c344', label: 'SMA 10' },
   sma_30: { color: '#3cc7f2', label: 'SMA 30' },
-  sma_200: { color: '#8c94ff', label: 'SMA 200' },
+  sma_50: { color: '#8c94ff', label: 'SMA 50' },
   ema_10: { color: '#f28b39', label: 'EMA 10' },
 } as const
 
-export default function TerminalChart({ bars, intradayBars, height = 440, overlays = ['sma_10', 'sma_30', 'sma_200'] }: Props) {
+export default function TerminalChart({ bars, intradayBars, height = 440, overlays = ['sma_10', 'sma_30', 'sma_50'] }: Props) {
   const hostRef = useRef<HTMLDivElement | null>(null)
   const chartRef = useRef<IChartApi | null>(null)
 
@@ -95,7 +95,7 @@ export default function TerminalChart({ bars, intradayBars, height = 440, overla
       overlays?.forEach((overlay) => {
         const series = chart.addLineSeries({
           color: OVERLAY_CONFIG[overlay].color,
-          lineWidth: overlay === 'sma_200' ? 2 : 1,
+          lineWidth: overlay === 'sma_50' ? 2 : 1,
           priceLineVisible: false,
           lastValueVisible: true,
         })

@@ -8,6 +8,7 @@ from backend.core import duckdb as duckdb_module
 from backend.core.duckdb import duckdb_connection, ensure_schema
 from backend.services.data_sync_service import (
     MIN_INDICATOR_LOOKBACK_YEARS,
+    _metadata_tickers_for_sync,
     _normalize_years,
     ensure_market_data,
     get_data_staleness_days,
@@ -74,6 +75,17 @@ def test_default_universe_includes_sp500_and_etfs():
     assert "AAPL" in universe
     assert "SPY" in universe
     assert "XLK" in universe
+
+
+def test_scheduled_sync_only_fetches_missing_metadata(monkeypatch, tmp_path):
+    _reset_schema(monkeypatch, tmp_path)
+    with duckdb_connection() as conn:
+        conn.execute(
+            "INSERT INTO stock_information (Ticker, FullName) VALUES ('AAPL', 'Apple Inc.')"
+        )
+
+    assert _metadata_tickers_for_sync(["AAPL", "MSFT"], "scheduled") == ["MSFT"]
+    assert _metadata_tickers_for_sync(["AAPL", "MSFT"], "manual") == ["AAPL", "MSFT"]
 
 
 def test_has_market_data_false_on_empty_db(monkeypatch, tmp_path):
@@ -206,10 +218,15 @@ def test_sync_market_data_writes_rows_and_metadata(mock_download, mock_meta, mon
         raw_count = conn.execute(
             "SELECT COUNT(*) FROM ohlcv_daily WHERE Ticker = 'AAPL'"
         ).fetchone()[0]
+        cached_latest = conn.execute(
+            "SELECT Close FROM latest_ticker_cache WHERE Ticker = 'AAPL'"
+        ).fetchone()
         meta = conn.execute("SELECT Sector FROM stock_information WHERE Ticker = 'AAPL'").fetchone()
 
     assert count == len(ohlcv)
     assert raw_count == len(ohlcv)
+    assert cached_latest is not None
+    assert cached_latest[0] == ohlcv.iloc[-1]["Close"]
     assert meta is not None
     assert meta[0] == "Technology"
 

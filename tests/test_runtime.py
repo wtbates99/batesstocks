@@ -19,6 +19,7 @@ def test_ensure_schema_creates_duckdb_tables(monkeypatch, tmp_path):
         tables = {row[0] for row in conn.execute("SHOW TABLES").fetchall()}
 
     assert "ticker_data" in tables
+    assert "latest_ticker_cache" in tables
     assert "stock_information" in tables
     assert "ohlcv_daily" in tables
     assert "strategy_runs" in tables

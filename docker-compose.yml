@@ -1,6 +1,8 @@
 services:
   app:
+    image: ${APP_IMAGE:-batesstocks:local}
     build: .
+    init: true
     restart: unless-stopped
     ports:
       - "${HOST_PORT:-8001}:8000"
@@ -11,11 +13,16 @@ services:
       - DB_PATH=/app/data/stock_data.duckdb
       - BACKUP_DIR=/app/backups
       - PORT=8000
-      - AUTO_SYNC_ON_START=false
-      - AUTO_SYNC_SCHEDULED=false
-      - AI_ENABLED=false
-      - DUCKDB_MEMORY_LIMIT=768MB
-      - DUCKDB_THREADS=2
+      - AUTO_SYNC_ON_START=${AUTO_SYNC_ON_START:-false}
+      - AUTO_SYNC_SCHEDULED=${AUTO_SYNC_SCHEDULED:-false}
+      - AI_ENABLED=${AI_ENABLED:-false}
+      - DUCKDB_MEMORY_LIMIT=${DUCKDB_MEMORY_LIMIT:-768MB}
+      - DUCKDB_THREADS=${DUCKDB_THREADS:-2}
+      - RESPONSE_CACHE_MAX_ENTRIES=${RESPONSE_CACHE_MAX_ENTRIES:-128}
+      - MALLOC_ARENA_MAX=2
+      - OMP_NUM_THREADS=1
+      - OPENBLAS_NUM_THREADS=1
+      - NUMEXPR_NUM_THREADS=1
     env_file:
       - .env
     healthcheck:
@@ -24,3 +31,9 @@ services:
       timeout: 5s
       retries: 3
       start_period: 20s
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

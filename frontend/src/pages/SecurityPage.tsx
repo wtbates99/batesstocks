@@ -39,16 +39,13 @@ const TIMEFRAMES: Timeframe[] = [
   { label: '6M', intraday: false, days: 132 },
   { label: '1Y', intraday: false, days: 252 },
   { label: '2Y', intraday: false, days: 504 },
-  { label: '5Y', intraday: false, days: 1260 },
-  { label: '10Y', intraday: false, days: 2520 },
-  { label: 'ALL', intraday: false, days: Infinity },
 ]
 
-function overlayLabel(overlay: 'sma_10' | 'sma_30' | 'sma_200' | 'ema_10') {
+function overlayLabel(overlay: 'sma_10' | 'sma_30' | 'sma_50' | 'ema_10') {
   switch (overlay) {
     case 'sma_10': return 'SMA 10'
     case 'sma_30': return 'SMA 30'
-    case 'sma_200': return 'SMA 200'
+    case 'sma_50': return 'SMA 50'
     case 'ema_10': return 'EMA 10'
   }
 }
@@ -163,8 +160,8 @@ export default function SecurityPage() {
   const navigate = useNavigate()
 
   const [activeTimeframe, setActiveTimeframe] = useState<Timeframe>(TIMEFRAMES[2]) // default 1M
-  const [overlays, setOverlays] = useState<Array<'sma_10' | 'sma_30' | 'sma_200' | 'ema_10'>>([
-    'sma_10', 'sma_30', 'sma_200',
+  const [overlays, setOverlays] = useState<Array<'sma_10' | 'sma_30' | 'sma_50' | 'ema_10'>>([
+    'sma_10', 'sma_30', 'sma_50',
   ])
   const [tab, setTab] = useState<'chart' | 'fundamentals'>('chart')
 
@@ -200,7 +197,13 @@ export default function SecurityPage() {
     [compareTickers, ticker],
   )
 
-  const security = useSecurityQuery(ticker, 3000)
+  // Fetch only the range the user can see. Daily bars already contain precomputed
+  // indicators. Keep six months resident so common range changes are instant, then
+  // fetch the bounded one/two-year ranges only when selected.
+  const requestedDailyBars = activeTimeframe.intraday
+    ? 132
+    : Math.min(504, Math.max(132, Number.isFinite(activeTimeframe.days) ? activeTimeframe.days : 504))
+  const security = useSecurityQuery(ticker, requestedDailyBars)
   const earnings = useEarningsQuery(tickerList)
   const earningsItem = earnings.data?.items[0]
   const news = useNewsQuery(newsTickers, 'security', 10)
@@ -398,7 +401,7 @@ export default function SecurityPage() {
               </div>
               {!isIntraday && (
                 <div className="toolbar-group">
-                  {(['sma_10', 'sma_30', 'sma_200', 'ema_10'] as const).map((overlay) => (
+                  {(['sma_10', 'sma_30', 'sma_50', 'ema_10'] as const).map((overlay) => (
                     <button
                       key={overlay}
                       type="button"

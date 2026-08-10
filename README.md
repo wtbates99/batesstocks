@@ -50,6 +50,10 @@ docker run --rm \
 
 Open <http://localhost:8000>.
 
+For a Raspberry Pi, use the published ARM64 image and the measured tuning/deployment
+guide in [docs/PI_PERFORMANCE_PLAN.md](docs/PI_PERFORMANCE_PLAN.md). It avoids building
+the frontend and Python environment on the Pi.
+
 ## Local development
 
 Backend:
@@ -78,7 +82,7 @@ do not represent current quotes or investment results.
 | `DB_PATH` | DuckDB database path |
 | `BACKUP_DIR` | Latest export directory |
 | `AUTO_SYNC_ON_START` | Bootstrap market data on an empty startup |
-| `AUTO_SYNC_SCHEDULED` | Enable the in-process scheduler; disabled in production |
+| `AUTO_SYNC_SCHEDULED` | Enable the daily after-close scheduler for a single-instance deployment |
 | `DUCKDB_MEMORY_LIMIT` | DuckDB memory cap |
 | `DUCKDB_THREADS` | DuckDB worker count |
 | `AI_ENABLED` | Enable the dormant AI route and frontend; false by default |

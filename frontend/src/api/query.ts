@@ -78,11 +78,14 @@ export function useSectorQuery(sector: string, enabled = true) {
   })
 }
 
-export function useSecurityQuery(ticker: string, limit = 1000) {
+export function useSecurityQuery(ticker: string, limit = 132) {
   return useQuery({
     queryKey: terminalKeys.security(ticker, limit),
     queryFn: () => api.terminal.security(ticker, limit),
-    staleTime: 30_000,
+    staleTime: 5 * 60_000,
+    gcTime: 30 * 60_000,
+    placeholderData: (previousData) =>
+      previousData?.snapshot.ticker === ticker ? previousData : undefined,
     refetchOnWindowFocus: false,
   })
 }

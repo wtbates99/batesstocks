@@ -4,11 +4,10 @@ import hmac
 import json
 import os
 from datetime import UTC, datetime
-from math import ceil
 
 import pandas as pd
 import yfinance as yf
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
 
 from backend.core.duckdb import duckdb_connection, ensure_schema
 from backend.models import (
@@ -57,6 +56,9 @@ from backend.services.terminal_service import (
 
 router = APIRouter(tags=["terminal"])
 
+SECURITY_DEFAULT_BARS = 132
+SECURITY_MAX_BARS = 504
+
 
 def require_system_admin(
     authorization: str | None = Header(default=None),
@@ -89,18 +91,30 @@ def terminal_workspace(ticker: str = Query("SPY", min_length=1, max_length=10)) 
     return get_or_compute(("workspace", symbol), 20, lambda: get_terminal_overview(symbol))
 
 
-@router.get("/terminal/security/{ticker}", response_model=SecurityOverview)
+@router.get(
+    "/terminal/security/{ticker}",
+    response_model=SecurityOverview,
+    response_model_exclude_none=True,
+)
 def terminal_security(
     ticker: str,
-    limit: int = Query(260, ge=30, le=3000),
+    response: Response,
+    limit: int = Query(SECURITY_DEFAULT_BARS, ge=20, le=SECURITY_MAX_BARS),
 ) -> SecurityOverview:
+    """Serve a bounded chart entirely from the local cache.
+
+    A read request must never perform a provider download or indicator rebuild. Those
+    operations belong to the scheduled/manual sync paths; coupling them here previously
+    made a one-month chart wait for as much as twelve years of history to download.
+    """
     ensure_schema()
-    history_years = max(5, ceil(limit / 252))
-    ensure_market_data([ticker], years=history_years, source="security")
     symbol = ticker.strip().upper()
+    response.headers["Cache-Control"] = "public, max-age=60, stale-while-revalidate=300"
     try:
         return get_or_compute(
-            ("security", symbol, limit), 20, lambda: get_security_overview(symbol, limit=limit)
+            ("security", symbol, limit),
+            300,
+            lambda: get_security_overview(symbol, limit=limit),
         )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

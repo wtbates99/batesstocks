@@ -18,11 +18,10 @@ def _load_security_bars(ticker: str, limit: int = 180) -> pd.DataFrame:
     with duckdb_connection(read_only=True) as conn:
         return conn.execute(
             """
-            SELECT *
+            SELECT * EXCLUDE (sort_date)
             FROM (
                 SELECT
                     Date,
-                    Ticker,
                     Open,
                     High,
                     Low,
@@ -31,23 +30,15 @@ def _load_security_bars(ticker: str, limit: int = 180) -> pd.DataFrame:
                     Ticker_SMA_10,
                     Ticker_SMA_30,
                     Ticker_SMA_50,
-                    Ticker_SMA_100,
-                    Ticker_SMA_200,
-                    Ticker_SMA_250,
                     Ticker_EMA_10,
-                    Ticker_EMA_50,
-                    Ticker_EMA_100,
-                    Ticker_EMA_200,
                     Ticker_RSI,
-                    Ticker_MACD,
-                    Ticker_MACD_Signal,
-                    Ticker_Tech_Score,
-                    ROW_NUMBER() OVER (PARTITION BY Ticker ORDER BY Date DESC) AS rn
+                    Date AS sort_date
                 FROM ticker_data
                 WHERE Ticker = ?
+                ORDER BY Date DESC
+                LIMIT ?
             ) ranked
-            WHERE rn <= ?
-            ORDER BY Date
+            ORDER BY sort_date
             """,
             [ticker.upper(), limit],
         ).df()
@@ -89,13 +80,46 @@ def get_security_overview(ticker: str, limit: int = 180) -> SecurityOverview:
         if snapshot is None:
             raise ValueError(f"No security data available for {symbol}")
 
+        # Filter to the peer set before applying window functions. Querying the general
+        # v_latest_security view here used to rank every historical row in the database
+        # just to return eight related names.
         related = conn.execute(
             """
-            SELECT Ticker, FullName, Close, Volume, Ticker_Tech_Score, change_pct
-            FROM v_latest_security
-            WHERE Sector = (SELECT Sector FROM stock_information WHERE Ticker = ?)
-              AND Ticker <> ?
-            ORDER BY Ticker_Tech_Score DESC NULLS LAST, change_pct DESC NULLS LAST
+            WITH peers AS (
+                SELECT Ticker, FullName
+                FROM stock_information
+                WHERE Sector = (SELECT Sector FROM stock_information WHERE Ticker = ?)
+                  AND Ticker <> ?
+            ), ranked AS (
+                SELECT
+                    td.Ticker,
+                    td.Close,
+                    td.Volume,
+                    td.Ticker_Tech_Score,
+                    LAG(td.Close) OVER (
+                        PARTITION BY td.Ticker ORDER BY td.Date
+                    ) AS prev_close,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY td.Ticker ORDER BY td.Date DESC
+                    ) AS rn
+                FROM ticker_data td
+                JOIN peers ON peers.Ticker = td.Ticker
+            )
+            SELECT
+                peers.Ticker,
+                peers.FullName,
+                ranked.Close,
+                ranked.Volume,
+                ranked.Ticker_Tech_Score,
+                CASE
+                    WHEN ranked.prev_close IS NULL OR ranked.prev_close = 0 THEN NULL
+                    ELSE ((ranked.Close / ranked.prev_close) - 1) * 100
+                END AS change_pct
+            FROM peers
+            JOIN ranked ON ranked.Ticker = peers.Ticker AND ranked.rn = 1
+            ORDER BY
+                ranked.Ticker_Tech_Score DESC NULLS LAST,
+                change_pct DESC NULLS LAST
             LIMIT 8
             """,
             [symbol, symbol],
@@ -136,17 +160,8 @@ def get_security_overview(ticker: str, limit: int = 180) -> SecurityOverview:
             sma_10=to_float(row.get("Ticker_SMA_10")),
             sma_30=to_float(row.get("Ticker_SMA_30")),
             sma_50=to_float(row.get("Ticker_SMA_50")),
-            sma_100=to_float(row.get("Ticker_SMA_100")),
-            sma_200=to_float(row.get("Ticker_SMA_200")),
-            sma_250=to_float(row.get("Ticker_SMA_250")),
             ema_10=to_float(row.get("Ticker_EMA_10")),
-            ema_50=to_float(row.get("Ticker_EMA_50")),
-            ema_100=to_float(row.get("Ticker_EMA_100")),
-            ema_200=to_float(row.get("Ticker_EMA_200")),
-            tech_score=to_float(row.get("Ticker_Tech_Score")),
             rsi=to_float(row.get("Ticker_RSI")),
-            macd=to_float(row.get("Ticker_MACD")),
-            macd_signal=to_float(row.get("Ticker_MACD_Signal")),
         )
         for row in bars_frame.to_dict("records")
     ]
