@@ -32,6 +32,8 @@ The optimized path now:
 7. filters peer ranking before running windows instead of ranking the full database.
 8. materializes the latest row for each symbol at startup/sync, so dashboard, monitor,
    sector, and security snapshots scan about 550 rows instead of 707,000 historical rows.
+9. gives each read request an independent DuckDB cursor while retaining a serialized writer,
+   eliminating the global read lock that queued simultaneous cold symbols.
 
 Using the 707,532-row development database, payload sizes changed as follows:
 

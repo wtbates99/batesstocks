@@ -1,6 +1,7 @@
 import os
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from backend.core.duckdb import duckdb_connection, ensure_schema
@@ -46,3 +47,24 @@ print(main.health_ready())
 
     assert result.stdout.strip() == "{'status': 'ready'}"
     assert Path(db_path).exists()
+
+
+def test_read_only_connections_can_query_concurrently(monkeypatch, tmp_path):
+    db_path = tmp_path / "concurrent.duckdb"
+    monkeypatch.setenv("DB_PATH", str(db_path))
+    monkeypatch.setenv("BACKUP_DIR", str(tmp_path / "backups"))
+    ensure_schema()
+    with duckdb_connection() as conn:
+        conn.execute(
+            "INSERT INTO ticker_data (Date, Ticker, Close) "
+            "VALUES ('2026-08-10', 'AAPL', 100), ('2026-08-10', 'MSFT', 200)"
+        )
+
+    def read_count(_: int) -> int:
+        with duckdb_connection(read_only=True) as conn:
+            return int(conn.execute("SELECT COUNT(*) FROM ticker_data").fetchone()[0])
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        results = list(executor.map(read_count, range(40)))
+
+    assert results == [2] * 40

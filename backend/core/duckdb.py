@@ -18,8 +18,8 @@ _SCHEMA_LOCK = Lock()
 _SCHEMA_READY = False
 _SCHEMA_DB_PATH: Path | None = None
 
-# Single shared connection + lock — DuckDB file connections don't support
-# concurrent writers from multiple threads, so we serialize all access.
+# One root connection owns the database. Writers are serialized on it, while read-only
+# callers get independent cursors so concurrent API requests do not queue behind one query.
 _CONN_LOCK = Lock()
 _SHARED_CONN: duckdb.DuckDBPyConnection | None = None
 _SHARED_CONN_PATH: Path | None = None
@@ -93,6 +93,18 @@ def open_connection(read_only: bool = False) -> duckdb.DuckDBPyConnection:
 
 @contextmanager
 def duckdb_connection(read_only: bool = False) -> Iterator[duckdb.DuckDBPyConnection]:
+    if read_only:
+        # DuckDB cursors are independent connections to the same in-process database and
+        # may execute concurrently. Hold the lock only while deriving the cursor so root
+        # connection creation/replacement cannot race with it.
+        with _CONN_LOCK:
+            cursor = _get_shared_connection().cursor()
+        try:
+            yield cursor
+        finally:
+            cursor.close()
+        return
+
     with _CONN_LOCK:
         conn = _get_shared_connection()
         yield conn
