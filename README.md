@@ -88,13 +88,24 @@ do not represent current quotes or investment results.
 | `AI_ENABLED` | Enable the dormant AI route and frontend; false by default |
 | `AI_PROVIDER` | Default AI provider when AI is explicitly enabled |
 | `AI_CHAT_TOKEN` | Token required for server-side AI chat unless explicitly public |
-| `ALLOW_PUBLIC_SERVER_AI` | Local/demo opt-in for unauthenticated server-side AI chat |
+| `ALLOW_BYOK_AI` | Permit browser-supplied AI keys; false by default |
 | `OLLAMA_HOST` / `OLLAMA_MODEL` | Ollama-compatible endpoint and model |
 | `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` | Optional cloud AI providers |
 | `CORS_ORIGINS` | Allowed browser origins |
-| `SYSTEM_ADMIN_TOKEN` | Token required for system mutation endpoints |
+| `ALLOWED_HOSTS` | Host names accepted by the application; configure this in production |
+| `TRUST_CLOUDFLARE_CONNECTING_IP` | Trust Cloudflare's client-IP header after the origin is restricted to the tunnel |
+| `RATE_LIMIT_*_PER_MINUTE` | Per-client limits for API, provider, strategy, and system routes |
+| `MAX_REQUEST_BODY_BYTES` | Maximum declared request-body size; 256 KiB by default |
+| `PERSIST_STRATEGY_RUNS` | Store anonymous backtest runs; false by default |
+| `ENABLE_API_DOCS` | Expose FastAPI documentation; false by default |
+| `SYSTEM_ADMIN_TOKEN` | Token required for every `/system/*` endpoint |
 
 Copy `.env.example` and keep credentials outside version control.
+
+In production, expose the container only through a trusted reverse proxy or tunnel. The
+Compose file binds its optional host port to loopback. Set a long random
+`SYSTEM_ADMIN_TOKEN`, and do not send it to browser code. Public status displays use the
+sanitized `/terminal/sync-status` and `/terminal/freshness` routes.
 
 ## Validation
 

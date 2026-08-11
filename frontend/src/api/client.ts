@@ -101,9 +101,9 @@ export const api = {
   },
 
   system: {
-    syncStatus: () => get<SyncStatus>('/system/sync/status'),
+    syncStatus: () => get<SyncStatus>('/terminal/sync-status'),
     freshness: () =>
-      get<{ latest_date: string | null; oldest_date: string | null; ticker_count: number; stale_count: number; stale_tickers: { ticker: string; latest: string }[] }>('/system/freshness'),
+      get<{ latest_date: string | null; oldest_date: string | null; ticker_count: number; stale_count: number; stale_tickers?: { ticker: string; latest: string }[] }>('/terminal/freshness'),
     sync: (body: SyncRequest) => post<SyncResponse>('/system/sync', body),
     backups: (retentionCount = 7) =>
       get<BackupStatus>('/system/backups', { retention_count: retentionCount }),

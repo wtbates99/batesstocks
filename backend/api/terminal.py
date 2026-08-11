@@ -3,14 +3,16 @@ from __future__ import annotations
 import hmac
 import json
 import os
+import re
 from datetime import UTC, datetime
 
 import pandas as pd
 import yfinance as yf
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Response
 
 from backend.core.duckdb import duckdb_connection, ensure_schema
 from backend.models import (
+    TICKER_PATTERN,
     BackupCreateRequest,
     BackupCreateResponse,
     BackupStatus,
@@ -35,8 +37,6 @@ from backend.models import (
 )
 from backend.services.backup_service import create_backup, list_backups
 from backend.services.data_sync_service import (
-    ensure_default_universe_data,
-    ensure_market_data,
     sync_market_data,
 )
 from backend.services.earnings_service import get_earnings
@@ -58,15 +58,13 @@ router = APIRouter(tags=["terminal"])
 
 SECURITY_DEFAULT_BARS = 132
 SECURITY_MAX_BARS = 504
+PUBLIC_TICKER_LIMIT = 25
 
 
 def require_system_admin(
     authorization: str | None = Header(default=None),
     x_admin_token: str | None = Header(default=None),
 ) -> None:
-    if os.getenv("ALLOW_UNAUTHENTICATED_SYSTEM_MUTATIONS", "false").lower() == "true":
-        return
-
     expected = os.getenv("SYSTEM_ADMIN_TOKEN", "")
     if not expected:
         raise HTTPException(status_code=503, detail="SYSTEM_ADMIN_TOKEN is not configured")
@@ -82,12 +80,22 @@ def _utc_now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _parse_ticker_list(value: str, limit: int = PUBLIC_TICKER_LIMIT) -> list[str]:
+    raw = [item.strip() for item in value.split(",") if item.strip()]
+    if len(raw) > limit or any(not re.fullmatch(TICKER_PATTERN, item) for item in raw):
+        raise HTTPException(
+            status_code=422,
+            detail=f"Provide at most {limit} valid ticker symbols",
+        )
+    return sorted({item.upper().replace(".", "-") for item in raw})
+
+
 @router.get("/terminal/workspace", response_model=TerminalOverview)
-def terminal_workspace(ticker: str = Query("SPY", min_length=1, max_length=10)) -> TerminalOverview:
+def terminal_workspace(
+    ticker: str = Query("SPY", min_length=1, max_length=15, pattern=TICKER_PATTERN),
+) -> TerminalOverview:
     ensure_schema()
-    ensure_default_universe_data()
-    ensure_market_data([ticker], source="workspace")
-    symbol = ticker.strip().upper()
+    symbol = ticker.strip().upper().replace(".", "-")
     return get_or_compute(("workspace", symbol), 20, lambda: get_terminal_overview(symbol))
 
 
@@ -97,8 +105,8 @@ def terminal_workspace(ticker: str = Query("SPY", min_length=1, max_length=10)) 
     response_model_exclude_none=True,
 )
 def terminal_security(
-    ticker: str,
     response: Response,
+    ticker: str = Path(..., min_length=1, max_length=15, pattern=TICKER_PATTERN),
     limit: int = Query(SECURITY_DEFAULT_BARS, ge=20, le=SECURITY_MAX_BARS),
 ) -> SecurityOverview:
     """Serve a bounded chart entirely from the local cache.
@@ -108,7 +116,7 @@ def terminal_security(
     made a one-month chart wait for as much as twelve years of history to download.
     """
     ensure_schema()
-    symbol = ticker.strip().upper()
+    symbol = ticker.strip().upper().replace(".", "-")
     response.headers["Cache-Control"] = "public, max-age=60, stale-while-revalidate=300"
     try:
         return get_or_compute(
@@ -169,11 +177,11 @@ def _fetch_intraday(symbol: str, interval: str, period: str) -> IntradayResponse
 
 @router.get("/terminal/security/{ticker}/intraday", response_model=IntradayResponse)
 def terminal_security_intraday(
-    ticker: str,
+    ticker: str = Path(..., min_length=1, max_length=15, pattern=TICKER_PATTERN),
     interval: str = Query("5m", pattern="^(1m|5m|15m|30m|1h)$"),
     period: str = Query("1d", pattern="^(1d|5d|1mo)$"),
 ) -> IntradayResponse:
-    symbol = ticker.strip().upper()
+    symbol = ticker.strip().upper().replace(".", "-")
     return intraday_cache.get_or_compute(
         (symbol, interval, period),
         lambda: _fetch_intraday(symbol, interval, period),
@@ -230,18 +238,19 @@ def _fetch_fundamentals(symbol: str) -> Fundamentals:
 
 
 @router.get("/terminal/security/{ticker}/fundamentals", response_model=Fundamentals)
-def terminal_security_fundamentals(ticker: str) -> Fundamentals:
-    symbol = ticker.strip().upper()
+def terminal_security_fundamentals(
+    ticker: str = Path(..., min_length=1, max_length=15, pattern=TICKER_PATTERN),
+) -> Fundamentals:
+    symbol = ticker.strip().upper().replace(".", "-")
     return fundamentals_cache.get_or_compute(symbol, lambda: _fetch_fundamentals(symbol))
 
 
 @router.get("/terminal/snapshots", response_model=SecuritySnapshotResponse)
 def terminal_snapshots(
-    tickers: str = Query(..., min_length=1, max_length=512),
+    tickers: str = Query(..., min_length=1, max_length=256),
 ) -> SecuritySnapshotResponse:
     ensure_schema()
-    symbols = sorted({value.strip().upper() for value in tickers.split(",") if value.strip()})
-    ensure_market_data(symbols, source="snapshots")
+    symbols = _parse_ticker_list(tickers)
     return get_or_compute(
         ("snapshots", tuple(symbols)), 20, lambda: get_terminal_snapshots(symbols)
     )
@@ -250,14 +259,14 @@ def terminal_snapshots(
 @router.get("/terminal/monitor", response_model=MarketMonitorOverview)
 def terminal_monitor() -> MarketMonitorOverview:
     ensure_schema()
-    ensure_default_universe_data()
     return get_or_compute(("monitor",), 20, get_market_monitor)
 
 
 @router.get("/terminal/sector/{sector}", response_model=SectorOverview)
-def terminal_sector(sector: str) -> SectorOverview:
+def terminal_sector(
+    sector: str = Path(..., min_length=1, max_length=64),
+) -> SectorOverview:
     ensure_schema()
-    ensure_default_universe_data()
     try:
         return get_or_compute(("sector", sector), 20, lambda: get_sector_overview(sector))
     except ValueError as exc:
@@ -266,17 +275,12 @@ def terminal_sector(sector: str) -> SectorOverview:
 
 @router.get("/terminal/bootstrap", response_model=TerminalBootstrap)
 def terminal_bootstrap(
-    ticker: str = Query("SPY", min_length=1, max_length=10),
-    tickers: str = Query("", max_length=512),
+    ticker: str = Query("SPY", min_length=1, max_length=15, pattern=TICKER_PATTERN),
+    tickers: str = Query("", max_length=256),
 ) -> TerminalBootstrap:
     ensure_schema()
-    symbol = ticker.strip().upper()
-    snapshot_symbols = sorted(
-        {value.strip().upper() for value in tickers.split(",") if value.strip()}
-    )
-    hydrate = sorted({symbol, *snapshot_symbols})
-    ensure_default_universe_data()
-    ensure_market_data(hydrate, source="bootstrap")
+    symbol = ticker.strip().upper().replace(".", "-")
+    snapshot_symbols = _parse_ticker_list(tickers) if tickers else []
     return get_or_compute(
         ("bootstrap", symbol, tuple(snapshot_symbols)),
         20,
@@ -293,32 +297,31 @@ def terminal_bootstrap(
 @router.post("/strategies/backtest", response_model=StrategyBacktestResponse)
 def strategy_backtest(request: StrategyBacktestRequest) -> StrategyBacktestResponse:
     ensure_schema()
-    ensure_default_universe_data()
     try:
         response = run_strategy_backtest(request)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    with duckdb_connection() as conn:
-        conn.execute(
-            """
-            INSERT INTO strategy_runs (ticker, strategy_name, request_json, summary_json)
-            VALUES (?, ?, ?, ?)
-            """,
-            [
-                response.ticker,
-                response.strategy_name,
-                json.dumps(request.model_dump(mode="json")),
-                json.dumps(response.summary.model_dump(mode="json")),
-            ],
-        )
+    if os.getenv("PERSIST_STRATEGY_RUNS", "false").lower() == "true":
+        with duckdb_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO strategy_runs (ticker, strategy_name, request_json, summary_json)
+                VALUES (?, ?, ?, ?)
+                """,
+                [
+                    response.ticker,
+                    response.strategy_name,
+                    json.dumps(request.model_dump(mode="json")),
+                    json.dumps(response.summary.model_dump(mode="json")),
+                ],
+            )
     return response
 
 
 @router.post("/strategies/screen", response_model=StrategyScreenResponse)
 def strategy_screen(strategy: StrategyDefinition) -> StrategyScreenResponse:
     ensure_schema()
-    ensure_default_universe_data()
     cache_key = ("strategy_screen", json.dumps(strategy.model_dump(mode="json"), sort_keys=True))
     try:
         matches = get_or_compute(cache_key, 20, lambda: screen_strategy(strategy))
@@ -332,7 +335,10 @@ def strategy_screen(strategy: StrategyDefinition) -> StrategyScreenResponse:
 
 
 @router.get("/system/backups", response_model=BackupStatus)
-def backup_status(retention_count: int = Query(7, ge=1, le=90)) -> BackupStatus:
+def backup_status(
+    retention_count: int = Query(7, ge=1, le=90),
+    _admin: None = Depends(require_system_admin),
+) -> BackupStatus:
     ensure_schema()
     return list_backups(retention_count=retention_count)
 
@@ -350,7 +356,9 @@ def backup_create(
 
 
 @router.get("/system/sync/status", response_model=SyncStatus)
-def system_sync_status() -> SyncStatus:
+def system_sync_status(
+    _admin: None = Depends(require_system_admin),
+) -> SyncStatus:
     snapshot = sync_status_tracker.get()
     return SyncStatus(**snapshot.__dict__)
 
@@ -371,9 +379,9 @@ def system_sync(
 
 @router.get("/api/earnings", response_model=EarningsResponse)
 def terminal_earnings(
-    tickers: str = Query("", max_length=512),
+    tickers: str = Query("", max_length=256),
 ) -> EarningsResponse:
-    ticker_list = [v.strip().upper() for v in tickers.split(",") if v.strip()]
+    ticker_list = _parse_ticker_list(tickers, limit=12) if tickers else []
     return get_earnings(ticker_list)
 
 
@@ -384,12 +392,11 @@ def terminal_news(
     limit: int = Query(12, ge=1, le=40),
 ) -> NewsResponse:
     ensure_schema()
-    ticker_list = [value.strip().upper() for value in tickers.split(",") if value.strip()]
+    ticker_list = _parse_ticker_list(tickers, limit=12) if tickers else []
     return get_news(scope=scope, tickers=ticker_list, limit=limit)
 
 
-@router.get("/system/freshness")
-def system_freshness() -> dict[str, object]:
+def _data_freshness(include_stale_tickers: bool) -> dict[str, object]:
     """Return data freshness summary: latest date per ticker, stale count, total count."""
     ensure_schema()
     with duckdb_connection(read_only=True) as conn:
@@ -401,13 +408,15 @@ def system_freshness() -> dict[str, object]:
                 COUNTIF(Date < CURRENT_DATE - INTERVAL '3 days') AS stale_count
             FROM v_latest_ticker
         """).fetchone()
-        stale_rows = conn.execute("""
-            SELECT Ticker, Date::TEXT AS latest
-            FROM v_latest_ticker
-            WHERE Date < CURRENT_DATE - INTERVAL '3 days'
-            ORDER BY Date ASC
-            LIMIT 50
-        """).fetchall()
+        stale_rows = []
+        if include_stale_tickers:
+            stale_rows = conn.execute("""
+                SELECT Ticker, Date::TEXT AS latest
+                FROM v_latest_ticker
+                WHERE Date < CURRENT_DATE - INTERVAL '3 days'
+                ORDER BY Date ASC
+                LIMIT 50
+            """).fetchall()
     if row is None:
         return {
             "generated_at": _utc_now(),
@@ -426,6 +435,35 @@ def system_freshness() -> dict[str, object]:
         "stale_count": int(stale_count or 0),
         "stale_tickers": [{"ticker": r[0], "latest": r[1]} for r in stale_rows],
     }
+
+
+@router.get("/terminal/freshness")
+def terminal_freshness() -> dict[str, object]:
+    return _data_freshness(include_stale_tickers=False)
+
+
+@router.get("/terminal/sync-status", response_model=SyncStatus)
+def terminal_sync_status() -> SyncStatus:
+    snapshot = sync_status_tracker.get()
+    detail = {
+        "running": "Market data refresh in progress.",
+        "error": "Market data refresh needs attention.",
+    }.get(snapshot.state, "Market data is ready.")
+    return SyncStatus(
+        **{
+            **snapshot.__dict__,
+            "source": "public",
+            "detail": detail,
+            "last_error": None,
+        }
+    )
+
+
+@router.get("/system/freshness")
+def system_freshness(
+    _admin: None = Depends(require_system_admin),
+) -> dict[str, object]:
+    return _data_freshness(include_stale_tickers=True)
 
 
 @router.post("/system/rebuild/indicators")
@@ -458,12 +496,12 @@ def system_rebuild_indicators(
 
 @router.post("/system/rebuild/security/{ticker}")
 def system_rebuild_security(
-    ticker: str,
+    ticker: str = Path(..., min_length=1, max_length=15, pattern=TICKER_PATTERN),
     _admin: None = Depends(require_system_admin),
 ) -> dict[str, object]:
     """Repair a single ticker's data — re-syncs and recomputes indicators."""
     ensure_schema()
-    symbol = ticker.strip().upper()
+    symbol = ticker.strip().upper().replace(".", "-")
     try:
         result = sync_market_data([symbol], years=5, source="repair_single")
     except Exception as exc:

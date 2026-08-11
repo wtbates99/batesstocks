@@ -29,7 +29,7 @@ export default function NewsPanel({ title, items, empty, loading, className }: P
               key={item.id}
               href={item.link}
               target="_blank"
-              rel="noreferrer"
+              rel="noopener noreferrer"
               className="feed-item"
             >
               <div className="feed-ticker">{item.ticker ?? 'NEWS'} · {item.publisher ?? 'WIRE'}</div>

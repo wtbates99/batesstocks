@@ -15,19 +15,23 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from backend.api.terminal import router as terminal_router
 from backend.core.duckdb import duckdb_connection, ensure_schema
-from backend.models import LivePrices, SearchResult
-from backend.services.data_sync_service import (
-    ensure_market_data,
-    get_data_staleness_days,
-    has_market_data,
-    sync_market_data,
+from backend.core.security import (
+    RequestBodyLimitMiddleware,
+    apply_security_headers,
+    max_request_body_bytes,
+    rate_limit_policy,
+    request_client_ip,
+    request_limiter,
 )
+from backend.models import TICKER_PATTERN, LivePrices, SearchResult, TickerSymbol
+from backend.services.data_sync_service import get_data_staleness_days, sync_market_data
 from backend.services.quote_cache import fetch_live_prices
 from backend.services.sync_scheduler import MarketSyncScheduler
 
@@ -50,19 +54,19 @@ _SYNC_LOCK = Lock()
 
 
 class PriceRequest(BaseModel):
-    tickers: list[str] = Field(default_factory=list)
+    tickers: list[TickerSymbol] = Field(default_factory=list, max_length=25)
 
 
 class AiMessage(BaseModel):
-    role: str
-    content: str
+    role: str = Field(pattern="^(user|assistant)$")
+    content: str = Field(min_length=1, max_length=12_000)
 
 
 class AiChatRequest(BaseModel):
-    provider: str | None = None
-    model: str | None = None
-    api_key: str | None = None
-    messages: list[AiMessage]
+    provider: str | None = Field(default=None, max_length=32)
+    model: str | None = Field(default=None, max_length=128)
+    api_key: str | None = Field(default=None, max_length=512)
+    messages: list[AiMessage] = Field(min_length=1, max_length=20)
     context: dict[str, object] | None = None
 
 
@@ -77,9 +81,7 @@ def require_ai_chat_access(
     authorization: str | None,
     x_ai_token: str | None,
 ) -> None:
-    if payload.api_key:
-        return
-    if os.getenv("ALLOW_PUBLIC_SERVER_AI", "false").lower() == "true":
+    if payload.api_key and os.getenv("ALLOW_BYOK_AI", "false").lower() == "true":
         return
 
     expected = os.getenv("AI_CHAT_TOKEN", "")
@@ -154,8 +156,20 @@ async def lifespan(_: FastAPI):
         await scheduler.stop()
 
 
-app = FastAPI(lifespan=lifespan)
+api_docs_enabled = os.getenv("ENABLE_API_DOCS", "false").lower() == "true"
+app = FastAPI(
+    lifespan=lifespan,
+    docs_url="/docs" if api_docs_enabled else None,
+    redoc_url="/redoc" if api_docs_enabled else None,
+    openapi_url="/openapi.json" if api_docs_enabled else None,
+)
 app.add_middleware(GZipMiddleware, minimum_size=1_000, compresslevel=5)
+app.add_middleware(RequestBodyLimitMiddleware)
+allowed_hosts = [
+    value.strip() for value in os.getenv("ALLOWED_HOSTS", "*").split(",") if value.strip()
+]
+if allowed_hosts != ["*"]:
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
@@ -169,9 +183,40 @@ app.include_router(terminal_router)
 @app.middleware("http")
 async def performance_and_cache_headers(request: Request, call_next):
     started = perf_counter()
+    if request.method in {"POST", "PUT", "PATCH"}:
+        content_length = request.headers.get("content-length")
+        if content_length:
+            try:
+                too_large = int(content_length) > max_request_body_bytes()
+            except ValueError:
+                too_large = True
+            if too_large:
+                response = JSONResponse(
+                    status_code=413, content={"detail": "Request body too large"}
+                )
+                apply_security_headers(response.headers)
+                return response
+
+    policy = rate_limit_policy(request.url.path, request.method)
+    limit_result = None
+    if policy is not None:
+        bucket, limit = policy
+        limit_result = request_limiter.check(request_client_ip(request), bucket, limit)
+        if not limit_result.allowed:
+            response = JSONResponse(status_code=429, content={"detail": "Rate limit exceeded"})
+            response.headers["Retry-After"] = str(limit_result.retry_after)
+            response.headers["X-RateLimit-Limit"] = str(limit_result.limit)
+            response.headers["X-RateLimit-Remaining"] = "0"
+            apply_security_headers(response.headers)
+            return response
+
     response = await call_next(request)
     elapsed_ms = (perf_counter() - started) * 1_000
     response.headers["Server-Timing"] = f"app;dur={elapsed_ms:.1f}"
+    apply_security_headers(response.headers)
+    if limit_result is not None:
+        response.headers["X-RateLimit-Limit"] = str(limit_result.limit)
+        response.headers["X-RateLimit-Remaining"] = str(limit_result.remaining)
     if elapsed_ms >= 1_000:
         logger.warning(
             "Slow request: %s %s completed in %.1fms",
@@ -198,13 +243,8 @@ if _frontend_build_dir().is_dir():
 
 @app.get("/search", response_model=list[SearchResult])
 def search(
-    query: str = Query(..., min_length=1), limit: int = Query(10, ge=1, le=25)
+    query: str = Query(..., min_length=1, max_length=64), limit: int = Query(10, ge=1, le=25)
 ) -> list[SearchResult]:
-    if not has_market_data():
-        try:
-            ensure_market_data(source="search")
-        except Exception as exc:  # pragma: no cover - network/provider dependent
-            logger.warning("Search bootstrap sync failed: %s", exc)
     pattern = f"%{query.strip().upper()}%"
     with duckdb_connection(read_only=True) as conn:
         rows = conn.execute(
@@ -265,8 +305,15 @@ def _read_latest_prices(tickers: list[str]) -> LivePrices:
 
 
 @app.get("/live-prices", response_model=LivePrices)
-def get_live_prices(tickers: str = Query(..., min_length=1)) -> LivePrices:
-    return _read_latest_prices(tickers.split(","))
+def get_live_prices(
+    tickers: str = Query(..., min_length=1, max_length=256),
+) -> LivePrices:
+    symbols = [value for value in tickers.split(",") if value.strip()]
+    if len(symbols) > 25 or any(
+        not re.fullmatch(TICKER_PATTERN, value.strip()) for value in symbols
+    ):
+        raise HTTPException(status_code=422, detail="Provide at most 25 valid ticker symbols")
+    return _read_latest_prices(symbols)
 
 
 @app.post("/live-prices", response_model=LivePrices)
@@ -439,6 +486,9 @@ _API_PREFIXES = (
     "strategies/",
     "system/",
     "terminal/",
+    "docs",
+    "openapi.json",
+    "redoc",
 )
 
 

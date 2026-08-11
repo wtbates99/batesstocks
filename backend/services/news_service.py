@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 from datetime import UTC, datetime, timedelta
+from urllib.parse import urlparse
 
 import yfinance as yf
 
@@ -26,13 +27,21 @@ def _to_iso(value: int | float | str | None) -> str | None:
     return text if text else None
 
 
+def _safe_article_link(value: object) -> str:
+    link = str(value or "").strip()
+    parsed = urlparse(link)
+    return link if parsed.scheme in {"http", "https"} and parsed.netloc else ""
+
+
 def _normalize_item(raw: dict[str, object], ticker: str | None = None) -> NewsItem | None:
     # New yfinance format (>=0.2.37): top-level keys are 'id' and 'content' (nested dict)
     content_block = raw.get("content")
     if isinstance(content_block, dict):
         title = str(content_block.get("title") or "").strip()
         canonical = content_block.get("canonicalUrl") or content_block.get("clickThroughUrl") or {}
-        link = str(canonical.get("url") if isinstance(canonical, dict) else canonical or "").strip()
+        link = _safe_article_link(
+            canonical.get("url") if isinstance(canonical, dict) else canonical
+        )
         if not link or not title:
             return None
         summary = (
@@ -63,7 +72,7 @@ def _normalize_item(raw: dict[str, object], ticker: str | None = None) -> NewsIt
         )
 
     # Legacy yfinance format: flat structure with top-level 'link', 'title', etc.
-    link = str(raw.get("link") or "").strip()
+    link = _safe_article_link(raw.get("link"))
     title = str(raw.get("title") or "").strip()
     if not link or not title:
         return None

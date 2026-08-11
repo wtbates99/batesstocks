@@ -1,4 +1,12 @@
-from pydantic import BaseModel, Field
+from typing import Annotated
+
+from pydantic import BaseModel, Field, StringConstraints
+
+TICKER_PATTERN = r"^[A-Za-z0-9^][A-Za-z0-9.^=_-]{0,14}$"
+TickerSymbol = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=15, pattern=TICKER_PATTERN),
+]
 
 
 class SearchResult(BaseModel):
@@ -73,33 +81,33 @@ class TerminalBootstrap(BaseModel):
 
 
 class StrategyLeg(BaseModel):
-    metric: str
-    condition: str
-    threshold: float | None = None
-    compare_to_metric: str | None = None
+    metric: str = Field(min_length=1, max_length=64)
+    condition: str = Field(min_length=1, max_length=32)
+    threshold: float | None = Field(default=None, allow_inf_nan=False)
+    compare_to_metric: str | None = Field(default=None, min_length=1, max_length=64)
 
 
 class StrategyDefinition(BaseModel):
-    name: str = "Custom Strategy"
+    name: str = Field(default="Custom Strategy", min_length=1, max_length=80)
     entry: StrategyLeg
     exit: StrategyLeg
-    entry_filters: list[StrategyLeg] = Field(default_factory=list)
-    exit_filters: list[StrategyLeg] = Field(default_factory=list)
-    entry_operator: str = "and"
-    exit_operator: str = "and"
-    universe: list[str] | None = None
-    start_date: str | None = None
-    end_date: str | None = None
-    initial_capital: float = 100000.0
-    position_size_pct: float = 100.0
-    stop_loss_pct: float | None = None
-    fee_bps: float = 0.0
-    slippage_bps: float = 0.0
-    max_open_positions: int = 1
+    entry_filters: list[StrategyLeg] = Field(default_factory=list, max_length=10)
+    exit_filters: list[StrategyLeg] = Field(default_factory=list, max_length=10)
+    entry_operator: str = Field(default="and", pattern="^(and|or)$")
+    exit_operator: str = Field(default="and", pattern="^(and|or)$")
+    universe: list[TickerSymbol] | None = Field(default=None, max_length=100)
+    start_date: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+    end_date: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+    initial_capital: float = Field(default=100000.0, ge=1.0, le=1_000_000_000_000.0)
+    position_size_pct: float = Field(default=100.0, ge=0.01, le=100.0)
+    stop_loss_pct: float | None = Field(default=None, ge=0.01, le=100.0)
+    fee_bps: float = Field(default=0.0, ge=0.0, le=10_000.0)
+    slippage_bps: float = Field(default=0.0, ge=0.0, le=10_000.0)
+    max_open_positions: int = Field(default=1, ge=1, le=100)
 
 
 class StrategyBacktestRequest(BaseModel):
-    ticker: str
+    ticker: TickerSymbol
     strategy: StrategyDefinition
 
 
@@ -281,7 +289,7 @@ class BackupStatus(BaseModel):
 
 class BackupCreateRequest(BaseModel):
     compress: bool = True
-    retention_count: int = 7
+    retention_count: int = Field(default=7, ge=1, le=90)
 
 
 class BackupCreateResponse(BaseModel):
@@ -290,8 +298,8 @@ class BackupCreateResponse(BaseModel):
 
 
 class SyncRequest(BaseModel):
-    tickers: list[str] | None = None
-    years: int = 5
+    tickers: list[TickerSymbol] | None = Field(default=None, max_length=600)
+    years: int = Field(default=5, ge=2, le=20)
 
 
 class SyncResponse(BaseModel):

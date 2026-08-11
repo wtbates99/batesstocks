@@ -1,6 +1,6 @@
 from backend.core import duckdb as duckdb_module
 from backend.core.duckdb import ensure_schema
-from backend.services.news_service import get_news
+from backend.services.news_service import _normalize_item, get_news
 
 
 def _reset_schema(monkeypatch, tmp_path):
@@ -41,3 +41,16 @@ def test_get_news_fetches_and_caches_items(monkeypatch, tmp_path):
     assert first.items[0].title == "AAPL headline"
     assert len(second.items) == 1
     assert second.items[0].id == "AAPL-1"
+
+
+def test_news_rejects_non_http_links():
+    item = _normalize_item(
+        {
+            "uuid": "unsafe-1",
+            "title": "Unsafe link",
+            "link": "javascript:alert(1)",
+        },
+        "AAPL",
+    )
+
+    assert item is None

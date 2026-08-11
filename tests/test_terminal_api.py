@@ -38,10 +38,6 @@ def test_security_read_never_triggers_market_sync(monkeypatch):
     )
     monkeypatch.setattr("backend.api.terminal.ensure_schema", lambda: None)
     monkeypatch.setattr(
-        "backend.api.terminal.ensure_market_data",
-        lambda *args, **kwargs: pytest.fail("chart reads must not fetch provider data"),
-    )
-    monkeypatch.setattr(
         "backend.api.terminal.get_or_compute",
         lambda _key, _ttl, compute: compute(),
     )
@@ -50,7 +46,7 @@ def test_security_read_never_triggers_market_sync(monkeypatch):
     )
     response = Response()
 
-    actual = terminal_security("aapl", response=response, limit=22)
+    actual = terminal_security(response=response, ticker="aapl", limit=22)
 
     assert actual is expected
     assert response.headers["cache-control"] == "public, max-age=60, stale-while-revalidate=300"
